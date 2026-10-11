@@ -34,6 +34,10 @@ public:
 constexpr std::size_t kMaxStoreBytes = 24u << 20;
 constexpr std::size_t kBackupsPerProfile = 5;
 
+// One human-readable current-profile file per aircraft model; copies share that aircraft file.
+std::string aircraftProfileFile(const std::string& modelKey);
+std::map<std::string, std::string> aircraftProfileFiles(const json& storeEnvelope);
+
 struct ProfileRecord {
     json current;               // committed revision
     std::vector<json> backups;  // previous committed revisions, newest first

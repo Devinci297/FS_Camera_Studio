@@ -3,9 +3,11 @@
 // SimConnectBackend implements it for MSFS 2024; FakeBackend (tests) delays, drops and reorders.
 
 #include "adapter.hpp"
+#include "fscs/core/effects.hpp"
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -15,6 +17,14 @@ namespace fscs::host {
 enum class SdkAvailability { NotAcquired, Acquired, AcquiredByOther, UserDisabled };
 
 namespace backend_event {
+struct NativeMouseButton { bool down = false; };
+struct NativeMouseAxis { bool horizontal = true; std::int32_t delta = 0; };
+struct NativeMouseMapping { bool ready = false; };
+struct AircraftPosition { double lat=0, lon=0, altitude=0; };
+struct AirportList { nlohmann::json airports; bool complete=false; };
+struct AirportIdentity { std::string ident, region, icao; double lat=0, lon=0; };
+struct AirportFacility { std::uint32_t requestId=0; nlohmann::json facility; std::string error; };
+struct MotionTelemetry { core::FlightMotion motion; };
 struct Connected { std::string simVersion; };
 struct Disconnected { std::string reason; };
 struct CameraStatus { SdkAvailability state = SdkAvailability::NotAcquired; bool gameControlled = false; };
@@ -35,7 +45,7 @@ using BackendEvent = std::variant<backend_event::Connected, backend_event::Disco
                                   backend_event::CameraData, backend_event::DefinitionList, backend_event::AircraftLoaded,
                                   backend_event::AircraftTitle, backend_event::FlightLoaded, backend_event::SimRunning,
                                   backend_event::Paused, backend_event::CameraException,
-                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::ControllersList>;
+                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::ControllersList, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity>;
 
 enum class CameraFlag { Interaction, AboveGround };
 
@@ -62,6 +72,8 @@ public:
     virtual bool requestCameraData(Referential ref) = 0;
     virtual bool enumerateDefinitions() = 0;
     virtual bool setUsingDefinition(const std::string& name) = 0;
+    virtual std::optional<bool> headTracking() { return std::nullopt; }
+    virtual bool setHeadTracking(bool) { return false; }
 
 };
 
@@ -75,7 +87,12 @@ public:
     virtual bool mapInputs(const std::vector<std::string>& definitions) = 0;
     // A separate group for the Bindings test dialog (InputEvent.test = true); empty string clears it.
     virtual bool mapTestInput(const std::string& definition) = 0;
+    // Native mouse registration is lazy: never subscribe during startup/flight loading.
+    virtual void setNativeMouseEnabled(bool enabled) = 0;
     virtual bool enumerateControllers() = 0;
+    virtual bool requestNearbyAirports() { return false; }
+    virtual bool requestAirport(const std::string&, std::uint32_t) { return false; }
+    virtual void resolveAirportIdentities(const nlohmann::json&) {}
 };
 
 }  // namespace fscs::host

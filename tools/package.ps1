@@ -12,17 +12,32 @@
 param(
     [string] $Wasm,
     [string] $Version,
-    [switch] $Compile
+    [switch] $Compile,
+    [string] $ProjectDirectory = 'build/project',
+    [string] $OutputDirectory = 'build/package',
+    [string] $TempDirectory = 'build/package-temp'
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Compile -and (Get-Process -Name FlightSimulator2024 -ErrorAction SilentlyContinue)) {
+    throw 'Close Microsoft Flight Simulator 2024 before compiling packages: this uses the simulator build mode.'
+}
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Version) { $Version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim() }
 if (-not $Wasm) { $Wasm = Join-Path $root 'build\wasm\Release\FSCameraStudio.wasm' }
 if (-not (Test-Path $Wasm)) { throw "WASM module not found at $Wasm. Run tools\build.ps1 first." }
 
-$project = Join-Path $root 'build\project'
-if (Test-Path $project) { Remove-Item -Recurse -Force $project }
+function Resolve-BuildDirectory([string] $path) {
+    $resolved = [IO.Path]::GetFullPath((Join-Path $root $path))
+    $buildRoot = [IO.Path]::GetFullPath((Join-Path $root 'build')) + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolved.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Build directory must be below $buildRoot : $resolved" }
+    return $resolved
+}
+$project = Resolve-BuildDirectory $ProjectDirectory
+$output = Resolve-BuildDirectory $OutputDirectory
+$temp = Resolve-BuildDirectory $TempDirectory
+if (@($project, $output, $temp | Select-Object -Unique).Count -ne 3) { throw 'Project, output and temporary directories must be different.' }
+if (Test-Path -LiteralPath $project) { Remove-Item -Recurse -Force -LiteralPath $project }
 Copy-Item -Recurse (Join-Path $root 'package') $project
 
 $definition = Join-Path $project 'PackageDefinitions\fs-camera-studio.xml'
@@ -31,7 +46,7 @@ $definition = Join-Path $project 'PackageDefinitions\fs-camera-studio.xml'
 # Web UI
 $panelDir = Join-Path $project 'PackageSources\html_ui\InGamePanels\FSCameraStudio'
 New-Item -ItemType Directory -Force $panelDir | Out-Null
-foreach ($f in 'app.css', 'app.js', 'bridge.js', 'icons.js', 'math.js', 'msfs-panel.js') {
+foreach ($f in 'app.css', 'app.js', 'bridge.js', 'icons.js', 'math.js', 'msfs-panel.js', 'version.js', 'updates.js') {
     Copy-Item (Join-Path $root "ui\$f") $panelDir
 }
 
@@ -43,16 +58,19 @@ Copy-Item (Join-Path $root 'package\panel\panel-host.css') $panelDir
 $simHead = @'
 <script type="text/javascript" src="/JS/coherent.js"></script>
 <script type="text/javascript" src="/JS/common.js"></script>
+<script type="text/javascript" src="/JS/dataStorage.js"></script>
+<script type="text/javascript" src="/JS/buttons.js"></script>
+<script type="text/javascript" src="/JS/Inputs.js"></script>
 <script type="text/javascript" src="/JS/Services/CommBus.js"></script>
 <script type="text/javascript" src="/JS/Services/ToolBarPanels.js"></script>
 <link rel="import" href="/templates/ingameUi/ingameUi.html" />
+<link rel="import" href="/templates/ingameUiHeader/ingameUiHeader.html" />
 '@
 $panels = @(
     # Main: the simulator's own window frame gives a title bar to drag and native resizing; the editor fills it.
     @{ Surface = 'main'; File = 'main.html'; PanelId = 'PANEL_FSCS_CAMERA_STUDIO'; Title = 'Camera Studio'; Id = 'FSCSMain'; Attrs = 'class="ingameUiFrame"' },
-    # Mini: borderless; the window height follows the content (content-fit + horizontal-only resize), so no
-    # invisible slack blocks cockpit clicks.
-    @{ Surface = 'mini'; File = 'mini.html'; PanelId = 'PANEL_FSCS_CAMERA_MINI'; Title = 'Camera Studio Mini'; Id = 'FSCSMini'; Attrs = 'class="ingameUiFrame panelInvisible" content-fit="true" min-height="0" resize="x"' }
+    # Mini: a full-width bottom strip with a bounded dock above it. msfs-panel.js reports only the active hit area.
+    @{ Surface = 'mini'; File = 'mini.html'; PanelId = 'PANEL_FSCS_CAMERA_MINI_DOCK'; Title = 'Camera Studio Mini'; Id = 'FSCSMini'; Attrs = 'class="ingameUiFrame no-header no-background" min-height="0" no-drag="true"' }
 )
 foreach ($p in $panels) {
     $html = $index
@@ -87,9 +105,7 @@ if (-not $Compile) {
 
 $sdk = $env:MSFS2024_SDK.TrimEnd('\')
 $tool = Join-Path $sdk 'Tools\bin\fspackagetool.exe'
-$output = Join-Path $root 'build\package'
-$temp = Join-Path $root 'build\package-temp'
-foreach ($d in $output, $temp) { if (Test-Path $d) { Remove-Item -Recurse -Force $d } }  # no stale reports or files
+foreach ($d in $output, $temp) { if (Test-Path -LiteralPath $d) { Remove-Item -Recurse -Force -LiteralPath $d } }  # no stale reports or files
 New-Item -ItemType Directory -Force $output, $temp | Out-Null
 & $tool (Join-Path $project 'fs-camera-studio.xml') -outputdir $output -tempdir $temp -rebuild -nopause
 if ($LASTEXITCODE -ne 0) { throw "fspackagetool failed with exit code $LASTEXITCODE (see its log in $temp)." }

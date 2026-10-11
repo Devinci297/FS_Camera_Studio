@@ -17,8 +17,13 @@ namespace fscs::host {
 class FakeBackend final : public ICameraBackend {
 public:
     bool open = false;
+    std::optional<bool> tracking = true;
+    bool trackingWriteOk = true;
+    std::optional<bool> headTracking() override { calls.push_back("tracking:read"); return tracking; }
+    bool setHeadTracking(bool enabled) override { calls.push_back(enabled?"tracking:on":"tracking:off");if(trackingWriteOk)tracking=enabled;return trackingWriteOk; }
     std::vector<std::string> calls;  // "acquire", "release", "submit", "flag:interaction:on", "get", ...
     std::vector<SdkPose> submitted;
+    std::vector<Referential> readFrames;
     std::deque<BackendEvent> inbox;
 
     bool tryConnect() override {
@@ -50,7 +55,7 @@ public:
         calls.push_back(std::string("flag:") + (f == CameraFlag::Interaction ? "interaction" : "ground") + (on ? ":on" : ":off"));
         return open;
     }
-    bool requestCameraData(Referential) override { calls.push_back("get"); return open; }
+    bool requestCameraData(Referential ref) override { calls.push_back("get"); readFrames.push_back(ref); return open; }
     bool enumerateDefinitions() override { calls.push_back("enumerate"); return open; }
     bool setUsingDefinition(const std::string& n) override { calls.push_back("definition:" + n); return open; }
 
@@ -67,6 +72,16 @@ public:
     std::vector<std::string> mapped;            // latest mapped definitions
     std::string testInput;
     int controllerRequests = 0;
+    int nearbyRequests = 0;
+    std::vector<std::pair<std::string,std::uint32_t>> airportRequests;
+    bool requestNearbyAirports() override { ++nearbyRequests; return true; }
+    bool requestAirport(const std::string& code,std::uint32_t id) override {airportRequests.emplace_back(code,id);return true;}
+    bool nativeMouseEnabled = false;
+    std::vector<bool> mouseEnableChanges;
+    void setNativeMouseEnabled(bool enabled) override {
+        if (enabled != nativeMouseEnabled) mouseEnableChanges.push_back(enabled);
+        nativeMouseEnabled = enabled;
+    }
 
     bool sendToPanels(const std::string& text) override {
         sent.push_back(text);

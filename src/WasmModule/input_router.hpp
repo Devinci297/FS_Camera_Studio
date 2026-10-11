@@ -23,6 +23,7 @@ struct ActionEvent {
     int viewId = 0;
     bool pressed = true;
     std::uint64_t holdId = 0;
+    bool pulse = false; // Simulator zoom commands have no matching release edge.
 };
 
 class InputRouter {

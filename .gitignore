@@ -2,6 +2,8 @@
 /build/
 /out/
 /dist/
+/output/
+/tmp/
 
 # Local design material (kept on disk, not published)
 /Docs/
@@ -11,3 +13,5 @@ CMakeUserPresets.json
 .vs/
 .vscode/
 *.user
+__pycache__/
+*.pyc

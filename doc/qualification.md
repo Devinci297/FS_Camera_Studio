@@ -1,7 +1,8 @@
 # In-sim qualification (Phase 0 gates)
 
-Design 2.0 §13.1 makes camera correctness and in-sim hosting co-equal release gates. Nothing below has been run
-yet; record each result (pass / fail / notes, simulator build, aircraft) in `doc/test-evidence/` as you go.
+Design 2.0 §13.1 makes camera correctness and in-sim hosting co-equal release gates. Initial in-sim tests exposed
+startup and hosting failures; the latest corrections still need a live retest. Record each result
+(pass / fail / notes, simulator build, aircraft) in `doc/test-evidence/` as you go.
 
 Baseline to record: simulator build (shown in Settings → Simulator), SDK 1.7.3, package version (`VERSION`),
 aircraft and livery, Steam or Microsoft Store edition.
@@ -19,15 +20,16 @@ aircraft and livery, Steam or Microsoft Store edition.
 | --- | --- | --- |
 | H01-a | Toolbar shows **Camera Studio** and **Camera Studio Mini** buttons | Both open their panels |
 | H01-b | Main panel looks like `Docs/MSFS_Camera_UI.html` (editor) | Layout, colours and fonts match; nothing hidden by the sim frame |
-| H01-c | Mini panel sits at the bottom; hovering its handle reveals the dock, leaving hides it after ~0.65 s; Pin keeps it | Behaves like the mockup's mini control panel |
+| H01-c | Open Mini from the toolbar; hover anywhere in the invisible bottom strip to reveal the dock; stay in the strip or dock; leave both | No visible handle, text, frame or resize grips while hidden; stays visible inside the area, hides after ~0.18 s outside; Pin keeps it |
+| H01-f | Drag any blank editor background; click buttons, fields and camera rows | Background moves the native window; controls retain their normal actions |
 | H01-d | Click switches/knobs right next to (not under) the mini panel and around the closed editor | Cockpit clicks outside the panels always work |
 | H01-e | Close and reopen each panel from the toolbar; switch aircraft | State comes back (same profile, selection, unsaved edits) |
 | H02 | Bindings: assign Ctrl+Alt+1, a joystick button and a hat direction; test each with the editor **closed**; unplug/replug the controller | Down/up work, peek returns, Release always works, hot-plug recovers |
 | H03 | Save, restart the flight, restart MSFS; export a profile code and import it back | Everything persists; import makes a copy |
 | H04 | Pause, active pause, menus, aircraft change, flight reload | No stale camera movement, no unexpected acquisition |
 
-If a toolbar panel doesn't appear or shows no content, edit `ui/msfs-panel.js` (the 2024 `hide`/`panelInvisible`
-workaround) and note what you saw.
+If a toolbar panel doesn't appear or shows no content, inspect `ui/msfs-panel.js` and the native template imports.
+The initial `hide` workaround leaves the simulator's `panelInvisible` visibility lifecycle intact.
 
 ## Camera gates
 

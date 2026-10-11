@@ -14,8 +14,8 @@ using json = nlohmann::json;
 
 enum class Action {
     SelectView, PeekView, NextCamera, PreviousCamera, NextCategory, ReturnToPilot, ReleaseCamera, RecenterLook,
-    ToggleEditor, ToggleMini, LookLeft, LookRight, LookUp, LookDown, MoveForward, MoveBack, MoveLeft, MoveRight,
-    MoveUp, MoveDown, ZoomIn, ZoomOut
+    ToggleEditor, ToggleMini, ToggleMouseLook, LookLeft, LookRight, LookUp, LookDown, MoveForward, MoveBack, MoveLeft, MoveRight,
+    MoveUp, MoveDown, ZoomIn, ZoomOut, MoveFast, ToggleHeadTracking, ToggleAirportAuto, SaveViews
 };
 const char* toString(Action a);
 std::optional<Action> parseAction(const std::string& s);
@@ -23,7 +23,7 @@ bool actionTakesViewId(Action a);
 // Held actions drive continuous motion; the rest fire on the down edge.
 bool actionIsContinuous(Action a);
 
-enum class InputKind { Key, Joystick };
+enum class InputKind { Key, Joystick, SimZoom };
 enum class PovDirection { None, Up, Right, Down, Left };
 
 struct InputSpec {
@@ -58,11 +58,19 @@ struct BindingSet {
 constexpr int kBindingsSchemaVersion = 2;
 BindingSet parseBindings(const json& doc);
 json defaultBindingsDocument();
+// One-time migration: expose the old runtime defaults without overwriting custom assignments.
+json upgradeMovementBindings(json doc);
 
 struct HostSettings {
     bool allowUnqualifiedAdapter = false;
     double lookSpeedDegPerSec = 60;
+    double airportRadiusNm = 25;
+    double mouseSensitivity = 1.0;
+    double mouseSmoothingMs = 55.0;
+    bool mouseLookEnabled = true;
+    bool mouseInvertY = false;
     double moveSpeedMetersPerSec = 0.5;
+    double movementPrecisionScale = 1.0;
 };
 
 constexpr int kSettingsSchemaVersion = 2;

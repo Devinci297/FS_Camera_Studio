@@ -4,6 +4,7 @@
 // the host's SimConnect thread. Time is injected so tests can drive it deterministically.
 
 #include "backend.hpp"
+#include "head_tracking.hpp"
 #include "input_router.hpp"
 #include "fscs/core/engine.hpp"
 #include "fscs/profiles/bindings.hpp"
@@ -69,7 +70,11 @@ public:
     void refreshQualification();
     const Qualification& qualificationState() const { return qual_; }
     void setManualInput(const core::ManualInput& in) { manual_ = in; }
+    void setMouseInputBlocked(bool blocked) { if (blocked) cancelMouseDrag(); mouseBlocked_ = blocked; }
+    void cancelMouseDrag();
     void tick(double now);
+    void setAircraftPosition(double lat, double lon, double altitude, double now) { targetLat_=lat; targetLon_=lon; targetAltitude_=altitude; targetAt_=now; }
+    bool selectAutomaticCamera(const std::string& id, double now) { return eligibleToSubmit() && activate(id,now,false).empty(); }
 
     // State the host app re-sends to a newly connected UI.
     void emitFullState();
@@ -112,6 +117,10 @@ private:
     void requestRead(ReadPurpose p, Referential ref, double now, double timeout);
 
     ICameraBackend& backend_;
+    HeadTracking headTracking_{backend_};
+    double targetLat_=0, targetLon_=0, targetAltitude_=0, targetAt_=-100;
+    std::map<std::string, core::TemporaryLook> rememberedLooks_;
+    std::string lookOwner_;
     EmitFn emit_;
     QualificationFn qualify_;
 
@@ -144,7 +153,18 @@ private:
     // Motion
     std::string activeCameraId_;
     core::CameraEngine engine_;
+    core::CameraEffects effects_;
+    core::FlightMotion flightMotion_;
+    double motionReceivedAt_ = -1;
     core::ManualInput manual_;
+    bool mouseMapped_ = false, mouseHeld_ = false, mouseBlocked_ = false, mouseMoved_ = false;
+    std::string mouseCameraId_;
+    unsigned mouseSamples_ = 0;
+    unsigned mouseFrames_ = 0, mouseLargeSamples_ = 0;
+    double mouseLastSampleAt_ = -1, mouseMaxSampleGap_ = 0, mouseMaxFrameGap_ = 0;
+    double mouseMaxRaw_ = 0;
+    bool mouseConcurrentLook_ = false;
+    double mouseHeadingPending_ = 0, mousePitchPending_ = 0;
     double lastTick_ = -1;
     std::optional<SdkPose> lastSubmitted_;
     std::uint64_t submissions_ = 0;
@@ -161,6 +181,7 @@ private:
 
     // Reads (CameraGet has no correlation id: one outstanding read, quarantined on timeout)
     ReadPurpose read_ = ReadPurpose::None;
+    std::string readCameraId_;
     double readDeadline_ = 0;
     std::optional<core::CameraPose> preAcquirePose_;
     bool readsUnreliable_ = false;

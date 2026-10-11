@@ -1,5 +1,5 @@
 #pragma once
-// IStorageDriver over the MSFS 2024 asynchronous IO API (MSFS_IO.h) for the package's persistent \work folder.
+// IStorageDriver over libc for local persistent \work files (never streamed package assets).
 
 #include "fscs/profiles/repository.hpp"
 

@@ -27,6 +27,8 @@ public:
     bool requestCameraData(Referential ref) override;
     bool enumerateDefinitions() override;
     bool setUsingDefinition(const std::string& name) override;
+    std::optional<bool> headTracking() override;
+    bool setHeadTracking(bool enabled) override;
 
     void stage(BackendEvent ev) { staged_.push_back(std::move(ev)); }
 

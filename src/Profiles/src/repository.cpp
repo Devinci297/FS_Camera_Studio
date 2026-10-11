@@ -4,6 +4,7 @@
 #include "fscs/profiles/json_util.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <memory>
 
 namespace fscs::profiles {
@@ -31,6 +32,44 @@ Repository::Repository(IStorageDriver& driver, std::string slotA, std::string sl
     slots_[1] = std::move(slotB);
     state_.settings = defaultSettingsDocument();
     state_.bindings = defaultBindingsDocument();
+}
+
+std::string aircraftProfileFile(const std::string& modelKey) {
+    if(modelKey.rfind("airport-",0)==0 && modelKey.size()<=16 && std::all_of(modelKey.begin()+8,modelKey.end(),[](char c){return std::isalnum(static_cast<unsigned char>(c));}))
+        return "\\work\\fscs-"+modelKey+".json";
+    std::string slug;
+    for (unsigned char c : modelKey) {
+        if (std::isalnum(c)) slug += static_cast<char>(std::tolower(c));
+        else if (!slug.empty() && slug.back() != '-') slug += '-';
+        if (slug.size() == 60) break;
+    }
+    while (!slug.empty() && slug.back() == '-') slug.pop_back();
+    if (slug.empty()) slug = "unassigned";
+    return "\\work\\fscs-profile-" + slug + "-" + hex32(js::crc32(modelKey)) + ".json";
+}
+
+std::map<std::string, std::string> aircraftProfileFiles(const json& envelope) {
+    const json& payload = js::object(envelope, "payload");
+    const json& preferred = js::object(js::object(payload, "navigation"), "lastByModel");
+    std::map<std::string, std::vector<json>> byModel;
+    for (const auto& rec : js::array(payload, "profiles")) {
+        const json& doc = js::object(rec, "current");
+        std::string key = js::str(js::object(doc, "aircraftMatch"), "modelKey");
+        if(js::str(doc,"scope")=="airport") key="airport-"+js::str(js::object(doc,"airport"),"icao");
+        if (key.empty()) key = "unassigned-" + js::str(doc, "profileId");
+        byModel[key].push_back(doc);
+    }
+    std::map<std::string, std::string> files;
+    for (const auto& [key, docs] : byModel) {
+        auto chosen = docs.begin();
+        const std::string id = js::str(preferred, key.c_str());
+        for (auto it = docs.begin(); it != docs.end(); ++it) if (js::str(*it, "profileId") == id) chosen = it;
+        json out{{"format", "fs-camera-studio-profile"}, {"version", 2}, {"workingCopy", false},
+                 {"profile", *chosen}, {"alternateProfiles", json::array()}, {"storeTransaction", js::get(payload, "txn")}};
+        for (auto it = docs.begin(); it != docs.end(); ++it) if (it != chosen) out["alternateProfiles"].push_back(*it);
+        files[aircraftProfileFile(key)] = out.dump(2, ' ', false, json::error_handler_t::replace);
+    }
+    return files;
 }
 
 std::string Repository::serialize(const StoreState& s, const std::vector<std::string>& recent) {
@@ -62,6 +101,47 @@ std::optional<StoreState> Repository::deserialize(const std::string& bytes, std:
     json payload = js::parse(body);
     if (payload.is_discarded() || !payload.is_object()) return std::nullopt;
 
+    // Live verification on this build found SDK +X moves left. Correct the old measured
+    // contract once, and preserve every existing physical view (including backups).
+    // Future qualification records use a different id and are never overridden here.
+    bool correctLateral = false;
+    if (payload.contains("navigation") && payload["navigation"].is_object() &&
+        payload["navigation"].contains("qualification") && payload["navigation"]["qualification"].is_object()) {
+        auto& qualification = payload["navigation"]["qualification"];
+        if (qualification.contains("records") && qualification["records"].is_array()) {
+            for (auto& record : qualification["records"]) {
+                if (!record.is_object() || !record.contains("contract") || !record["contract"].is_object()) continue;
+                auto& contract = record["contract"];
+                if (js::str(record, "simVersion") == "12.2.282174.999" &&
+                    js::str(contract, "id") == "msfs2024-wasm-measured-12.2.282174.999" &&
+                    js::get(contract, "axisIndex") == json::array({2,0,1}) &&
+                    js::get(contract, "axisSign") == json::array({1,1,-1})) {
+                    contract["axisSign"][1] = -1;
+                    contract["id"] = "msfs2024-wasm-measured-12.2.282174.999-right-positive-v2";
+                    correctLateral = true;
+                }
+            }
+        }
+    }
+    if (correctLateral && payload.contains("profiles") && payload["profiles"].is_array()) {
+        const auto preservePose = [](json& profile) {
+            if (!profile.is_object() || !profile.contains("cameras") || !profile["cameras"].is_array()) return;
+            for (auto& camera : profile["cameras"]) {
+                if (!camera.is_object() || !camera.contains("positionMetersFRD")) continue;
+                const auto mode = js::str(camera, "mode");
+                if (mode != "aircraftCockpit" && mode != "aircraftExterior") continue;
+                auto& position = camera["positionMetersFRD"];
+                if (position.is_array() && position.size() == 3 && position[1].is_number()) position[1] = -position[1].get<double>();
+            }
+        };
+        for (auto& record : payload["profiles"]) {
+            if (!record.is_object()) continue;
+            if (record.contains("current")) preservePose(record["current"]);
+            if (record.contains("backups") && record["backups"].is_array())
+                for (auto& backup : record["backups"]) preservePose(backup);
+        }
+    }
+
     StoreState s;
     s.txn = js::integer(payload, "txn", -1);
     if (s.txn < 1) return std::nullopt;
@@ -82,7 +162,7 @@ std::optional<StoreState> Repository::deserialize(const std::string& bytes, std:
     }
     s.settings = normalizeSettings(js::get(payload, "settings"));
     const json& bindings = js::get(payload, "bindings");
-    s.bindings = parseBindings(bindings).problems.empty() ? bindings : defaultBindingsDocument();
+    s.bindings = parseBindings(bindings).problems.empty() ? upgradeMovementBindings(bindings) : defaultBindingsDocument();
     if (!parseBindings(bindings).problems.empty() && notes) notes->push_back("Saved bindings were damaged; defaults were restored.");
     s.navigation = js::object(payload, "navigation");
     if (recent)

@@ -64,10 +64,17 @@ There is no desktop application, tray app or external process.
 ```
 
 * `aircraftMatch.strategy`: `aircraftPath` | `userConfirmedModelVariant` | `none`.
-* `mode`: `aircraftCockpit` (MVP); `aircraftExterior` (Preview — cockpit audio limitation); `orbit`, `flyby`,
-  `airport`, `free` are stored and editable but **cannot activate** (reason shown beside the control).
+* `mode`: `aircraftCockpit` (MVP); `aircraftExterior` (Preview — cockpit audio limitation);
+  `airport` (Preview — world-fixed coordinates, pending live qualification). `orbit`, `flyby`, and
+  `free` are stored and editable but **cannot activate** (reason shown beside the control).
+* Airport profiles have `scope: "airport"`, `requiredSchemaFeatures: ["airport-world-v1"]`, and
+  `airport: {icao, name, origin: {lat, lon, altitude}}`. Cameras retain a `worldOrigin`, `airportIcao`,
+  and stable `generatedKey`. Position is local FRD about that geodetic origin; the SDK adapter converts
+  it to world latitude/longitude/altitude. Only the currently loaded airport is combined with the aircraft
+  profile for display. Each domain is validated and saved separately; cross-domain category moves are rejected.
 * `transition.kind`: `cut` (Instant), `smoothstep3` (Smooth, default), `smoothstep5` (Cinematic).
   `durationSeconds` 0.1–15 (ignored for `cut`); `delaySeconds` 0–30 = **start delay** before movement.
+* `mouseLookOnRelease`: optional `retain` (default) | `reset`. Per camera: keep temporary native right-drag look, or recenter it on button release. Does not overwrite the saved pose.
 * `temporaryLookPolicy`: `resetOnRecall` | `retain`. `levelHorizon` is capability-gated (disabled until qualified).
 * Validation: ≤ 10 MiB, finite numbers, |position| ≤ 10 000 m, FOV 0.1–2.8 rad, quaternion norm within 1e-3
   (normalised; zero rejected), unique UUIDs, every camera in exactly one category matching its `categoryId`,
@@ -87,11 +94,24 @@ There is no desktop application, tray app or external process.
 
 Actions: `selectView` (+`viewId`), `peekView` (+`viewId`), `nextCamera`, `previousCamera`, `nextCategory`,
 `returnToPilot`, `releaseCamera`, `recenterLook`, `toggleEditor`, `toggleMini`, `lookLeft`, `lookRight`, `lookUp`,
-`lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `zoomIn`, `zoomOut`.
+`lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveFast`, `zoomIn`, `zoomOut`.
 An input definition maps to at most one action. Keys are captured by the panel (keydown while the Assign dialog
 has focus) and stored as MSFS input definition strings; controller inputs are chosen from `ControllersListed`
 plus a button/hat number and confirmed with a live down/up test. Inputs are mapped in-module through
 `SimConnect_MapInputEventToClientEvent_EX1`, so they work with the editor closed (flight loaded only).
+
+Movement defaults are stored and editable: W/S forward/back, A/D left/right, Q/E down/up, Shift faster movement.
+`movementDefaultsVersion: 1` records the one-time migration of the previous invisible runtime defaults. Missing
+defaults are added only if neither the action nor the input is occupied. Clearing a migrated assignment stays
+cleared across save/reload; runtime mapping never supplies hidden fallbacks.
+
+Zoom also accepts `{ "kind": "simZoom", "definition": "sim:ZOOM_IN", "label": "Mouse wheel up / MSFS zoom in" }`
+and `sim:ZOOM_OUT`. Only `zoomIn` / `zoomOut` may use these inputs. They observe the corresponding MSFS zoom
+events (including ZOOM_PLUS / ZOOM_MINUS aliases) without masking them; each event is a bounded 2-degree FOV
+step, not a held input. Wheel operation depends on MSFS's zoom assignment and delivery of these events, pending
+live verification. This does not install a full-screen pointer surface. Assign supports keys, controllers, or either
+wheel direction; replacing a conflict clears the old action atomically. Text focus, pause, release and simulator
+camera takeover suppress these pulses.
 
 ### 2.3 Settings — schemaVersion 2
 
@@ -103,6 +123,8 @@ plus a button/hat number and confirmed with a live down/up test. Inputs are mapp
 ```
 
 `remember` keeps the last selected view per profile as navigation metadata (never dirties camera content).
+`ui.precision` also scales held-key translation: Fine 0.1x, Normal 1x, Coarse 10x of
+`host.moveSpeedMetersPerSec`; `moveFast` multiplies that by four while held. Mouse-look sensitivity is independent.
 `ui.miniPinned` is a global preference: changing it through `UpdateDraft` saves it immediately on its own and never
 marks settings as unsaved.
 

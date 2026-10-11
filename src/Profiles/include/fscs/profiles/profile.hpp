@@ -3,6 +3,7 @@
 // for the coordinator. Portable: no Windows API, no exceptions.
 
 #include "fscs/core/engine.hpp"
+#include "fscs/core/effects.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -19,7 +20,7 @@ constexpr int kSchemaVersion = 2;
 constexpr std::size_t kMaxProfileBytes = 10u << 20;
 constexpr std::size_t kMaxCameras = 500;
 constexpr std::size_t kMaxCategories = 100;
-constexpr int kMaxViewId = 20;
+constexpr int kMaxViewId = 2147483647;
 
 enum class CameraMode { AircraftCockpit, AircraftExterior, Orbit, Flyby, Airport, Free };
 const char* toString(CameraMode m);
@@ -52,9 +53,14 @@ struct CameraEntry {
     int viewId = 0;
     bool favorite = false;
     core::CameraPose pose;
+    double originLat=0, originLon=0, originAltitude=0;
     core::TransitionSpec transition;
     bool interaction = true;
+    std::string trackingPolicy = "nativeIfQualified";
+    std::string aircraftTracking = "off";
     bool retainLook = false;
+    bool resetMouseLookOnRelease = false;
+    core::EffectsSettings effects;
     bool levelHorizon = false;
     std::string seedDefinitionName;
 };
@@ -63,6 +69,7 @@ struct CategoryEntry {
     std::string id;
     std::string name;
     std::vector<std::string> cameraIds;
+    std::string defaultCameraId;
 };
 
 struct ProfileSnapshot {
@@ -87,6 +94,8 @@ ProfileSnapshot toSnapshot(const json& doc);
 
 // A fresh profile with one Cockpit category and a Pilot view at the eyepoint.
 json makeStarterProfile(const std::string& name, const std::string& modelKey, const std::string& displayName);
+bool isC172(const std::string& modelKey, const std::string& displayName);
+json makeC172Profile(const std::string& modelKey, const std::string& displayName);
 // Replaces every ID with a new UUID, keeping references (default view included) consistent. Returns old->new map.
 std::vector<std::pair<std::string, std::string>> reassignIds(json& doc);
 

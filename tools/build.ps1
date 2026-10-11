@@ -12,7 +12,8 @@
 #>
 param(
     [ValidateSet('Release', 'Debug')] [string] $Configuration = 'Release',
-    [switch] $ModuleOnly
+    [switch] $ModuleOnly,
+    [string] $OutputDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +30,10 @@ $wasmLd = Join-Path $sdk 'WASM\llvm\bin\wasm-ld.exe'
 $sysroot = Join-Path $sdk 'WASM\wasi-sysroot'
 $sdkVersion = (Get-Content (Join-Path $sdk 'version.txt') -TotalCount 1).Trim()
 
-$out = Join-Path $root "build\wasm\$Configuration"
+$out = if ($OutputDirectory) { [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory)) } else { Join-Path $root "build\wasm\$Configuration" }
+if (-not $out.StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'The build output must stay inside the project checkout.'
+}
 $obj = Join-Path $out 'obj'
 New-Item -ItemType Directory -Force $obj | Out-Null
 # Version header (passing a quoted -D through PowerShell to a native tool is unreliable).

@@ -1,0 +1,106 @@
+FS CAMERA STUDIO - TESTER BUILD
+Microsoft Flight Simulator 2024 | Windows 11 x64
+
+INSTALL
+1. Close Microsoft Flight Simulator 2024.
+2. Run the included FS-Camera-Studio-...-Setup.exe under your normal Windows
+   account. No SDK, Python, Node, external app or background service is needed.
+3. Confirm the detected Community / Community2024 folder, or Browse to it.
+   Steam, Microsoft Store / Xbox app and custom package locations are supported.
+   If no folder is detected, launch MSFS once. Use the simulator's Community
+   folder location to find the correct folder; do not choose the add-on folder.
+4. Finish setup, then start MSFS and load a flight.
+5. Open Camera Studio from the MSFS toolbar. The mini panel appears at the
+   bottom of the simulator window. Enable the toolbar item if it is hidden.
+
+This tester installer is not code-signed. Windows may show an unknown-publisher
+or SmartScreen message. Confirm you received it from the developer and compare
+the SHA-256 against the separately supplied checksum before choosing to run it.
+Do not disable antivirus or Windows protection settings.
+
+FIRST FLIGHT
+- Use a familiar aircraft and a parked flight for the first check.
+- Select a camera, then View in sim / Enable camera.
+- If camera control needs qualification, open Settings and run the axis check
+  while safely parked. Report its result rather than guessing axis directions.
+- Hold right mouse and drag in the simulator scene to look around.
+- W/S moves forward/back along the view, A/D sideways, Q down, E up.
+- Shift moves faster. Mouse wheel zooms. Fine/Normal/Coarse changes precision.
+- Ctrl+S saves the adjusted active view and all pending changes. Bindings are
+  editable in the Bindings tab; existing conflicting assignments are preserved.
+- Mouse look opens options to retain the adjusted look or reset on release,
+  and to remember/reset temporary look when recalling that camera.
+- Release camera returns control to MSFS.
+
+AIRPORT CAMERAS
+Camera library + > Create airport cameras. Choose a nearby airport or enter
+ICAO codes, choose features and placement, then Preview and Save selected views.
+Runways, gates/apron, towers and offset taxiway intersections use scenery data.
+Optional airport XML supplies actual taxi-sign positions. Only the current,
+nearest or manually selected nearby saved airport is loaded alongside the
+aircraft profile.
+
+Airport views can be repositioned with the editor or movement bindings. Track
+lets you choose fixed direction, aircraft heading, or heading and pitch. Auto
+switch on the mini toolbar chooses the nearest camera while airport control is
+active. Manual movement, right-drag or selecting another camera stops it.
+The mini toolbar also has Save; longer camera lists and toolbars scroll.
+
+HEAD TRACKING
+Use Head tracking to turn the MSFS TrackIR-compatible channel on/off for each
+camera, or use the simulator setting in Behavior > Head-tracking options.
+Assign Toggle head tracking in Bindings if desired. The add-on does not include
+tracking hardware/drivers and does not control VR or independent camera tools.
+Physical hardware behavior still needs tester verification.
+
+UPGRADE / REPAIR
+The app bar shows the version. Click it for Version & updates in Settings.
+Check for updates queries official GitHub releases; Download update opens the
+installer in your browser. A selectable URL is provided if browser launch is
+unavailable. Close MSFS before running setup. Automatic checks can be disabled.
+The illustrated User manual is included and available in Start > FS Camera Studio.
+
+Close MSFS and run the newer setup over the same Community location. Setup
+backs up an existing package under:
+  %LOCALAPPDATA%\FS Camera Studio\Backups
+LAST-BACKUP.txt in that folder's parent identifies the latest backup. Re-running
+setup repairs the shipped package files. Profiles, airports, settings and
+bindings are stored by MSFS outside the installed package and are not removed.
+Export valuable profiles using Profiles > Export current before testing.
+
+Only install ONE copy. A package managed by Addons Linker or a development
+junction must be disabled/removed as a link before using this installer.
+Setup deliberately refuses to overwrite linked package directories.
+If your chosen Community folder is protected, use a writable simulator package
+location. Do not run setup as a different Windows account.
+
+UNINSTALL / ROLLBACK
+Close MSFS. Windows Settings > Apps > Installed apps > FS Camera Studio (Tester)
+> Uninstall. This removes installer-owned files and preserves MSFS profile
+storage, backups and any additional files you placed in the package directory.
+
+For rollback: after uninstalling, copy the entire fs-camera-studio folder from
+the desired backup into your Community folder. Ensure only one copy is active.
+Do not restore files while the simulator is running.
+
+WHAT TO TEST / REPORT
+This is a test build, not a stability-certified release. Offline native and
+browser checks have passed; flight loading, live movement, airport cameras and
+physical head tracking still need simulator testing. Airport elevations depend
+on scenery data. Exterior views may retain cockpit sound.
+
+Check: flight loading; cockpit clicks and MSFS toolbar hover; right-drag
+smoothness; pitched WASD and Q/E; temporary-look reset/recall; Ctrl+S and view
+recall; bindings past slot 20; airport generation/movement/tracking/Auto switch;
+scrolling long mini lists; head tracking on/off; upgrade persistence.
+
+Send the developer:
+- Build ID from BUILD-INFO.json supplied with the download or installed at
+  %LOCALAPPDATA%\FS Camera Studio\BUILD-INFO.json
+- MSFS version, aircraft, airport ICAO and scenery add-ons.
+- Exact steps, expected/actual behavior, and screenshot/video if useful.
+- For crashes: whether loading, opening the panel or a specific action caused it.
+- For install errors: the newest Setup Log in %TEMP%.
+Review logs before sharing; paths may contain your Windows username.
+
+No profiles, credentials or data from the developer's computer are bundled.

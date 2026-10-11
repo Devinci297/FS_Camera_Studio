@@ -1,12 +1,2 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <g fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="32" cy="32" r="24"/>
-    <path d="M32 8 L42.5 26"/>
-    <path d="M52.8 20 L32 20.5"/>
-    <path d="M52.8 44 L42.5 26"/>
-    <path d="M32 56 L21.5 38"/>
-    <path d="M11.2 44 L32 43.5"/>
-    <path d="M11.2 20 L21.5 38"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"><path fill="#ffffff" fill-rule="evenodd" d="M8 18H18L23 11H41L46 18H56V53H8ZM12 22V49H52V22H44L39 15H25L20 22ZM45 26H49V30H45Z M32 24A12 12 0 1 0 32 48A12 12 0 1 0 32 24ZM32 28A8 8 0 1 1 32 44A8 8 0 1 1 32 28Z"/></svg>

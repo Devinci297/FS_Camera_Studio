@@ -1,4 +1,5 @@
 #include "test.hpp"
+#include <set>
 
 #include "fake_backend.hpp"
 #include "fscs/profiles/bindings.hpp"
@@ -286,6 +287,44 @@ TEST_CASE("settings: normalisation clamps and fills defaults") {
     CHECK_EQ(n["ui"]["precision"].get<std::string>(), std::string("coarse"));
     CHECK_NEAR(n["host"]["lookSpeedDegPerSec"].get<double>(), 360.0, 1e-9);
     CHECK(n["ui"]["miniEnabled"].get<bool>());
+    CHECK_EQ(n["ui"]["nameDisplay"], "both");
+    CHECK_NEAR(n["ui"]["miniOpacity"].get<double>(), 0.65, 1e-9);
+    s["ui"]["nameDisplay"] = "icons"; s["ui"]["miniOpacity"] = 3;
+    n = normalizeSettings(s);
+    CHECK_EQ(n["ui"]["nameDisplay"], "icons");
+    CHECK_NEAR(n["ui"]["miniOpacity"].get<double>(), 1, 1e-9);
+    s["ui"]["nameDisplay"] = "invalid"; s["ui"]["miniOpacity"] = -1;
+    n = normalizeSettings(s);
+    CHECK_EQ(n["ui"]["nameDisplay"], "both");
+    CHECK_NEAR(n["ui"]["miniOpacity"].get<double>(), 0.15, 1e-9);
+}
+
+TEST_CASE("bindings: movement migration preserves custom assignments and persists deliberate clearing") {
+    json legacy{{"schemaVersion", 2}, {"bindings", json::array({
+        {{"action", "moveForward"}, {"input", {{"kind", "key"}, {"definition", "I"}, {"label", "I"}}}},
+        {{"action", "nextCamera"}, {"input", {{"kind", "key"}, {"definition", "E"}, {"label", "E"}}}}
+    })}};
+    const auto upgraded = upgradeMovementBindings(legacy);
+    CHECK_EQ(upgraded["bindings"][0], legacy["bindings"][0]);
+    CHECK_EQ(upgraded["bindings"][1], legacy["bindings"][1]);
+    const auto parsed = parseBindings(upgraded); CHECK(parsed.problems.empty());
+    for (const auto& b : parsed.bindings) {
+        CHECK(b.action != Action::MoveUp); // E belongs to another action.
+        CHECK(b.input.definition != "W"); // Existing custom forward binding wins.
+    }
+    CHECK_EQ(upgradeMovementBindings(upgraded), upgraded);
+    StoreState state; state.txn = 1; state.settings = defaultSettingsDocument(); state.bindings = upgraded;
+    state.bindings["bindings"] = json::array(); // Clear all, then save/reload.
+    const auto loaded = Repository::deserialize(Repository::serialize(state, {}), nullptr, nullptr);
+    CHECK(loaded.has_value());
+    if (loaded) { CHECK(loaded->bindings["bindings"].empty()); CHECK_EQ(loaded->bindings["movementDefaultsVersion"], 1); }
+    auto wheel = InputSpec::fromJson({{"kind","simZoom"},{"definition","sim:ZOOM_IN"}});
+    CHECK(wheel.has_value());
+    if (wheel) { const auto encoded = wheel->toJson(); CHECK_EQ(encoded["kind"], "simZoom"); }
+    CHECK(!InputSpec::fromJson({{"kind","key"},{"definition","sim:ZOOM_IN"}}));
+    CHECK(!InputSpec::fromJson({{"kind","simZoom"},{"definition","W"}}));
+    CHECK(!validDefinition("sim:ENGINE_AUTO_START"));
+    CHECK(!parseBindings({{"schemaVersion",2},{"bindings",json::array({{{"action","moveFast"},{"input",{{"kind","simZoom"},{"definition","sim:ZOOM_IN"}}}}})}}).problems.empty());
 }
 
 TEST_CASE("protocol: chunking round-trips, keeps UTF-8 intact, and rejects junk") {
@@ -307,4 +346,113 @@ TEST_CASE("protocol: chunking round-trips, keeps UTF-8 intact, and rejects junk"
     CHECK(!Command::fromJson({{"protocolVersion", 1}, {"action", "X"}}, &err));
     CHECK(Command::fromJson({{"protocolVersion", 2}, {"action", "X"}, {"requestId", "main-4"}}, &err).has_value());
     CHECK(!Command::fromJson({{"protocolVersion", 2}, {"action", "X"}, {"payload", 7}}, &err));
+}
+
+TEST_CASE("profiles: C172 defaults have 12 cockpit and 8 exterior views with a pilot default") {
+    json doc = makeC172Profile("asobo_c172sp_g1000", "C172SP G1000 Passengers");
+    CHECK(validateProfile(doc).ok());
+    CHECK_EQ(doc["cameras"].size(), std::size_t{20});
+    CHECK_EQ(doc["categories"].size(), std::size_t{5});
+    auto snap = toSnapshot(doc);
+    CHECK(snap.camera(snap.defaultCameraId));
+    CHECK_EQ(snap.camera(snap.defaultCameraId)->name, std::string("Pilot - normal"));
+    int exterior = 0;
+    std::set<int> numbers;
+    for (const auto& view : doc["cameras"]) {
+        CHECK(numbers.insert(view["viewId"].get<int>()).second);
+        if (view["mode"] == "aircraftExterior") { ++exterior; CHECK(!view["interaction"].get<bool>()); }
+    }
+    CHECK_EQ(exterior, 8);
+}
+
+TEST_CASE("profiles: aircraft files separate models, keep alternates and import the preferred profile") {
+    json cessna = makeC172Profile("asobo_c172sp_g1000", "C172");
+    json alternate = makeStarterProfile("Other C172 views", "asobo_c172sp_g1000", "C172");
+    json jet = makeStarterProfile("Jet", "some-aircraft", "Jet");
+    json payload{{"txn", 2}, {"navigation", {{"lastByModel", {{"asobo_c172sp_g1000", cessna["profileId"]}}}}},
+                 {"profiles", {{{"current", cessna}}, {{"current", alternate}}, {{"current", jet}}}}};
+    const auto files = aircraftProfileFiles({{"payload", payload}});
+    CHECK_EQ(files.size(), std::size_t{2});
+    const auto name = aircraftProfileFile("asobo_c172sp_g1000");
+    CHECK(files.count(name));
+    auto code = fscs::js::parse(files.at(name));
+    CHECK_EQ(code["profile"]["profileId"], cessna["profileId"]);
+    CHECK_EQ(code["alternateProfiles"].size(), std::size_t{1});
+    CHECK(importProfileCode(files.at(name), nullptr).has_value());
+    CHECK(aircraftProfileFile("model/a") != aircraftProfileFile("model-a"));
+    CHECK(aircraftProfileFile("../../model").find("..") == std::string::npos);
+}
+
+TEST_CASE("profiles: camera effects round trip and reject invalid strengths") {
+    auto doc = makeStarterProfile("FX", "test", "Test");
+    doc["cameras"][0]["effects"] = {{"enabled",true},{"intensity",.6}};
+    CHECK(validateProfile(doc).ok());
+    const auto profile = toSnapshot(doc);
+    CHECK(profile.cameras[0].effects.enabled);
+    CHECK_NEAR(profile.cameras[0].effects.intensity,.6,1e-9);
+    CHECK_NEAR(profile.cameras[0].effects.turbulence,.5,1e-9);
+    doc["cameras"][0]["effects"]["groundRoll"]=2.; CHECK(!validateProfile(doc).ok());
+    doc["cameras"][0]["effects"]="invalid"; CHECK(!validateProfile(doc).ok());
+}
+TEST_CASE("profiles: corrected lateral calibration preserves saved physical poses once") {
+    StoreState state; state.txn=1;
+    auto doc = makeStarterProfile("Saved", "test", "Test");
+    doc["cameras"][0]["positionMetersFRD"]={.2,.08,-.1};
+    const auto id = doc["profileId"].get<std::string>();
+    state.profiles[id].current=doc; state.profiles[id].backups.push_back(doc);
+    fscs::host::AdapterContract old;
+    old.id="msfs2024-wasm-measured-12.2.282174.999";
+    state.navigation={{"qualification",{{"records",json::array({{{"simVersion","12.2.282174.999"},{"contract",old.toJson()},{"gates",{{"G01","pass"},{"G03","pass"}}}}})}}}};
+    const auto oldPose=toSnapshot(doc).cameras[0].pose;
+    const auto oldSdk=fscs::host::toSdk(oldPose,old,fscs::host::Referential::Eyepoint);
+    auto loaded=Repository::deserialize(Repository::serialize(state,{}),nullptr,nullptr); CHECK(loaded.has_value()); if (!loaded) return;
+    const auto q=fscs::host::qualificationFor(loaded->navigation["qualification"],"12.2.282174.999");
+    CHECK_NEAR(q.contract.axisSign[1],-1.,1e-9);
+    CHECK_NEAR(loaded->profiles[id].current["cameras"][0]["positionMetersFRD"][1].get<double>(),-.08,1e-9);
+    CHECK_NEAR(loaded->profiles[id].backups[0]["cameras"][0]["positionMetersFRD"][1].get<double>(),-.08,1e-9);
+    const auto current=toSnapshot(loaded->profiles[id].current).cameras[0].pose;
+    CHECK_NEAR(fscs::host::toSdk(current,q.contract,fscs::host::Referential::Eyepoint).x,oldSdk.x,1e-9);
+    auto again=Repository::deserialize(Repository::serialize(*loaded,{}),nullptr,nullptr); CHECK(again.has_value()); if (!again) return;
+    CHECK_NEAR(again->profiles[id].current["cameras"][0]["positionMetersFRD"][1].get<double>(),-.08,1e-9);
+}
+
+TEST_CASE("profile: category defaults and colors validate and remap together") {
+    auto doc = fscs::profiles::makeStarterProfile("Colors", "c172", "C172");
+    doc["categories"][0]["defaultCameraId"] = doc["cameras"][0]["id"];
+    doc["categories"][0]["color"] = "#75baff";
+    doc["cameras"][0]["color"] = "#ffd27a";
+    CHECK(fscs::profiles::validateProfile(doc).ok());
+    const auto snapshot = fscs::profiles::toSnapshot(doc);
+    CHECK_EQ(snapshot.categories[0].defaultCameraId, doc["cameras"][0]["id"].get<std::string>());
+    fscs::profiles::reassignIds(doc);
+    CHECK_EQ(doc["categories"][0]["defaultCameraId"], doc["cameras"][0]["id"]);
+    CHECK(fscs::profiles::validateProfile(doc).ok());
+    auto bad = doc; bad["categories"][0]["defaultCameraId"] = fscs::profiles::newUuid();
+    CHECK(!fscs::profiles::validateProfile(bad).ok());
+    bad = doc; bad["cameras"][0]["color"] = "url(invalid)";
+    CHECK(!fscs::profiles::validateProfile(bad).ok());
+}
+
+TEST_CASE("profiles: per-camera mouse release behavior defaults to retain and validates") {
+    auto doc = makeStarterProfile("Mouse", "test", "Test");
+    CHECK(!toSnapshot(doc).cameras[0].resetMouseLookOnRelease);
+    doc["cameras"][0]["mouseLookOnRelease"] = "reset";
+    CHECK(validateProfile(doc).ok());
+    CHECK(toSnapshot(doc).cameras[0].resetMouseLookOnRelease);
+    doc["cameras"][0]["mouseLookOnRelease"] = "retain";
+    CHECK(validateProfile(doc).ok());
+    CHECK(!toSnapshot(doc).cameras[0].resetMouseLookOnRelease);
+    doc["cameras"][0]["mouseLookOnRelease"] = "unknown";
+    CHECK(!validateProfile(doc).ok());
+    doc["cameras"][0]["mouseLookOnRelease"] = 1;
+    CHECK(!validateProfile(doc).ok());
+}
+
+TEST_CASE("bindings: high view IDs and reassignable save shortcut survive reload") {
+    auto profile=makeStarterProfile("Slots","test","Test");profile["cameras"][0]["viewId"]=12345;
+    CHECK(validateProfile(profile).ok());CHECK(toSnapshot(profile).cameraByViewId(12345)!=nullptr);
+    json doc{{"schemaVersion",2},{"bindings",json::array({{{"action","selectView"},{"viewId",12345},{"input",{{"kind","key"},{"definition","F"}}}}})}};
+    CHECK(parseBindings(doc).problems.empty());doc=upgradeMovementBindings(doc);
+    bool save=false;for(auto& b:parseBindings(doc).bindings)if(b.action==Action::SaveViews){save=true;CHECK_EQ(b.input.definition,std::string("VK_LCONTROL+S"));}CHECK(save);
+    doc["bindings"]=json::array();CHECK(upgradeMovementBindings(doc)["bindings"].empty());
 }

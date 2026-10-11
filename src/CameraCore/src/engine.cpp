@@ -97,7 +97,7 @@ void ManualMover::advance(double dt, const ManualInput& in, TemporaryLook& look)
         look.headingDeg = wrapDeg(look.headingDeg + rate_.lookRight * speeds_.lookDegPerSec * kStep);
         look.pitchDeg = clamp(look.pitchDeg + rate_.lookUp * speeds_.lookDegPerSec * kStep, -178.0, 178.0);
         look.translationHeadingFrame +=
-            Vec3{rate_.moveForward, rate_.moveRight, -rate_.moveUp} * (speeds_.moveMetersPerSec * kStep);
+            Vec3{rate_.moveForward, rate_.moveRight, -rate_.moveUp} * (speeds_.moveMetersPerSec * (in.fast ? 4.0 : 1.0) * kStep);
         look.fovDeltaRad = clamp(look.fovDeltaRad - rate_.zoomIn * speeds_.zoomRadPerSec * kStep, -kMaxFovRad, kMaxFovRad);
     }
     // Snap tiny residual rates to zero so a released input fully stops.
@@ -124,15 +124,44 @@ void CameraEngine::place(const CameraPose& pose) {
     transition_.reset();
 }
 
-void CameraEngine::tick(double dt, const ManualInput& input) {
+void CameraEngine::tick(double dt, const ManualInput& input, std::optional<Quat> movementOrientation) {
     if (transition_) {
         transition_->advance(dt);
         if (transition_->finished()) transition_.reset();
     }
-    mover_.advance(dt, input, look_);
+    auto relative = input;
+    if (const auto base = basePose()) {
+        const auto orientation = movementOrientation.value_or(sample().pose.orientation);
+        auto angles = orientation.toPbh();
+        angles.headingDeg = wrapDeg(angles.headingDeg - base->orientation.toPbh().headingDeg);
+        const auto direction = Quat::fromPbh(angles).rotate({input.moveForward,input.moveRight,0});
+        relative.moveForward=direction.x; relative.moveRight=direction.y; relative.moveUp=input.moveUp-direction.z;
+    }
+    mover_.advance(dt, relative, look_);
 }
 
 void CameraEngine::freeze() { mover_.neutralize(); }
+
+void CameraEngine::offsetPosition(const Vec3& delta) {
+    if (!base_ || !delta.finite()) return;
+    const auto old = look_.translationHeadingFrame;
+    look_.translationHeadingFrame += delta;
+    if (!sample().valid) look_.translationHeadingFrame = old;
+}
+
+void CameraEngine::offsetFov(double deltaRad) {
+    const auto base = basePose();
+    if (!base || !std::isfinite(deltaRad)) return;
+    look_.fovDeltaRad = clamp(base->fovRad + look_.fovDeltaRad + deltaRad, kMinFovRad, kMaxFovRad) - base->fovRad;
+}
+
+void CameraEngine::offsetLook(double headingDeg, double pitchDeg) {
+    if (!base_ || !std::isfinite(headingDeg) || !std::isfinite(pitchDeg)) return;
+    look_.headingDeg = wrapDeg(look_.headingDeg + headingDeg);
+    const auto base = basePose();
+    const double pitch = base ? base->orientation.toPbh().pitchDeg : 0;
+    look_.pitchDeg = clamp(pitch + look_.pitchDeg + pitchDeg, -89.0, 89.0) - pitch;
+}
 
 std::optional<CameraPose> CameraEngine::basePose() const {
     if (!base_) return std::nullopt;

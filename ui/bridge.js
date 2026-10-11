@@ -92,7 +92,7 @@
           this.isOpen = true;
           if (onOpen) onOpen();
         });
-        this.listener.on('FSCS_HOST_TO_UI', data => this.handlers.forEach(cb => cb(data)));
+        this.listener.on('FSCS_HOST_TO_UI', data => { const frame = typeof data === 'string' ? data : clone(data); setTimeout(() => this.handlers.forEach(cb => cb(frame)), 0); });
       } catch (error) {
         console.error('CommBus listener could not be created', error);
       }
@@ -285,7 +285,10 @@
     list.push({ action: 'lookRight', input: ctrlAlt('VK_RIGHT', 'Right arrow') });
     list.push({ action: 'lookUp', input: ctrlAlt('VK_UP', 'Up arrow') });
     list.push({ action: 'lookDown', input: ctrlAlt('VK_DOWN', 'Down arrow') });
-    return { schemaVersion: 2, bindings: list };
+    [['moveForward','W'],['moveBack','S'],['moveLeft','A'],['moveRight','D'],['moveDown','Q'],['moveUp','E'],['moveFast','VK_SHIFT']].forEach(entry => list.push({action:entry[0],input:{kind:'key',definition:entry[1],label:entry[1]==='VK_SHIFT'?'Shift':entry[1]}}));
+    [['zoomIn','sim:ZOOM_IN','Mouse wheel up / MSFS zoom in'],['zoomOut','sim:ZOOM_OUT','Mouse wheel down / MSFS zoom out']].forEach(entry => list.push({action:entry[0],input:{kind:'simZoom',definition:entry[1],label:entry[2]}}));
+    list.push({action:'saveViews',input:{kind:'key',definition:'VK_LCONTROL+S',label:'Ctrl + S'}});
+    return { schemaVersion: 2, movementDefaultsVersion: 1, saveViewsDefaultsVersion:1, bindings: list };
   }
 
   function validateProfile(p) {
@@ -359,7 +362,10 @@
           doc.profile.cameras = doc.profile.cameras.filter(c => c.id !== op.cameraId);
           doc.profile.categories.forEach(g => { g.cameraIds = g.cameraIds.filter(id => id !== op.cameraId); });
           break;
-        case 'setCategories': doc.profile.categories = clone(op.categories); break;
+        case 'setCategories':
+          doc.profile.categories = clone(op.categories);
+          doc.profile.categories.forEach(g => g.cameraIds.forEach(id => { const camera = doc.profile.cameras.find(c => c.id === id); if (camera) camera.categoryId = g.id; }));
+          break;
         case 'setProfileFields':
           ['name', 'defaultCameraId', 'aircraftMatch'].forEach(k => { if (op[k] !== undefined) doc.profile[k] = clone(op[k]); });
           break;
@@ -388,7 +394,7 @@
     addRepo(mine, 3, [{ revision: 1, savedAt: new Date(now - 3 * 86400e3).toISOString(), profile: r1 }, { revision: 2, savedAt: new Date(now - 86400e3 - 5 * 3600e3).toISOString(), profile: r2 }]);
     addRepo(cinematic, 1);
     addRepo(airport, 1);
-    repo.settings = { schemaVersion: 2, ui: { shortcuts: true, contrast: false, backups: true, remember: true, precision: 'normal', theme: 'dark', reducedMotion: false, miniEnabled: true, miniHover: true, miniPinned: false }, host: { allowUnqualifiedAdapter: false, lookSpeedDegPerSec: 60, moveSpeedMetersPerSec: 0.5 } };
+    repo.settings = { schemaVersion: 2, ui: { shortcuts: true, contrast: false, backups: true, remember: true, precision: 'normal', theme: 'dark', reducedMotion: false, miniEnabled: true, miniHover: true, miniPinned: false, miniOpacity: 0.65, nameDisplay: 'both' }, host: { allowUnqualifiedAdapter: false, lookSpeedDegPerSec: 60, moveSpeedMetersPerSec: 0.5 } };
     repo.bindings = seedBindings();
 
     const m = {
@@ -581,6 +587,7 @@
           else if (action === 'nextCategory') { nextCategory(internal(env, 'dispatch')); message = 'Moved to the next category.'; }
           else { cycle(internal(env, 'dispatch'), action === 'nextCamera' ? 1 : -1); message = 'Switched camera.'; }
           break;
+        case 'toggleMouseLook': event('SurfaceRequest', {target:'mini', op:'mouseLook'}); break;
         case 'toggleEditor': case 'toggleMini':
           event('SurfaceRequest', { target: action === 'toggleEditor' ? 'main' : 'mini', op: 'toggle' });
           break;
@@ -624,6 +631,13 @@
         case 'NextCategory': return nextCategory(env);
         case 'ReturnToPilot': return activate(env, m.working.profile.defaultCameraId);
         case 'RecenterLook': m.look = NEUTRAL_LOOK(); event('TemporaryLookChanged', m.look); return ack(env, 'Completed');
+        case 'MouseLookDelta': {
+          if (m.ownership.state !== 'Active') return ack(env, 'Rejected', 'notActive');
+          m.look.pbhDeg[2] = M.wrapDeg(m.look.pbhDeg[2] + (payload.headingDeg || 0));
+          m.look.pbhDeg[0] = M.clamp(m.look.pbhDeg[0] + (payload.pitchDeg || 0), -89, 89);
+          m.look.active = true;
+          event('TemporaryLookChanged', m.look); return ack(env, 'Completed');
+        }
         case 'BeginGesture': case 'RenewGesture': case 'EndGesture': return ack(env, 'Completed');
         case 'UpdateDraft': {
           if (env.draftRevision !== m.working.draftRevision) return ack(env, 'Rejected', 'staleDraft');
@@ -807,6 +821,7 @@
         }
         case 'TestBinding': return testBinding(env, payload.binding);
         case 'RelaySurface': ack(env, 'Completed'); return event('SurfaceRequest', { target: payload.target, op: payload.op });
+        case 'PointerOverPanel':
         case 'TextFocus': return ack(env, 'Completed');
         case 'QualificationStart':
           // Live control is allowed on an unqualified build while the axis check runs.

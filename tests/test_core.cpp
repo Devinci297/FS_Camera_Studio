@@ -2,6 +2,7 @@
 
 #include "adapter.hpp"
 #include "fscs/core/engine.hpp"
+#include "fscs/core/effects.hpp"
 
 using namespace fscs::core;
 using fscs::host::AdapterContract;
@@ -13,6 +14,19 @@ namespace {
 constexpr double kEps = 1e-9;
 CameraPose pose(Vec3 p, Pbh a, double fov = 1.0) { return {p, Quat::fromPbh(a), fov}; }
 }  // namespace
+
+TEST_CASE("movement: WASD follows yaw and pitch while QE remains vertical") {
+    CameraEngine e; e.place(pose({},{}));e.offsetLook(90,30);
+    ManualInput input;input.moveForward=1;
+    for(int i=0;i<120;++i)e.tick(1.0/60,input);
+    const auto moved=e.sample().pose.positionFRD;
+    CHECK_NEAR(moved.x,0,1e-8);CHECK(moved.y>.5);CHECK(moved.z<-.3);
+    CHECK_NEAR(-moved.z/moved.y,std::tan(30*kDegToRad),1e-6);
+    e.freeze();const auto before=e.sample().pose.positionFRD;input={};input.moveUp=1;
+    for(int i=0;i<60;++i)e.tick(1.0/60,input);
+    const auto after=e.sample().pose.positionFRD;
+    CHECK_NEAR(before.x,after.x,1e-8);CHECK_NEAR(before.y,after.y,1e-8);CHECK(after.z<before.z);
+}
 
 TEST_CASE("math: heading 90 turns the view to the right") {
     const Vec3 f = Quat::fromPbh({0, 0, 90}).rotate({1, 0, 0});
@@ -199,4 +213,51 @@ TEST_CASE("adapter: contract JSON rejects permutations that are not bijective") 
     j = c.toJson();
     j["pitchSign"] = 2.0;
     CHECK(!AdapterContract::fromJson(j).has_value());
+}
+TEST_CASE("engine: mouse look keeps preset unchanged and recenters") {
+    CameraEngine e;
+    const auto saved = pose({1, 2, 3}, {5, 0, 10});
+    e.place(saved);
+    e.offsetLook(20, 12);
+    CHECK_NEAR(e.look().headingDeg, 20, kEps);
+    CHECK_NEAR(e.look().pitchDeg, 12, kEps);
+    CHECK_NEAR(angleBetween(e.basePose()->orientation, saved.orientation), 0, 1e-7);
+    e.offsetLook(0, 200);
+    CHECK_NEAR(e.look().pitchDeg + saved.orientation.toPbh().pitchDeg, 89, kEps);
+    e.offsetLook(NAN, 0);
+    CHECK(e.sample().valid);
+    e.recenterLook();
+    CHECK(!e.look().active());
+    CHECK_NEAR(angleBetween(e.sample().pose.orientation, saved.orientation), 0, 1e-7);
+}
+
+TEST_CASE("effects: only valid enabled telemetry moves the view and never changes the base") {
+    CameraEffects fx; EffectsSettings settings; FlightMotion motion; CameraPose base = pose({1,2,3}, {}, 1.);
+    motion.forwardAcceleration = 5.;
+    fx.tick(.02, motion, settings, true); CHECK_NEAR(fx.offset().length(), 0., 1e-12);
+    settings.enabled = true;
+    for (int i=0;i<50;++i) fx.tick(.02,motion,settings,true);
+    CHECK(fx.offset().x < 0); CHECK(fx.offset().length() < .1);
+    const auto output = fx.apply(base); CHECK(output.positionFRD.x < base.positionFRD.x); CHECK_NEAR(base.positionFRD.x,1.,1e-12);
+    CHECK_NEAR(output.fovRad,base.fovRad,1e-12);
+    fx.tick(.02,motion,settings,false); CHECK_NEAR(fx.offset().length(),0.,1e-12);
+    fx.tick(.5,motion,settings,true); CHECK_NEAR(fx.offset().length(),0.,1e-12);
+    motion.gForce = std::numeric_limits<double>::quiet_NaN();
+    fx.tick(.02,motion,settings,true); CHECK_NEAR(fx.offset().length(),0.,1e-12);
+}
+TEST_CASE("effects: stationary aircraft is still and touchdown does not trigger on startup") {
+    CameraEffects fx; EffectsSettings settings; settings.enabled=true; FlightMotion motion;
+    for (int i=0;i<50;++i) fx.tick(.02,motion,settings,true);
+    CHECK_NEAR(fx.offset().length(),0.,1e-12);
+    motion.onGround=0; motion.verticalSpeed=-3.; fx.tick(.02,motion,settings,true);
+    motion.onGround=1; motion.verticalSpeed=0.; fx.tick(.02,motion,settings,true);
+    CHECK(fx.offset().z > 0);
+    for (int i=0;i<500;++i) fx.tick(.02,motion,settings,true);
+    CHECK_NEAR(fx.offset().length(),0.,1e-9);
+    motion.groundSpeed=20;
+    for (int i=0;i<30;++i) fx.tick(.02,motion,settings,true);
+    CHECK(fx.offset().length()>1e-7);
+    settings.intensity=0;
+    for (int i=0;i<100;++i) fx.tick(.02,motion,settings,true);
+    CHECK_NEAR(fx.offset().length(),0.,1e-9);
 }

@@ -1,9 +1,11 @@
 #include "fscs/profiles/profile.hpp"
+#include "fscs/profiles/airport.hpp"
 
 #include "fscs/profiles/json_util.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <map>
 #include <set>
 #include <sstream>
@@ -23,7 +25,7 @@ namespace {
 
 using core::Quat;
 
-const std::set<std::string> kKnownFeatures = {};  // schema 2 defines no optional required features yet
+const std::set<std::string> kKnownFeatures = {"airport-world-v1"};  // schema 2 defines no optional required features yet
 
 json starterCalibration() {
     return {{"frameContract", "FRD-camera-to-anchor-xyzw-v1"},
@@ -126,7 +128,7 @@ std::optional<CameraMode> parseMode(const std::string& s) {
     return it->second;
 }
 
-bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior; }
+bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior || m == CameraMode::Airport; }
 
 std::string ValidationResult::summary() const {
     if (errors.empty()) return "valid";
@@ -154,6 +156,10 @@ ValidationResult validateProfile(json& doc) {
     }
     if (c.text(doc, "profileId", "$", 36, 36) && !isUuid(doc["profileId"].get<std::string>())) c.error("$.profileId", "must be a UUID");
     c.text(doc, "name", "$", 1, 60);
+    const bool airportProfile=js::str(doc,"scope")=="airport";
+    const auto airportCode=js::str(js::object(doc,"airport"),"icao");
+    if(airportProfile && (!airport::validCode(airportCode)||!airport::geo(js::get(js::object(doc,"airport"),"origin")).valid()))
+        c.error("$.airport","Airport profiles need a valid ICAO and geographic origin.");
     if (!doc.contains("revision") || !doc["revision"].is_number_integer()) doc["revision"] = 0;
     if (doc["revision"].get<std::int64_t>() < 0) c.error("$.revision", "must not be negative");
 
@@ -223,6 +229,14 @@ ValidationResult validateProfile(json& doc) {
             if (c.text(cam, "categoryId", p, 36, 36)) cameraCategory[id] = cam["categoryId"].get<std::string>();
             else cameraCategory[id] = "";
             if (!parseMode(js::str(cam, "mode"))) c.error(p + ".mode", "unknown camera mode");
+            if(airportProfile && (js::str(cam,"mode")!="airport" || js::str(cam,"airportIcao")!=airportCode))
+                c.error(p,"This camera must belong to the same airport as its profile.");
+            if (js::str(cam, "mode") == "airport") {
+                const auto& origin = js::object(cam, "worldOrigin");
+                double lat=js::num(origin,"lat",NAN), lon=js::num(origin,"lon",NAN), alt=js::num(origin,"altitude",NAN);
+                if(!std::isfinite(lat)||std::abs(lat)>=89.9||!std::isfinite(lon)||std::abs(lon)>180||!std::isfinite(alt)||alt< -1500||alt>30000)
+                    c.error(p+".worldOrigin", "Airport camera needs a valid world origin in degrees/meters.");
+            }
             if (c.numbers(cam, "positionMetersFRD", 3, p))
                 for (const auto& v : cam["positionMetersFRD"])
                     if (std::abs(v.get<double>()) > core::kMaxPositionMeters) c.error(p + ".positionMetersFRD", "is more than 10 km from the anchor");
@@ -248,8 +262,13 @@ ValidationResult validateProfile(json& doc) {
                     c.error(p + ".transition.durationSeconds", "must be 0.1-15 seconds");
                 if (!std::isfinite(delay) || delay < 0 || delay > core::kMaxDelaySeconds) c.error(p + ".transition.delaySeconds", "must be 0-30 seconds");
             }
+            if (cam.contains("color")) {
+                const auto color = js::str(cam, "color");
+                if (color.size() != 7 || color[0] != '#' || color.find_first_not_of("0123456789abcdefABCDEF", 1) != std::string::npos)
+                    c.error(p + ".color", "must be a six-digit hex color");
+            }
             const std::int64_t vid = js::integer(cam, "viewId", 0);
-            if (vid < 0 || vid > kMaxViewId) c.error(p + ".viewId", "must be 0-20");
+            if (vid < 0 || vid > kMaxViewId) c.error(p + ".viewId", "must be a non-negative 32-bit integer");
             else if (vid > 0 && !viewIds.insert(vid).second) c.error(p + ".viewId", "view ID " + std::to_string(vid) + " is used twice");
             cam["viewId"] = vid;
             const std::pair<const char*, json> defaults[] = {
@@ -258,8 +277,28 @@ ValidationResult validateProfile(json& doc) {
                 {"effects", {{"enabled", false}}}, {"requiredCapabilities", json::array()}};
             for (const auto& [k, v] : defaults)
                 if (!cam.contains(k)) cam[k] = v;
+            auto& fx = cam["effects"];
+            const auto tracking = js::str(cam, "trackingPolicy");
+            if (tracking != "nativeIfQualified" && tracking != "on" && tracking != "off") c.error(p + ".trackingPolicy", "must be nativeIfQualified, on or off");
+            if (!cam.contains("aircraftTracking")) cam["aircraftTracking"] = "off";
+            const auto target = js::str(cam, "aircraftTracking");
+            if (target != "off" && target != "heading" && target != "both") c.error(p + ".aircraftTracking", "must be off, heading or both");
+            if (!fx.is_object()) c.error(p + ".effects", "must be an object");
+            else {
+                if (!fx.contains("enabled")) fx["enabled"] = false;
+                if (!fx["enabled"].is_boolean()) c.error(p + ".effects.enabled", "must be true or false");
+                const std::pair<const char*, double> amounts[] = {{"intensity", .35}, {"turbulence", .5}, {"groundRoll", .35}, {"touchdown", .5}, {"acceleration", .35}, {"engine", .2}};
+                for (const auto& [key, fallback] : amounts) {
+                    if (!fx.contains(key)) fx[key] = fallback;
+                    const double value = js::num(fx, key, -1.);
+                    if (!fx[key].is_number() || !std::isfinite(value) || value < 0 || value > 1)
+                        c.error(p + ".effects." + key, "must be a number between 0 and 1");
+                }
+            }
             const std::string look = js::str(cam, "temporaryLookPolicy");
             if (look != "resetOnRecall" && look != "retain") c.error(p + ".temporaryLookPolicy", "unknown look policy");
+            const std::string mouseRelease = js::str(cam, "mouseLookOnRelease", "retain");
+            if ((cam.contains("mouseLookOnRelease") && !cam["mouseLookOnRelease"].is_string()) || (mouseRelease != "retain" && mouseRelease != "reset")) c.error(p + ".mouseLookOnRelease", "must be retain or reset");
             if (!cam["favorite"].is_boolean() || !cam["interaction"].is_boolean() || !cam["levelHorizon"].is_boolean())
                 c.error(p, "favorite, interaction and levelHorizon must be true or false");
             if (!(cam["seedDefinitionName"].is_null() || cam["seedDefinitionName"].is_string())) cam["seedDefinitionName"] = nullptr;
@@ -292,6 +331,13 @@ ValidationResult validateProfile(json& doc) {
             if (!ids.is_array()) {
                 c.error(p + ".cameraIds", "must be a list");
                 continue;
+            }
+            if (cat.contains("defaultCameraId") && (!cat["defaultCameraId"].is_string() || std::find(ids.begin(), ids.end(), cat["defaultCameraId"]) == ids.end()))
+                c.error(p + ".defaultCameraId", "must name a camera in this category");
+            if (cat.contains("color")) {
+                const auto color = js::str(cat, "color");
+                if (color.size() != 7 || color[0] != '#' || color.find_first_not_of("0123456789abcdefABCDEF", 1) != std::string::npos)
+                    c.error(p + ".color", "must be a six-digit hex color");
             }
             for (const auto& ref : ids) {
                 const std::string id = js::str(ref);
@@ -345,6 +391,7 @@ ProfileSnapshot toSnapshot(const json& doc) {
     for (const auto& cat : js::array(doc, "categories")) {
         CategoryEntry e{js::str(cat, "id"), js::str(cat, "name"), {}};
         for (const auto& id : js::array(cat, "cameraIds")) e.cameraIds.push_back(js::str(id));
+        e.defaultCameraId = js::str(cat, "defaultCameraId");
         s.categories.push_back(std::move(e));
     }
     for (const auto& cam : js::array(doc, "cameras")) {
@@ -367,7 +414,14 @@ ProfileSnapshot toSnapshot(const json& doc) {
         e.transition.durationSeconds = js::num(t, "durationSeconds", core::kDefaultTransitionSeconds);
         e.transition.delaySeconds = js::num(t, "delaySeconds", 0.0);
         e.interaction = js::boolean(cam, "interaction", true);
+        e.trackingPolicy = js::str(cam, "trackingPolicy", "nativeIfQualified");
+        e.aircraftTracking = js::str(cam, "aircraftTracking", "off");
         e.retainLook = js::str(cam, "temporaryLookPolicy") == "retain";
+        e.originLat=js::num(js::object(cam,"worldOrigin"),"lat",0); e.originLon=js::num(js::object(cam,"worldOrigin"),"lon",0); e.originAltitude=js::num(js::object(cam,"worldOrigin"),"altitude",0);
+        e.resetMouseLookOnRelease = js::str(cam, "mouseLookOnRelease", "retain") == "reset";
+        const auto& fx = js::object(cam, "effects");
+        e.effects = {js::boolean(fx, "enabled", false), js::num(fx, "intensity", .35), js::num(fx, "turbulence", .5),
+                     js::num(fx, "groundRoll", .35), js::num(fx, "touchdown", .5), js::num(fx, "acceleration", .35), js::num(fx, "engine", .2)};
         e.levelHorizon = js::boolean(cam, "levelHorizon", false);
         e.seedDefinitionName = js::str(cam, "seedDefinitionName");
         s.cameras.push_back(std::move(e));
@@ -464,6 +518,79 @@ json makeStarterProfile(const std::string& name, const std::string& modelKey, co
         {"sequences", json::array()}};
 }
 
+bool isC172(const std::string& modelKey, const std::string& displayName) {
+    std::string text = modelKey + " " + displayName;
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text.find("c172") != std::string::npos || text.find("c-172") != std::string::npos ||
+           text.find("cessna 172") != std::string::npos;
+}
+
+json makeC172Profile(const std::string& modelKey, const std::string& displayName) {
+    json doc = makeStarterProfile("Cessna 172 - Complete views", modelKey, displayName);
+    doc["builtinTemplate"] = "c172-complete-v1";
+    doc["categories"] = json::array();
+    doc["cameras"] = json::array();
+    const json cameraTemplate = makeStarterProfile("", "", "")["cameras"][0];
+    int viewId = 0;
+    auto category = [&](const std::string& name) {
+        std::string id = newUuid();
+        doc["categories"].push_back({{"id", id}, {"name", name}, {"cameraIds", json::array()}});
+        return id;
+    };
+    auto view = [&](const std::string& group, const char* name, double f, double r, double d, double pitch,
+                    double heading, double fov, bool favorite = false, bool exterior = false) {
+        json cam = cameraTemplate;
+        const std::string id = newUuid();
+        const auto q = core::Quat::fromPbh({pitch, 0, heading});
+        cam["id"] = id;
+        cam["categoryId"] = group;
+        cam["name"] = name;
+        cam["viewId"] = ++viewId;
+        cam["favorite"] = favorite;
+        cam["positionMetersFRD"] = {f, r, d};
+        cam["orientationCameraToAnchorXYZW"] = {q.x, q.y, q.z, q.w};
+        cam["projection"]["value"] = fov * core::kDegToRad;
+        cam["transition"]["durationSeconds"] = exterior ? 1.2 : 0.55;
+        cam["mode"] = exterior ? "aircraftExterior" : "aircraftCockpit";
+        cam["interaction"] = !exterior;
+        cam["requiredCapabilities"] = exterior ? json({"fov"}) : json({"cockpitPose", "interaction", "fov"});
+        doc["cameras"].push_back(cam);
+        for (auto& cat : doc["categories"]) if (cat["id"] == group) cat["cameraIds"].push_back(id);
+        if (viewId == 1) doc["defaultCameraId"] = id;
+    };
+    auto group = category("Flight deck");
+    view(group, "Pilot - normal", 0, 0, 0, 0, 0, 62, true);
+    view(group, "Pilot - landing", 0.08, 0, -0.08, -3, 0, 58, true);
+    view(group, "Pilot - wide cockpit", -0.06, 0.12, -0.04, -8, 0, 82);
+    view(group, "Copilot", 0, 0.74, 0, 0, 0, 62);
+    group = category("Instruments");
+    view(group, "G1000 - PFD", 0.38, 0.02, 0.08, -12, 0, 35, true);
+    view(group, "G1000 - MFD", 0.38, 0.38, 0.08, -12, 0, 35, true);
+    view(group, "G1000 - full panel", 0.16, 0.30, 0.10, -14, 0, 68);
+    view(group, "Standby instruments", 0.30, 0.16, 0.18, -22, 0, 40);
+    group = category("Controls");
+    view(group, "Throttle, mixture and trim", 0.18, 0.34, 0.30, -48, 0, 48, true);
+    view(group, "Electrical and lighting", 0.14, -0.12, 0.24, -38, -15, 46);
+    view(group, "Overhead and cabin lighting", -0.05, 0.30, -0.18, 40, 0, 66);
+    group = category("Cabin");
+    view(group, "Rear seats - forward", -0.95, 0.35, -0.02, -5, 0, 80);
+    group = category("Exterior (Preview)");
+    auto outside = [&](const char* name, double f, double r, double d, double fov, bool favorite = false) {
+        const double heading = std::atan2(-r, -f) * core::kRadToDeg;
+        const double pitch = std::atan2(d, std::hypot(f, r)) * core::kRadToDeg;
+        view(group, name, f, r, d, pitch, heading, fov, favorite, true);
+    };
+    outside("Front left quarter", 7, -7, -2.8, 55, true);
+    outside("Front right quarter", 7, 7, -2.8, 55);
+    outside("Left wing", 0, -10, -2.2, 55);
+    outside("Right wing", 0, 10, -2.2, 55);
+    outside("Tail - chase", -11, 0, -3, 55, true);
+    outside("Nose - head on", 10, 0, -1.8, 50);
+    outside("Above - overview", -4, 0, -13, 60);
+    outside("Rear left quarter", -8, -7, -3, 55);
+    return doc;
+}
+
 std::vector<std::pair<std::string, std::string>> reassignIds(json& doc) {
     std::map<std::string, std::string> remap;
     auto mapId = [&](json& v) {
@@ -485,6 +612,7 @@ std::vector<std::pair<std::string, std::string>> reassignIds(json& doc) {
         for (auto& cat : doc["categories"]) {
             if (!cat.is_object()) continue;
             if (cat.contains("id")) mapId(cat["id"]);
+            if (cat.contains("defaultCameraId")) mapId(cat["defaultCameraId"]);
             if (cat.contains("cameraIds") && cat["cameraIds"].is_array())
                 for (auto& ref : cat["cameraIds"]) mapId(ref);
         }

@@ -6,12 +6,15 @@
 #include "backend.hpp"
 #include "coordinator.hpp"
 #include "input_router.hpp"
+#include "fscs/profiles/airport.hpp"
 #include "fscs/profiles/repository.hpp"
 #include "fscs/protocol/protocol.hpp"
 
 #include <deque>
+#include <cmath>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace fscs::host {
@@ -53,6 +56,7 @@ private:
         double lastRenew = 0;
         bool visible = true;
         bool lapsed = false;
+        bool pointerOver = false;
     };
     struct Gesture {
         core::ManualInput input;
@@ -77,6 +81,7 @@ private:
     void broadcastSnapshot(const std::string& to = {});
     json snapshot() const;
     bool anyVisibleLease() const;
+    void updateMouseBlock();
 
     // Coordinator bridge
     void onCoordinatorEvent(const std::string& name, json payload);
@@ -98,6 +103,27 @@ private:
     Qualification qualification(const std::string& simVersion) const;
     void diag(const std::string& line);
 
+    json combinedProfile() const;
+    void splitCombined(json profile);
+    bool validateCombined(json& profile, std::string& error) const;
+    bool handleAirport(const protocol::Command& c, double now);
+    bool airportEvent(const BackendEvent& ev, double now);
+    void refreshAirports(double now);
+    bool setAirportAuto(bool enabled, double now);
+    void updateAirportAuto(double now);
+    bool airportAuto_=false, saveViewsRequested_=false;
+    std::string autoCameraId_;
+    double lastAutoCheck_=-100, lastAutoSwitch_=-100, positionAt_=-100;
+    json airportState() const;
+    std::map<std::string,json> airportDrafts_, airportPreviews_;
+    struct AirportJob { std::string icao, to; json options; double deadline=0; };
+    std::map<std::uint32_t,AirportJob> airportJobs_;
+    std::uint32_t airportRequestId_=10000;
+    profiles::airport::Geo position_{NAN,NAN,NAN};
+    json nearbyAirports_=json::array(), nearbyFacilities_=json::array();
+    std::string loadedAirport_, pinnedAirport_;
+    double lastAirportRefresh_=-100;
+    bool airportDirty() const;
     IModuleServices& services_;
     profiles::IStorageDriver& storage_;
     profiles::Repository repo_;
@@ -122,6 +148,7 @@ private:
 
     std::string aircraftModelKey_, aircraftTitle_;
     bool resolveAircraft_ = false;
+    std::set<std::string> defaultProfileAttempts_;
     json lastAircraft_ = json::object();
     std::string captureRequester_;
     std::string testDefinition_;

@@ -1,0 +1,23 @@
+{
+  "baseline": "airport-controls-20261011",
+  "files": {
+    "manifest.json": "0073faa255bd3584e0e62a8a2400437e943dcce84bf7722dd18b100a06b30db8",
+    "InGamePanels/fscs-camera-mini.spb": "ddd7b35b14cb02faa30b875b3e75b3c8e2aa47c346d00a8ecc2e75234777235c",
+    "InGamePanels/fscs-camera-studio.spb": "5d0903b6e0876aa2d8c79e666505edcca5df5b2aabd33dcb1e058425cfda3832",
+    "html_ui/icons/toolbar/ICON_TOOLBAR_FSCS_CAMERA_MINI.svg": "162b5cc8d259e600fdf932d916363754dbcde1b88240ddef0ef42f83ed53bfa9",
+    "html_ui/icons/toolbar/ICON_TOOLBAR_FSCS_CAMERA_STUDIO.svg": "78e947c32b033943d9dde35bb96d77ddf6f6f7f24ae6367ddd4cb2efb9c89171",
+    "html_ui/InGamePanels/FSCameraStudio/app.css": "cdf49c0373cd906203ee8df9835cbd8536ed2156bc62fda9cbfb047b4b67c648",
+    "html_ui/InGamePanels/FSCameraStudio/app.js": "2e67d3cb2e541d71a72baeefff08f49bc78eff750cc055f40ff2b9fb5ebad4e7",
+    "html_ui/InGamePanels/FSCameraStudio/bridge.js": "55c352edfa6ad1348325ad38e3301af4c8828907561213a5187fe9a864671bc0",
+    "html_ui/InGamePanels/FSCameraStudio/icons.js": "88563ef7811cc00bb59f86d57a3037a55e62f75b05dc34f00c2d7764481f0b87",
+    "html_ui/InGamePanels/FSCameraStudio/main.html": "c3b81b43f0f3f26350ad19b9503891ca72650d4f70451969aad76ef209b9b256",
+    "html_ui/InGamePanels/FSCameraStudio/math.js": "8465640d2d71e71e46f1adabe4521b64524d043190cf266fab9116d4fffd13e6",
+    "html_ui/InGamePanels/FSCameraStudio/mini.html": "0a34100520dab23e4bd2b3bb9cbe5be6ecc61d433404ed211ffe6fcceeff582d",
+    "html_ui/InGamePanels/FSCameraStudio/msfs-panel.js": "dcf5e210cecbfbdd65fe2bea391248a2dfb223f034236829eafd55428f3e4256",
+    "html_ui/InGamePanels/FSCameraStudio/panel-host.css": "86dfbeb422276365dbf91eab50d2bf66859969013f21c4bc8ccb888aaf0e5ad5",
+    "html_ui/InGamePanels/FSCameraStudio/surface-main.js": "a27d7fd06a7d7fc8c029f058b3566d8a6783bf4c19c7450e9b88a56ab58fb63d",
+    "html_ui/InGamePanels/FSCameraStudio/surface-mini.js": "d942d29b73455cfdd1d2f72cba84d456c0d5b363cee23b8331e7658aa6faf653",
+    "html_ui/Textures/Menu/toolbar/ICON_TOOLBAR_FSCS_CAMERA_MINI.svg": "162b5cc8d259e600fdf932d916363754dbcde1b88240ddef0ef42f83ed53bfa9",
+    "html_ui/Textures/Menu/toolbar/ICON_TOOLBAR_FSCS_CAMERA_STUDIO.svg": "78e947c32b033943d9dde35bb96d77ddf6f6f7f24ae6367ddd4cb2efb9c89171"
+  }
+}

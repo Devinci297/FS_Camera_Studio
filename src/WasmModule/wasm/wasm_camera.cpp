@@ -2,6 +2,8 @@
 
 #include <MSFS/MSFS.h>
 #include <MSFS/MSFS_Camera.h>
+#include <MSFS/MSFS_Vars.h>
+#include <cmath>
 
 #include <cstdlib>
 #include <cstring>
@@ -76,6 +78,21 @@ bool WasmCamera::requestStatus() {
 }
 
 bool WasmCamera::acquire(const std::string& clientId) { return fsCameraAcquire(clientId.c_str()); }
+
+std::optional<bool> WasmCamera::headTracking() {
+    if (!subscribed_) return std::nullopt;
+    const auto id = fsVarsGetAVarId("TRACK IR ENABLE");
+    const auto unit = fsVarsGetUnitId("Bool");
+    double value = NAN;
+    if (id < 0 || unit < 0 || fsVarsAVarGet(id, unit, {}, &value) != FS_VAR_ERROR_NONE || !std::isfinite(value)) return std::nullopt;
+    return value != 0;
+}
+bool WasmCamera::setHeadTracking(bool enabled) {
+    if (!subscribed_) return false;
+    const auto id = fsVarsGetAVarId("TRACK IR ENABLE");
+    const auto unit = fsVarsGetUnitId("Bool");
+    return id >= 0 && unit >= 0 && fsVarsAVarSet(id, unit, {}, enabled ? 1.0 : 0.0) == FS_VAR_ERROR_NONE;
+}
 
 bool WasmCamera::release(const std::string& definitionName) {
     interactionKnown_ = false;

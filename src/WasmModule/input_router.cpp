@@ -65,6 +65,11 @@ std::vector<ActionEvent> InputRouter::onInput(std::size_t index, bool down, std:
     auto map = bindingsForDefinition_.find(index);
     if (map == bindingsForDefinition_.end()) return {};
     const auto& candidates = map->second;
+    const auto& first = bindings_[candidates.front()];
+    if (first.input.kind == profiles::InputKind::SimZoom) {
+        if (!down || textFocus_) return {};
+        return {{first.action, first.viewId, true, 0, true}};
+    }
     const bool pov = bindings_[candidates.front()].input.isPov();
     std::vector<ActionEvent> out;
     if (!pov) {
@@ -139,6 +144,7 @@ core::ManualInput InputRouter::manualInput() const {
             case Action::LookRight: m.lookRight += 1; break;
             case Action::LookUp: m.lookUp += 1; break;
             case Action::LookDown: m.lookUp -= 1; break;
+            case Action::MoveFast: m.fast = true; break;
             case Action::MoveForward: m.moveForward += 1; break;
             case Action::MoveBack: m.moveForward -= 1; break;
             case Action::MoveRight: m.moveRight += 1; break;

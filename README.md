@@ -4,9 +4,10 @@ A camera manager for **Microsoft Flight Simulator 2024** that lives entirely ins
 profiles, organised views, precise editing, smooth transitions and shortcuts — opened from the sim's toolbar, with a
 mini control panel at the bottom of the screen.
 
-**Status: built, not yet run in the simulator.** The WASM module compiles with the MSFS 2024 SDK toolchain, the
-panels run in a browser preview, and 71 native + 22 UI tests pass. Every in-sim behaviour still has to be qualified
-on a real simulator build — see [`doc/qualification.md`](doc/qualification.md).
+**Status: in-sim testing, with a new build awaiting live verification.** The module and panels have run in MSFS;
+the airport-camera test build passes 102 native tests and focused browser checks and compiles with SDK 1.7.3.
+Camera axes, template poses and hosting behaviour still require live qualification — see
+[`doc/qualification.md`](doc/qualification.md).
 
 ## How it works
 
@@ -30,12 +31,46 @@ state held in the module, so the editor and the mini panel always agree.
 * **Profiles** are matched to the loaded aircraft by its package (liveries keep the same profile). Saves are one
   transaction (profile + settings + bindings), written to one of two checksummed slots and verified by readback, so
   an interrupted save can never damage the last good one. Five backups per profile.
+  Each aircraft also gets a readable, importable JSON file alongside these recovery slots; see
+  [`doc/profile-storage.md`](doc/profile-storage.md). The C172 automatically receives a 20-view starter profile
+  (12 cockpit, 8 exterior) the first time this template is used. It does not move the camera on load.
 * **Bindings** use the simulator's own input mapping (keyboard chords, joystick buttons, hats) and work with the
   editor closed.
 * **Axis check:** the camera API's axis signs are measured per simulator build with an in-panel check before live
   control is enabled.
+* **Airport cameras (test build):** open **Profiles → Airport cameras**, choose a nearby airport or enter ICAOs,
+  preview generated views and save the selected ones. Runway, gate/apron, tower and offset taxiway-intersection
+  views use available scenery facility data. Optional airport XML supplies actual taxi-sign positions.
+  Only one nearby saved airport loads under the Airport category. See
+  [`the airport test guide`](doc/test-evidence/2026-10-11-airport-cameras.md) for scope and live checks.
 
 ## Build
+
+The tester release and illustrated manual are available from
+[GitHub Releases](https://github.com/Devinci297/FS_Camera_Studio/releases).
+The app bar displays the version; click it for update detection and the installer download.
+Close MSFS before installing an update. Airport cameras that have been generated **and saved**
+load automatically within the configured radius (25 NM by default); Auto switch is a separate viewpoint control.
+
+### Reproduce the 0.1.1 tester release
+
+```powershell
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.1.1
+python tools/diagnostics/stage-release.py
+python tools/build-manual.py
+python tools/build-installer.py
+```
+
+Install ReportLab for manual generation and obtain Inno Setup with `tools/get-installer-compiler.ps1`.
+`package/validated-host` freezes the previously working toolbar host, including compiled panel definitions;
+its receipt is `package/validated-host.json`. The release stage applies only the update UI and rebuilt module.
+This intentionally preserves the known-loading host while broader `ui/` host changes still need flight-loading
+qualification. Do not replace the release host wholesale with the development panel. The generated receipt,
+installer and PDF are under `build/release`, `dist` and `output/pdf` respectively. Nothing is installed by these commands.
+
+For a shareable Windows tester setup, see [`installer/README.md`](installer/README.md).
+The installer packages an explicitly verified build, detects the MSFS Community folder, supports upgrades and
+uninstall, and preserves saved camera profiles. Testers do not need the SDK or developer tools.
 
 Requirements: Windows 11 x64, the MSFS 2024 SDK (`MSFS2024_SDK` set; 1.7.3 is the baseline), PowerShell. For the
 native tests: Visual Studio 2022 Build Tools and CMake 3.25+.
@@ -54,7 +89,8 @@ cmake --build --preset tests
 ctest --preset tests
 ```
 
-UI tests and browser preview: `node ui/tests/math.test.mjs`, `node ui/tests/bridge.test.mjs`, and open
+UI tests and browser preview: `node ui/tests/math.test.mjs`, `node ui/tests/bridge.test.mjs`,
+`node ui/tests/panel.test.mjs`, and open
 `ui/index.html` in a browser (demo mode with an in-memory module).
 
 ## Repository layout

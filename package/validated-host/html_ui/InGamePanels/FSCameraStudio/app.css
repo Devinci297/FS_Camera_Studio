@@ -1,0 +1,690 @@
+/*
+ * FS Camera Studio - panel styles.
+ * Coherent GT safe: no light-dark(), :has(), nesting or container queries. Two palettes via #mc-sim[data-theme].
+ * Surfaces: body.surface-demo (browser preview with mock sim chrome), .surface-main (editor toolbar panel),
+ * .surface-mini (mini control panel).
+ */
+html, body { margin: 0; padding: 0; }
+body.surface-demo { background: #fff; padding: 16px; }
+@media (prefers-color-scheme: dark) { body.surface-demo { background: #181818; } }
+html.surface-main, body.surface-main { height: 100%; background: transparent; overflow: hidden; }
+html.surface-mini, body.surface-mini { height: 100%; background: transparent; overflow: hidden; }
+#mc-sim button, #mc-sim summary, #mc-sim label { cursor: pointer; }
+/* -- Ported from the approved mockup, rule by rule (colour pairs split into the two data-theme palettes) -- */
+#mc-sim{--mc-bg:#101923;--mc-raised:#17222f;--mc-subtle:#121e2b;--mc-input:#0e1823;--mc-text:#edf3f8;--mc-muted:#9aacbe;--mc-faint:#8fa2b5;--mc-line:#2a3847;--mc-accent:#66dec4;--mc-accent-ink:#082d29;--mc-active:#1a3939;--mc-hover:#213141;--mc-amber:#f4c779;--mc-danger:#f8a5a0;font:13px/1.45 "Segoe UI",Arial,sans-serif;color:var(--mc-text);width:100%;min-width:0;position:relative;isolation:isolate;box-sizing:border-box}
+#mc-sim[data-theme="light"]{--mc-bg:#f6f8fb;--mc-raised:#fff;--mc-subtle:#edf1f5;--mc-input:#fff;--mc-text:#172b3b;--mc-muted:#596c7b;--mc-faint:#596c7b;--mc-line:#dce3e9;--mc-accent:#007b70;--mc-accent-ink:#fff;--mc-active:#dff3ee;--mc-hover:#e7edf2;--mc-amber:#956200;--mc-danger:#a43e3e}
+#mc-sim.demo{background:#2c4453;overflow:hidden;border-radius:14px}
+#mc-sim *{box-sizing:border-box}
+#mc-sim button,#mc-sim input,#mc-sim select,#mc-sim textarea{font:inherit;color:inherit}
+#mc-sim button{border:0;min-height:34px;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border-radius:7px;padding:7px 10px;line-height:1.25;white-space:normal}
+#mc-sim button:hover{background:var(--mc-hover)}
+#mc-sim button:disabled{opacity:.45;cursor:default}
+#mc-sim [hidden]{display:none!important}
+#mc-sim svg.mc-icon{width:17px;height:17px;display:block;flex:none}
+#mc-sim input[type="text"],#mc-sim input[type="search"],#mc-sim input[type="number"],#mc-sim select,#mc-sim textarea{min-width:0;background:var(--mc-input);border:1px solid var(--mc-line);border-radius:7px;padding:9px 11px;min-height:36px;font-variant-numeric:tabular-nums;max-width:100%}
+#mc-sim input[type="number"]{appearance:textfield;-moz-appearance:textfield}
+#mc-sim input::-webkit-inner-spin-button,#mc-sim input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+#mc-sim input[type="range"]{accent-color:var(--mc-accent);width:100%;margin:0;min-height:26px;-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer}
+#mc-sim input[type="range"]::-webkit-slider-runnable-track{height:4px;background:var(--mc-line);border-radius:3px}
+#mc-sim input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border-radius:50%;border:1px solid var(--mc-accent);background:var(--mc-accent)}
+#mc-sim input[type="checkbox"]{accent-color:var(--mc-accent);width:18px;height:18px;margin:0;flex:none}
+#mc-sim select{padding-right:25px}
+#mc-sim label{min-width:0}
+#mc-sim p,#mc-sim h2,#mc-sim h3,#mc-sim h4{margin:0}
+#mc-sim .mc-primary{background:var(--mc-accent);color:var(--mc-accent-ink);font-weight:600}
+#mc-sim .mc-primary:hover{filter:brightness(1.06);background:var(--mc-accent)}
+#mc-sim .mc-secondary{background:var(--mc-raised);border:1px solid var(--mc-line)}
+#mc-sim .mc-quiet{color:var(--mc-muted)}
+#mc-sim .mc-muted{color:var(--mc-muted)}
+#mc-sim .mc-icon-button{width:34px;padding:7px;flex:none}
+#mc-sim .mc-icon-button[aria-pressed="true"]{color:var(--mc-accent);background:var(--mc-active)}
+#mc-sim .mc-spacer{flex:1}
+#mc-sim .mc-num{font-variant-numeric:tabular-nums;font-family:"Cascadia Code",Consolas,monospace}
+#mc-sim .mc-simbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:10px 22px;background:#101d2bd9;color:#e5edf4;position:relative;z-index:3}
+#mc-sim .mc-sim-title{font-size:11px;letter-spacing:.08em;font-weight:500}
+#mc-sim .mc-sim-tools{display:flex;align-items:center;gap:13px}
+#mc-sim .mc-sim-tools>svg{color:#acbdcb}
+#mc-sim .mc-sim-launch{background:#304858;color:#dcecf4;padding:6px 10px;min-height:29px;font-size:12px}
+#mc-sim .mc-sim-launch:hover{background:#3a5b70}
+#mc-sim .mc-scene{position:absolute;top:48px;right:0;bottom:0;left:0;z-index:-1;overflow:hidden;background:linear-gradient(180deg,#263e55 0%,#6d8b9b 26%,#c0c0ae 48%,#9b9f84 49%,#466362 57%,#29444b 78%,#24333d 100%)}
+#mc-sim .mc-scene:before{content:"";position:absolute;left:-10%;right:-10%;top:36%;height:25%;background:#304f58b3;clip-path:polygon(0 49%,10% 20%,17% 33%,30% 0,38% 30%,51% 13%,60% 36%,69% 6%,77% 39%,86% 20%,100% 53%,100% 100%,0 100%);filter:blur(1px)}
+#mc-sim .mc-scene:after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;background:linear-gradient(90deg,#0a192657,transparent 28%,transparent 72%,#0a192657),linear-gradient(0deg,#102130bb,transparent 52%)}
+#mc-sim .mc-strut{position:absolute;width:8%;height:105%;top:-10%;left:7%;transform:rotate(-17deg);background:linear-gradient(90deg,#222e36,#4d5f69 55%,#263540);border-right:5px solid #13242e;box-shadow:14px 0 25px #10232b55}
+#mc-sim .mc-strut.right{left:auto;right:7%;transform:rotate(17deg);border-right:0;border-left:5px solid #13242e}
+#mc-sim .mc-cockpit{position:absolute;left:8%;right:8%;bottom:-18%;height:43%;background:linear-gradient(#1c2a31,#0e1923);border-radius:45% 45% 0 0/25% 25% 0 0;border-top:12px solid #131e25;box-shadow:0 -8px 30px #142936aa;display:flex;justify-content:center;gap:5%;padding:8% 8% 0}
+#mc-sim .mc-display{height:62%;width:33%;background:linear-gradient(#25485e 48%,#68594b 49%);border:10px solid #0b1822;border-radius:10px;box-shadow:0 0 0 2px #394a54;opacity:.8}
+#mc-sim .mc-display.round{width:16%;height:90px;max-height:90px;border-radius:50%;background:conic-gradient(#526873 0 80deg,#0e1c25 81deg 180deg,#415963 181deg 250deg,#10212d 251deg)}
+#mc-sim .mc-stage{padding:24px;position:relative;min-height:510px}
+#mc-sim .mc-panel{position:relative;border:1px solid var(--mc-line);border-radius:12px;background:var(--mc-bg);box-shadow:0 20px 65px #04111e66;overflow:hidden;max-width:980px;margin:0 auto}
+#mc-sim .mc-panel-head{display:flex;align-items:center;gap:12px;padding:16px 19px;border-bottom:1px solid var(--mc-line)}
+#mc-sim .mc-brand-icon{height:34px;width:34px;background:var(--mc-active);color:var(--mc-accent);border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none}
+#mc-sim .mc-brand-icon svg{height:22px;width:22px}
+#mc-sim .mc-brand{min-width:0}
+#mc-sim .mc-brand h2{font-size:17px;font-weight:600;letter-spacing:-.025em;line-height:1.2}
+#mc-sim .mc-brand p{font-size:11px;color:var(--mc-muted);margin-top:3px}
+#mc-sim .mc-profile-button{margin-left:auto;text-align:left;justify-content:flex-start;background:var(--mc-subtle);border:1px solid var(--mc-line);padding:7px 10px;min-width:0}
+#mc-sim .mc-profile-button span{font-size:12px}
+#mc-sim .mc-profile-button svg:last-child{width:13px}
+#mc-sim .mc-compact-button{font-size:12px;color:var(--mc-muted)}
+#mc-sim .mc-global-nav{display:flex;align-items:center;gap:5px;padding:8px 18px;border-bottom:1px solid var(--mc-line);background:var(--mc-subtle)}
+#mc-sim .mc-global-nav>button{padding:7px 12px;min-height:32px;font-size:12px;color:var(--mc-muted)}
+#mc-sim .mc-global-nav>button[aria-selected="true"]{background:var(--mc-raised);color:var(--mc-text);box-shadow:0 1px 3px #0001}
+#mc-sim .mc-status{margin-left:auto;display:flex;align-items:center;gap:7px;color:var(--mc-muted);font-size:11px;white-space:nowrap;padding-left:8px}
+#mc-sim .mc-status-dot{height:6px;width:6px;border-radius:50%;background:var(--mc-accent);flex:none}
+#mc-sim[data-enabled="false"] .mc-status-dot{background:var(--mc-amber)}
+#mc-sim .mc-camera-layout{display:grid;grid-template-columns:230px minmax(0,1fr)}
+#mc-sim .mc-browser{border-right:1px solid var(--mc-line);background:var(--mc-subtle);padding:17px 11px 14px;min-width:0}
+#mc-sim .mc-browser-title{display:flex;align-items:center;justify-content:space-between;padding:0 5px 11px}
+#mc-sim .mc-browser-title h3{font-size:12px;font-weight:600}
+#mc-sim .mc-browser-title button{min-height:25px;width:26px;height:26px;padding:4px}
+#mc-sim .mc-search{display:flex;align-items:center;gap:7px;position:relative;margin:0 3px 15px;color:var(--mc-muted)}
+#mc-sim .mc-search>svg{position:absolute;left:10px;width:15px;height:15px;pointer-events:none}
+#mc-sim .mc-search input{width:100%;padding:8px 10px 8px 33px;font-size:12px;min-height:33px}
+#mc-sim .mc-tree{display:flex;flex-direction:column;gap:4px}
+#mc-sim .mc-category{min-width:0}
+#mc-sim .mc-category-line{display:flex;align-items:center;gap:2px}
+#mc-sim .mc-category-line .mc-category-head{flex:1;min-width:0;width:auto}
+#mc-sim .mc-category-menu{width:26px;min-height:28px;padding:5px;flex:none;color:var(--mc-faint)}
+#mc-sim .mc-category-menu svg{width:14px;height:14px}
+#mc-sim .mc-category-head{display:flex;align-items:center;gap:6px;width:100%;text-align:left;padding:8px 7px;font-size:12px;font-weight:500;color:var(--mc-muted);min-height:33px}
+#mc-sim .mc-category-head .mc-count{margin-left:auto;color:var(--mc-faint);font-size:11px;font-weight:400}
+#mc-sim .mc-category-head svg{width:14px;height:14px}
+#mc-sim .mc-category-head[aria-expanded="true"]{color:var(--mc-text)}
+#mc-sim .mc-camera-rows{display:flex;flex-direction:column;gap:3px;padding:2px 0 7px 5px}
+#mc-sim .mc-camera-row{display:flex;gap:4px;align-items:center;border-radius:7px;position:relative;min-width:0}
+#mc-sim .mc-camera-row[data-current="true"]{background:var(--mc-active)}
+#mc-sim .mc-camera-row[data-current="true"]:before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:3px;background:var(--mc-accent)}
+#mc-sim .mc-camera-select{justify-content:flex-start;text-align:left;flex:1;min-width:0;padding:9px 6px 9px 15px;min-height:37px;gap:7px;color:var(--mc-muted);font-size:12px}
+#mc-sim .mc-camera-select>span:first-child{flex:1;overflow-wrap:anywhere}
+#mc-sim .mc-camera-row[data-current="true"] .mc-camera-select{color:var(--mc-text);font-weight:500}
+#mc-sim .mc-key{min-width:21px;height:20px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--mc-line);border-radius:4px;background:var(--mc-input);font-family:Consolas,monospace;font-size:11px;color:var(--mc-muted);line-height:1;flex:none}
+#mc-sim .mc-row-star{width:26px;min-height:28px;padding:6px 5px;margin-right:5px;color:var(--mc-faint);flex:none}
+#mc-sim .mc-row-star svg{width:13px;height:13px}
+#mc-sim .mc-row-star[aria-pressed="true"]{color:var(--mc-accent)}
+#mc-sim .mc-browser-bottom{border-top:1px solid var(--mc-line);padding:11px 3px 0;margin-top:10px}
+#mc-sim .mc-browser-bottom button{width:100%;justify-content:flex-start;color:var(--mc-muted);font-size:12px}
+#mc-sim .mc-empty{padding:22px 8px;text-align:center;color:var(--mc-muted);font-size:12px}
+#mc-sim .mc-inspector{min-width:0;padding:23px 24px 20px}
+#mc-sim .mc-camera-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+#mc-sim .mc-eyebrow{color:var(--mc-muted);font-size:11px;font-weight:500;letter-spacing:.11em;text-transform:uppercase;margin-bottom:7px;line-height:1.4}
+#mc-sim .mc-camera-heading h3{font-size:24px;font-weight:500;letter-spacing:-.035em;line-height:1.2;overflow-wrap:anywhere}
+#mc-sim .mc-camera-subtitle{color:var(--mc-muted);font-size:12px;margin-top:7px;line-height:1.5}
+#mc-sim .mc-camera-tools{display:flex;gap:4px;flex:none}
+#mc-sim .mc-section-tabs{display:flex;gap:23px;border-bottom:1px solid var(--mc-line);margin:22px 0 21px}
+#mc-sim .mc-section-tabs button{padding:0 0 11px;border-radius:0;min-height:30px;color:var(--mc-muted);font-size:12px;position:relative;background:none}
+#mc-sim .mc-section-tabs button[aria-selected="true"]{color:var(--mc-accent);font-weight:500}
+#mc-sim .mc-section-tabs button[aria-selected="true"]:after{position:absolute;content:"";height:2px;background:var(--mc-accent);bottom:-1px;left:0;right:0;border-radius:2px}
+#mc-sim .mc-section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+#mc-sim .mc-section-heading h4{font-weight:500;font-size:13px}
+#mc-sim .mc-section-heading .mc-unit-label{font-size:11px;color:var(--mc-muted)}
+#mc-sim .mc-precision{display:flex;align-items:center;gap:3px;padding:3px;background:var(--mc-input);border:1px solid var(--mc-line);border-radius:7px}
+#mc-sim .mc-precision button{font-size:11px;min-height:24px;padding:4px 8px;border-radius:4px;color:var(--mc-muted)}
+#mc-sim .mc-precision button[aria-pressed="true"]{background:var(--mc-hover);color:var(--mc-text)}
+#mc-sim .mc-axis-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+#mc-sim .mc-axis{min-width:0}
+#mc-sim .mc-axis label{display:flex;align-items:center;gap:6px;color:var(--mc-muted);font-size:11px;margin-bottom:7px}
+#mc-sim .mc-axis-letter{font-family:Consolas,monospace;color:var(--mc-text);font-size:11px}
+#mc-sim .mc-stepper{display:flex;align-items:center;border:1px solid var(--mc-line);border-radius:7px;background:var(--mc-input);min-width:0;overflow:hidden}
+#mc-sim .mc-stepper button{width:29px;min-height:36px;border-radius:0;padding:6px;flex:none;color:var(--mc-muted)}
+#mc-sim .mc-stepper button svg{width:13px;height:13px}
+#mc-sim .mc-stepper input{border:0;background:none;border-radius:0;min-height:36px;padding:6px 0;width:100%;text-align:center;font-size:12px;font-family:"Cascadia Code",Consolas,monospace}
+#mc-sim .mc-axis-footnote{color:var(--mc-faint);font-size:11px;margin-top:9px}
+#mc-sim .mc-divider{height:1px;background:var(--mc-line);margin:21px 0}
+#mc-sim .mc-lens-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:7px}
+#mc-sim .mc-lens-top h4{font-size:13px;font-weight:500}
+#mc-sim .mc-value-input{display:flex;align-items:center;gap:6px;color:var(--mc-muted);font-size:12px}
+#mc-sim .mc-value-input input{width:66px;text-align:center;padding:6px;font-size:12px;min-height:31px}
+#mc-sim .mc-range-labels{display:flex;justify-content:space-between;color:var(--mc-faint);font-size:11px;margin-top:1px}
+#mc-sim .mc-lens-presets{display:flex;align-items:center;gap:6px;margin-top:12px;flex-wrap:wrap}
+#mc-sim .mc-lens-presets button{border:1px solid var(--mc-line);color:var(--mc-muted);padding:5px 11px;font-size:11px;min-height:29px}
+#mc-sim .mc-lens-presets button[aria-pressed="true"]{border-color:var(--mc-accent);background:var(--mc-active);color:var(--mc-accent)}
+#mc-sim .mc-pose-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:22px;padding-top:16px;border-top:1px solid var(--mc-line)}
+#mc-sim .mc-pose-actions button{font-size:11px;color:var(--mc-muted);padding:5px 7px;min-height:28px}
+#mc-sim .mc-pose-actions svg{width:14px;height:14px}
+#mc-sim .mc-savebar{border-top:1px solid var(--mc-line);background:var(--mc-raised);padding:12px 18px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+#mc-sim .mc-save-state{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mc-muted);margin-right:auto;min-width:0}
+#mc-sim .mc-save-state[data-dirty="true"]{color:var(--mc-amber)}
+#mc-sim .mc-save-state svg{width:14px;height:14px}
+#mc-sim .mc-savebar button{font-size:12px}
+#mc-sim .mc-release{color:var(--mc-muted);border-right:1px solid var(--mc-line);border-radius:0;margin-right:5px;padding-right:15px;font-size:11px!important}
+#mc-sim .mc-mobile-browser{display:none}
+#mc-sim .mc-select-card{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:13px}
+#mc-sim .mc-select-card button{border:1px solid var(--mc-line);background:var(--mc-input);display:flex;align-items:center;flex-direction:column;gap:9px;padding:16px 9px;font-size:12px;min-height:77px;color:var(--mc-muted)}
+#mc-sim .mc-select-card button[aria-pressed="true"]{background:var(--mc-active);border-color:var(--mc-accent);color:var(--mc-accent)}
+#mc-sim .mc-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
+#mc-sim .mc-field{display:flex;flex-direction:column;gap:7px;font-size:12px;min-width:0}
+#mc-sim .mc-field small{font-size:11px;color:var(--mc-muted);line-height:1.45}
+#mc-sim .mc-field>input,#mc-sim .mc-field>select{width:100%}
+#mc-sim .mc-motion-demo{margin-top:20px;background:var(--mc-input);border:1px solid var(--mc-line);border-radius:8px;padding:15px 16px}
+#mc-sim .mc-motion-labels{display:flex;justify-content:space-between;gap:12px;font-size:11px;color:var(--mc-muted)}
+#mc-sim .mc-motion-track{height:24px;margin:12px 8px 7px;position:relative}
+#mc-sim .mc-motion-track:before{content:"";position:absolute;top:11px;left:0;right:0;height:2px;background:var(--mc-line)}
+#mc-sim .mc-motion-marker{position:absolute;top:0;left:0;width:24px;height:24px;background:var(--mc-accent);color:var(--mc-accent-ink);border-radius:6px;display:flex;align-items:center;justify-content:center;transform:translateX(-50%)}
+#mc-sim .mc-motion-marker svg{width:14px;height:14px}
+#mc-sim .mc-motion-demo>button{margin-top:7px;padding:5px 0;color:var(--mc-accent);font-size:11px;min-height:24px}
+#mc-sim .mc-switch-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 0;border-bottom:1px solid var(--mc-line);font-size:12px}
+#mc-sim .mc-switch-row:last-child{border-bottom:0}
+#mc-sim .mc-switch-copy{min-width:0}
+#mc-sim .mc-switch-copy span{display:block}
+#mc-sim .mc-switch-copy small{display:block;color:var(--mc-muted);font-size:11px;margin-top:4px;line-height:1.5}
+#mc-sim .mc-switch{appearance:none;width:33px!important;height:19px!important;border-radius:12px;border:1px solid var(--mc-line);background:var(--mc-input);position:relative;flex:none}
+#mc-sim .mc-switch:before{content:"";position:absolute;width:13px;height:13px;left:2px;top:2px;border-radius:50%;background:var(--mc-muted);transition:transform .12s}
+#mc-sim .mc-switch:checked{background:var(--mc-accent);border-color:var(--mc-accent)}
+#mc-sim .mc-switch:checked:before{transform:translateX(14px);background:var(--mc-accent-ink)}
+#mc-sim details{border-top:1px solid var(--mc-line);margin-top:10px;padding-top:5px}
+#mc-sim summary{padding:11px 0;font-size:12px;color:var(--mc-muted)}
+#mc-sim details>div{padding:6px 0 8px}
+#mc-sim .mc-note{font-size:11px;line-height:1.55;color:var(--mc-muted);margin-top:10px}
+#mc-sim .mc-page{padding:25px;min-height:574px}
+#mc-sim .mc-page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:24px}
+#mc-sim .mc-page-header h3{font-size:23px;font-weight:500;letter-spacing:-.035em;line-height:1.25}
+#mc-sim .mc-page-header p{font-size:12px;color:var(--mc-muted);margin-top:7px;max-width:450px;line-height:1.5}
+#mc-sim .mc-page-header button{flex:none;font-size:12px}
+#mc-sim .mc-section-label{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--mc-muted);font-weight:500;margin:20px 0 11px}
+#mc-sim .mc-binding-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(125px,.7fr) 65px;align-items:center;gap:15px;padding:15px 0;border-bottom:1px solid var(--mc-line)}
+#mc-sim .mc-binding-name{font-size:13px}
+#mc-sim .mc-binding-name small{display:block;font-size:11px;color:var(--mc-muted);margin-top:4px}
+#mc-sim .mc-binding-row select{width:100%;font-size:12px}
+#mc-sim .mc-binding-row button{font-size:11px;background:var(--mc-raised);border:1px solid var(--mc-line)}
+#mc-sim .mc-binding-result{color:var(--mc-muted);font-size:12px;min-height:20px;margin-top:16px}
+#mc-sim .mc-profile-list{display:grid;gap:11px}
+#mc-sim .mc-profile-entry{border:1px solid var(--mc-line);border-radius:9px;padding:17px;display:flex;align-items:center;gap:15px;background:var(--mc-raised)}
+#mc-sim .mc-profile-entry[data-current="true"]{border-color:var(--mc-accent);background:var(--mc-active)}
+#mc-sim .mc-profile-icon{width:42px;height:42px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;background:var(--mc-subtle);color:var(--mc-muted)}
+#mc-sim .mc-profile-text{flex:1;min-width:0}
+#mc-sim .mc-profile-text strong{font-size:13px;font-weight:500;display:block;overflow-wrap:anywhere}
+#mc-sim .mc-profile-text small{display:block;color:var(--mc-muted);font-size:11px;margin-top:4px}
+#mc-sim .mc-profile-entry button{font-size:12px}
+#mc-sim .mc-profile-active{font-size:11px;color:var(--mc-accent);display:flex;align-items:center;gap:5px}
+#mc-sim .mc-profile-active svg{width:14px;height:14px}
+#mc-sim .mc-profile-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+#mc-sim .mc-profile-actions button{font-size:12px}
+#mc-sim .mc-settings-section{max-width:700px}
+#mc-sim .mc-inline-field{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0;border-bottom:1px solid var(--mc-line);font-size:12px}
+#mc-sim .mc-inline-field select{width:160px;font-size:12px}
+#mc-sim .mc-flight-context{display:none;position:relative;min-height:348px;padding:15px 10px 0;color:#edf4f9;pointer-events:none}
+#mc-sim .mc-flight-context small{display:block;color:#c3d2dd;font-size:11px;letter-spacing:.03em}
+#mc-sim .mc-flight-context strong{font-weight:400;font-size:24px;letter-spacing:-.03em;display:block;margin-top:5px}
+#mc-sim .mc-flight-context span{font-size:11px;display:inline-flex;align-items:center;gap:6px;margin-top:10px;color:#c7e7dd}
+#mc-sim .mc-dock{display:none;align-items:center;gap:14px;padding:13px 15px;border:1px solid var(--mc-line);border-radius:10px;background:var(--mc-bg);box-shadow:0 10px 30px #00132355;position:relative;max-width:960px;margin:0 auto}
+#mc-sim .mc-dock-current{display:flex;gap:2px;align-items:center;flex:none}
+#mc-sim .mc-dock-current>button{padding:6px;min-height:34px}
+#mc-sim .mc-dock-picker{text-align:left!important;justify-content:flex-start!important;gap:8px!important;min-width:126px;max-width:185px}
+#mc-sim .mc-dock-picker>span{flex:1;min-width:0;overflow-wrap:anywhere}
+#mc-sim .mc-dock-picker small{display:block;color:var(--mc-muted);font-size:11px;font-weight:400;margin-bottom:3px}
+#mc-sim .mc-dock-picker strong{font-size:12px;font-weight:500}
+#mc-sim .mc-dock-picker svg{width:13px!important}
+#mc-sim .mc-dock-favorites{display:flex;gap:5px;align-items:center;flex:1;min-width:0;flex-wrap:wrap;border-left:1px solid var(--mc-line);padding-left:13px}
+#mc-sim .mc-dock-favorites button{font-size:11px;border:1px solid var(--mc-line);min-height:32px;padding:6px 8px;gap:6px}
+#mc-sim .mc-dock-favorites button[aria-pressed="true"]{color:var(--mc-accent);background:var(--mc-active);border-color:var(--mc-accent)}
+#mc-sim .mc-dock-favorites .mc-key{font-size:11px;min-width:16px;height:17px;padding:0 3px}
+#mc-sim .mc-dock-tools{display:flex;align-items:center;gap:5px;flex:none;margin-left:auto}
+#mc-sim .mc-dock-tools>button{font-size:11px}
+#mc-sim .mc-dock-tools>button:first-child{color:var(--mc-accent);background:var(--mc-active)}
+#mc-sim .mc-demo-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 22px;color:#afc2d1;font-size:11px;background:#101d2bbd;position:relative;z-index:2}
+#mc-sim .mc-demo-footer span:first-child{display:flex;align-items:center;gap:6px;color:#c3d2dc}
+#mc-sim .mc-demo-footer svg{width:12px;height:12px}
+#mc-sim .mc-dialog-shade{position:absolute;top:0;right:0;bottom:0;left:0;background:#07121ec4;z-index:1000;display:flex;justify-content:center;align-items:flex-start;padding:90px 20px 28px}
+#mc-sim .mc-dialog{width:440px;max-width:100%;padding:22px;border:1px solid var(--mc-line);border-radius:12px;background:var(--mc-bg);box-shadow:0 16px 60px #0006}
+#mc-sim .mc-dialog-head{display:flex;align-items:center;gap:14px;justify-content:space-between;margin-bottom:18px}
+#mc-sim .mc-dialog-head h3{font-size:18px;font-weight:500;letter-spacing:-.025em}
+#mc-sim .mc-dialog-head button{color:var(--mc-muted)}
+#mc-sim .mc-dialog-body{min-width:0}
+#mc-sim .mc-dialog-body .mc-field{margin:13px 0}
+#mc-sim .mc-dialog-body p{color:var(--mc-muted);font-size:12px;margin:9px 0;line-height:1.55}
+#mc-sim .mc-dialog-body textarea{width:100%;min-height:180px;font-size:11px;font-family:Consolas,monospace;resize:vertical}
+#mc-sim .mc-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:22px;flex-wrap:wrap}
+#mc-sim .mc-dialog-actions button{font-size:12px}
+#mc-sim .mc-danger{color:var(--mc-danger);background:var(--mc-raised);border:1px solid var(--mc-line)}
+#mc-sim .mc-dialog-error{font-size:12px;color:var(--mc-danger);margin-top:10px}
+#mc-sim .mc-action-list{display:flex;flex-direction:column;gap:4px}
+#mc-sim .mc-action-list button{justify-content:flex-start;text-align:left;width:100%;padding:10px 11px;font-size:12px}
+#mc-sim .mc-action-list button svg{color:var(--mc-muted);width:16px;height:16px}
+#mc-sim .mc-picker-views{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+#mc-sim .mc-picker-views button{justify-content:flex-start;text-align:left;font-size:12px;border:1px solid var(--mc-line);background:var(--mc-input);min-height:40px}
+#mc-sim .mc-picker-views button[aria-pressed="true"]{background:var(--mc-active);color:var(--mc-accent);border-color:var(--mc-accent)}
+#mc-sim .mc-toast{position:absolute;z-index:1001;bottom:76px;left:50%;transform:translateX(-50%);padding:10px 14px;background:var(--mc-raised);border:1px solid var(--mc-line);border-radius:8px;box-shadow:0 8px 24px #0004;max-width:calc(100% - 32px);width:auto;width:max-content;font-size:12px;display:flex;align-items:center;gap:8px}
+#mc-sim .mc-toast svg{color:var(--mc-accent);width:15px;height:15px}
+#mc-sim[data-mode="fly"] .mc-panel{display:none}
+#mc-sim[data-mode="fly"] .mc-flight-context{display:block}
+#mc-sim[data-mode="fly"] .mc-stage{padding-bottom:25px}
+#mc-sim[data-shortcuts="false"] .mc-key{display:none}
+#mc-sim[data-contrast="true"] .mc-camera-row[data-current="true"]{outline:2px solid var(--mc-accent);outline-offset:-2px}
+@media(max-width:880px){#mc-sim .mc-stage{padding:17px}#mc-sim .mc-panel-head{padding:14px}#mc-sim .mc-camera-layout{grid-template-columns:205px minmax(0,1fr)}#mc-sim .mc-inspector{padding:21px 18px 17px}#mc-sim .mc-brand-icon{width:31px;height:31px}#mc-sim .mc-brand h2{font-size:16px}#mc-sim .mc-axis-grid{gap:8px}#mc-sim .mc-axis label{font-size:11px;gap:4px}#mc-sim .mc-stepper button{width:24px;padding:5px}#mc-sim .mc-stepper input{font-size:11px}#mc-sim .mc-profile-button{max-width:215px}#mc-sim .mc-compact-button{padding:7px}#mc-sim .mc-compact-button span{display:none}#mc-sim .mc-section-tabs{gap:20px}#mc-sim .mc-dock{flex-wrap:wrap;gap:9px}#mc-sim .mc-dock-favorites{order:3;width:100%;flex-basis:100%;border:0;padding:9px 0 0;border-top:1px solid var(--mc-line)}#mc-sim .mc-global-nav{padding:8px 12px}}
+@media(max-width:700px){#mc-sim .mc-axis-grid{grid-template-columns:1fr;gap:8px}#mc-sim .mc-axis{display:grid;grid-template-columns:90px minmax(0,1fr);align-items:center;gap:10px}#mc-sim .mc-axis label{font-size:11px;margin:0}#mc-sim .mc-stepper button{width:30px}#mc-sim .mc-stepper input{font-size:12px}#mc-sim .mc-section-heading{gap:8px;flex-wrap:wrap}#mc-sim .mc-savebar{padding:12px}#mc-sim .mc-release{margin-right:0;padding-right:10px}#mc-sim .mc-global-nav>button{padding:7px 9px}#mc-sim .mc-global-nav>button svg{display:none}#mc-sim .mc-status{font-size:11px}}
+@media(max-width:620px){#mc-sim{border-radius:10px}#mc-sim .mc-simbar{padding:11px 13px;gap:10px}#mc-sim .mc-sim-title{font-size:11px;letter-spacing:.035em}#mc-sim .mc-sim-tools>svg{display:none}#mc-sim .mc-sim-launch span{display:none}#mc-sim .mc-sim-launch{padding:6px;min-height:27px}#mc-sim .mc-stage{padding:12px 10px 18px}#mc-sim .mc-panel{border-radius:10px}#mc-sim .mc-panel-head{padding:14px 13px;gap:9px;flex-wrap:wrap}#mc-sim .mc-brand{flex:1}#mc-sim .mc-brand h2{font-size:17px}#mc-sim .mc-profile-button{order:4;width:100%;max-width:none;margin:4px 0 0;justify-content:flex-start;min-height:33px}#mc-sim .mc-profile-button svg:last-child{margin-left:auto}#mc-sim .mc-profile-button span{font-size:12px}#mc-sim .mc-panel-head>#mc-hide{display:none}#mc-sim .mc-compact-button span{display:inline}#mc-sim .mc-camera-layout{grid-template-columns:1fr}#mc-sim .mc-mobile-browser{display:flex;width:100%;justify-content:space-between;border-radius:0;background:var(--mc-raised);padding:11px 15px;border-bottom:1px solid var(--mc-line);font-size:12px;color:var(--mc-muted)}#mc-sim .mc-mobile-browser span{display:flex;align-items:center;gap:8px}#mc-sim .mc-browser{display:none;border-right:0;border-bottom:1px solid var(--mc-line);padding:15px}#mc-sim[data-browser-open="true"] .mc-browser{display:block}#mc-sim .mc-inspector{padding:20px 18px}#mc-sim .mc-global-nav{padding:8px;gap:2px;flex-wrap:wrap}#mc-sim .mc-global-nav>button{padding:7px 10px;flex:1;font-size:12px}#mc-sim .mc-status{display:none}#mc-sim .mc-camera-heading h3{font-size:24px}#mc-sim .mc-section-tabs{gap:22px;margin-top:22px}#mc-sim .mc-section-tabs button{font-size:11px}#mc-sim .mc-camera-subtitle{font-size:12px}#mc-sim .mc-axis-grid{grid-template-columns:1fr;gap:9px}#mc-sim .mc-axis{grid-template-columns:93px minmax(0,1fr)}#mc-sim .mc-axis label{font-size:11px}#mc-sim .mc-stepper input{font-size:16px}#mc-sim .mc-stepper button{width:32px;min-height:38px}#mc-sim .mc-axis-footnote{font-size:11px}#mc-sim .mc-pose-actions{gap:3px}#mc-sim .mc-pose-actions button{font-size:11px;gap:5px}#mc-sim .mc-save-state{flex-basis:100%;margin-bottom:2px;font-size:11px}#mc-sim .mc-savebar{gap:7px}#mc-sim .mc-savebar button{font-size:11px;padding:8px 10px}#mc-sim .mc-release{margin-right:auto;border:0;padding:8px 4px!important}#mc-sim .mc-savebar .mc-primary{padding:9px 12px}#mc-sim .mc-form-grid{grid-template-columns:1fr;gap:16px}#mc-sim .mc-page{padding:21px 18px;min-height:540px}#mc-sim .mc-page-header{flex-wrap:wrap;gap:14px}#mc-sim .mc-page-header h3{font-size:24px}#mc-sim .mc-binding-row{grid-template-columns:minmax(0,1fr) 60px;gap:10px;padding:17px 0}#mc-sim .mc-binding-name{grid-column:1/-1}#mc-sim .mc-binding-row select{font-size:16px}#mc-sim .mc-profile-entry{padding:14px;gap:10px;flex-wrap:wrap}#mc-sim .mc-profile-icon{width:33px;height:33px}#mc-sim .mc-profile-text strong{font-size:12px}#mc-sim .mc-profile-entry>button,#mc-sim .mc-profile-active{margin-left:auto}#mc-sim .mc-inline-field{align-items:flex-start;flex-wrap:wrap;gap:10px}#mc-sim .mc-inline-field select{width:100%;font-size:16px}#mc-sim .mc-flight-context{padding:12px 6px;min-height:330px}#mc-sim .mc-dock{padding:11px;gap:7px}#mc-sim .mc-dock-current{flex:1;min-width:0}#mc-sim .mc-dock-picker{min-width:105px}#mc-sim .mc-dock-tools{gap:2px}#mc-sim .mc-dock-tools>button{padding:7px;font-size:11px}#mc-sim .mc-dock-tools>button span{display:none}#mc-sim .mc-dock-favorites{gap:6px}#mc-sim .mc-dock-favorites button{flex:1;min-width:70px;min-height:36px}#mc-sim .mc-demo-footer{padding:10px 13px;flex-wrap:wrap;gap:5px;font-size:11px}#mc-sim .mc-dialog-shade{padding:55px 12px 25px}#mc-sim .mc-dialog{padding:19px}#mc-sim .mc-dialog-body input[type="text"],#mc-sim .mc-dialog-body select,#mc-sim .mc-field>select,#mc-sim .mc-field>input{font-size:16px}#mc-sim .mc-picker-views{grid-template-columns:1fr 1fr}#mc-sim .mc-select-card{gap:7px}#mc-sim .mc-select-card button{font-size:11px}}
+@media(pointer:coarse){#mc-sim button{min-height:42px}#mc-sim .mc-icon-button{width:42px}#mc-sim .mc-camera-select{min-height:44px}#mc-sim .mc-row-star{width:38px;min-height:44px}#mc-sim .mc-category-head{min-height:44px}#mc-sim .mc-stepper button{min-height:44px;width:38px}#mc-sim .mc-precision button{min-height:36px}#mc-sim .mc-lens-presets button{min-height:40px}#mc-sim .mc-section-tabs button{min-height:40px}#mc-sim .mc-switch-row{min-height:55px}#mc-sim .mc-switch{width:38px!important;height:23px!important}#mc-sim .mc-switch:before{width:17px;height:17px}#mc-sim .mc-switch:checked:before{transform:translateX(15px)}#mc-sim .mc-field input,#mc-sim select{min-height:42px}}
+@media(prefers-reduced-motion:reduce){#mc-sim .mc-switch:before{transition:none}}
+#mc-sim .mc-stage,#mc-sim[data-mode="fly"] .mc-stage{padding-bottom:var(--mc-mini-clearance,144px)}
+#mc-sim .mc-mini-region{position:absolute;z-index:12;left:0;right:0;bottom:0;height:36px}
+#mc-sim .mc-mini-region .mc-dock{display:flex;position:absolute;left:24px;right:24px;bottom:36px;margin:0 auto;max-width:960px;opacity:0;transform:translateY(12px);visibility:hidden;pointer-events:none;transition:opacity .18s ease,transform .18s ease,visibility 0s linear .18s}
+#mc-sim[data-mini-open="true"] .mc-mini-region .mc-dock{opacity:1;transform:translateY(0);visibility:visible;pointer-events:auto;transition:opacity .18s ease,transform .18s ease,visibility 0s}
+#mc-sim .mc-mini-trigger{position:absolute;left:0;right:0;bottom:0;width:100%;height:36px;min-height:36px;padding:4px 12px 7px;border-radius:0;background:transparent;color:#d0e5ec;justify-content:center}
+#mc-sim .mc-mini-trigger:hover{background:transparent}
+#mc-sim .mc-mini-handle{display:inline-flex;align-items:center;gap:7px;background:#132938;border:1px solid #42616e;border-radius:6px;padding:4px 13px;font-size:11px;line-height:1.2;box-shadow:0 2px 10px #07172544}
+#mc-sim .mc-mini-handle svg{width:13px;height:13px;transition:transform .18s ease}
+#mc-sim[data-mini-open="true"] .mc-mini-handle{border-color:#7ea5b2;background:#1d3847}
+#mc-sim[data-mini-open="true"] .mc-mini-handle svg{transform:rotate(180deg)}
+#mc-sim .mc-dock-tools #mc-mini-pin{background:transparent;color:var(--mc-muted)}
+#mc-sim .mc-dock-tools #mc-mini-pin[aria-pressed="true"]{background:var(--mc-active);color:var(--mc-accent)}
+#mc-sim .mc-dock-tools #mc-expand{background:var(--mc-active);color:var(--mc-accent)}
+@media(max-width:880px){#mc-sim .mc-mini-region .mc-dock{left:17px;right:17px}}
+@media(max-width:620px){#mc-sim .mc-mini-region .mc-dock{left:10px;right:10px}#mc-sim .mc-mini-handle{padding:5px 14px}}
+@media(pointer:coarse){#mc-sim .mc-mini-region{height:48px}#mc-sim .mc-mini-region .mc-dock{bottom:48px}#mc-sim .mc-mini-trigger{height:48px;min-height:48px}#mc-sim .mc-mini-handle{padding:9px 17px}#mc-sim .mc-dock-tools>button{min-width:44px;min-height:44px}}
+@media(prefers-reduced-motion:reduce){#mc-sim .mc-mini-region .mc-dock,#mc-sim[data-mini-open="true"] .mc-mini-region .mc-dock,#mc-sim .mc-mini-handle svg{transition:none}}
+
+/* -- Additions (behaviour changes), styled with the mockup's tokens ------------------------------- */
+#mc-sim svg.mc-icon { stroke-width: 1.6; width: 16px !important; height: 16px !important; } /* as rendered in the approved mockup page */
+#mc-sim:not(.demo) .mc-simbar, #mc-sim:not(.demo) .mc-scene, #mc-sim:not(.demo) .mc-demo-footer { display: none; }
+#mc-sim .mc-dialog-shade { overflow: auto; }
+
+/* Main editor panel: fills its toolbar window, transparent outside the card. */
+#mc-sim[data-surface="main"] { height: 100%; background: transparent; }
+/* The editor card fills the simulator's window frame edge to edge; only the middle region scrolls. */
+#mc-sim[data-surface="main"] .mc-stage { height: 100%; min-height: 0; padding: 0; }
+#mc-sim[data-surface="main"][data-mode="edit"] .mc-stage { padding: 0; }
+#mc-sim[data-surface="main"] .mc-mini-region { display: none !important; }
+#mc-sim[data-surface="main"] .mc-panel { height: 100%; max-width: none; margin: 0; display: flex; flex-direction: column; }
+#mc-sim[data-surface="main"] .mc-panel > header, #mc-sim[data-surface="main"] .mc-panel > nav, #mc-sim[data-surface="main"] .mc-panel > footer, #mc-sim[data-surface="main"] .mc-banners { flex: none; }
+#mc-sim[data-surface="main"] .mc-panel > [role="tabpanel"] { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+#mc-sim[data-surface="main"] .mc-page { min-height: 0; }
+#mc-sim[data-surface="main"] #mc-page-cameras { display: flex; flex-direction: column; overflow: hidden; }
+#mc-sim[data-surface="main"] #mc-page-cameras > * { flex: none; }
+#mc-sim[data-surface="main"] #mc-page-cameras > .mc-camera-layout { flex: 1 1 auto; min-height: 0; }
+#mc-sim[data-surface="main"] .mc-browser, #mc-sim[data-surface="main"] .mc-inspector { min-height: 0; overflow-y: auto; overflow-x: hidden; }
+#mc-sim[data-surface="main"] .mc-dialog-shade { padding-top: 40px; padding-bottom: 20px; }
+@media (max-width: 620px) {
+  #mc-sim[data-surface="main"] .mc-camera-layout > .mc-browser { max-height: 45%; }
+  #mc-sim[data-surface="main"] .mc-camera-layout > .mc-inspector { flex: 1 1 auto; }
+}
+
+/* Mini control panel: only the dock, always visible, filling its window. */
+#mc-sim[data-surface="mini"] { background: transparent; }
+#mc-sim[data-surface="mini"] .mc-stage { padding: 0; min-height: 0; }
+#mc-sim[data-surface="mini"] .mc-panel, #mc-sim[data-surface="mini"] .mc-flight-context { display: none !important; }
+/* Invisible full-width bottom edge: hover this strip or the revealed dock to keep it open. */
+#mc-sim[data-surface="mini"] { height: 100%; }
+#mc-sim[data-surface="mini"] .mc-stage { height: 100%; }
+#mc-sim[data-surface="mini"] .mc-mini-region { position: absolute; height: 36px; padding: 0; }
+#mc-sim[data-surface="mini"] .mc-mini-trigger { display: block; opacity: 1; background: rgba(0,0,0,0.001); border: 0; box-shadow: none; cursor: default; pointer-events: auto; }
+#mc-sim[data-surface="mini"] .mc-mini-trigger:hover { background: rgba(0,0,0,0.001); }
+#mc-sim[data-surface="mini"] .mc-mini-handle { display: none; }
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock { position: absolute; left: 24px; right: 24px; bottom: 36px; margin: 0 auto; }
+@media (max-width: 880px) { #mc-sim[data-surface="mini"] .mc-mini-region .mc-dock { left: 17px; right: 17px; } }
+@media (max-width: 620px) { #mc-sim[data-surface="mini"] .mc-mini-region .mc-dock { left: 10px; right: 10px; } }
+@media (pointer: coarse) { #mc-sim[data-surface="mini"] .mc-mini-region { height: 48px; } #mc-sim[data-surface="mini"] .mc-mini-region .mc-dock { bottom: 48px; } }
+/* always: the dock alone, filling the window */
+#mc-sim[data-surface="mini"][data-mini-mode="always"] .mc-mini-trigger { display: none !important; }
+#mc-sim[data-surface="mini"][data-mini-mode="always"] .mc-mini-region .mc-dock { bottom: 0; }
+#mc-sim[data-surface="mini"][data-mini-mode="always"] .mc-mini-region .mc-dock { opacity: 1; transform: none; visibility: visible; pointer-events: auto; transition: none; }
+/* off: only a short note */
+#mc-sim .mc-mini-off { display: none; }
+#mc-sim[data-surface="mini"][data-mini-mode="off"] .mc-mini-region { display: none; }
+#mc-sim[data-surface="mini"][data-mini-mode="off"] .mc-mini-off { display: none; }
+#mc-sim .mc-mini-off span { font-size: 11px; color: var(--mc-muted); background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 6px; padding: 4px 12px; }
+#mc-sim[data-surface="mini"] .mc-toast { bottom: auto; top: 50%; transform: translate(-50%, -50%); }
+#mc-sim .mc-dock[data-picking="true"] .mc-dock-favorites { flex-wrap: nowrap; overflow-x: auto; }
+#mc-sim .mc-dock-group { font-size: 11px; color: var(--mc-muted); padding: 0 2px 0 8px; white-space: nowrap; flex: none; }
+#mc-sim .mc-dock-group:first-child { padding-left: 0; }
+
+/* Banners under the navigation (capabilities, aircraft match, read-only). */
+#mc-sim .mc-banner { display: flex; align-items: center; gap: 10px; padding: 8px 18px; border-bottom: 1px solid var(--mc-line); background: var(--mc-subtle); font-size: 12px; flex-wrap: wrap; line-height: 1.45; }
+#mc-sim .mc-banner > svg.mc-icon { width: 15px; height: 15px; color: var(--mc-amber); }
+#mc-sim .mc-banner.mc-info > svg.mc-icon { color: var(--mc-accent); }
+#mc-sim .mc-banner-text { flex: 1; min-width: 180px; }
+#mc-sim .mc-banner-text strong { font-weight: 600; }
+#mc-sim .mc-banner button { font-size: 11px; min-height: 28px; padding: 5px 10px; }
+#mc-sim .mc-banner .mc-icon-button { width: 28px; padding: 5px; color: var(--mc-muted); }
+
+/* Small labels */
+#mc-sim .mc-pill { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px solid var(--mc-amber); color: var(--mc-amber); border-radius: 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; font-weight: 500; line-height: 1; flex: none; }
+#mc-sim .mc-pill.mc-accent { border-color: var(--mc-accent); color: var(--mc-accent); }
+#mc-sim .mc-live { height: 20px; padding: 0 5px; display: inline-flex; align-items: center; border: 1px solid var(--mc-accent); border-radius: 4px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--mc-accent); line-height: 1; flex: none; }
+#mc-sim .mc-warn { color: var(--mc-amber) !important; }
+#mc-sim .mc-field-label { display: flex; align-items: center; gap: 8px; }
+
+/* Inspector extras */
+#mc-sim .mc-camera-tools { align-items: center; }
+#mc-sim .mc-camera-tools .mc-view-sim { font-size: 12px; padding: 7px 11px; }
+#mc-sim .mc-camera-tools .mc-view-sim svg.mc-icon { width: 15px; height: 15px; }
+#mc-sim .mc-camera-tools .mc-view-sim[data-live="true"] { background: var(--mc-active); color: var(--mc-accent); }
+#mc-sim .mc-templook { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 8px 11px; border: 1px solid var(--mc-line); border-radius: 7px; background: var(--mc-input); font-size: 11px; color: var(--mc-muted); flex-wrap: wrap; }
+#mc-sim .mc-templook svg.mc-icon { width: 14px; height: 14px; color: var(--mc-accent); }
+#mc-sim .mc-templook span { flex: 1; min-width: 150px; }
+#mc-sim .mc-templook button { font-size: 11px; min-height: 26px; padding: 4px 9px; border: 1px solid var(--mc-line); background: var(--mc-raised); }
+#mc-sim .mc-pose-actions { flex-wrap: wrap; }
+#mc-sim .mc-pose-actions > div { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+#mc-sim .mc-empty-page { padding: 60px 24px; text-align: center; color: var(--mc-muted); display: flex; flex-direction: column; align-items: center; gap: 12px; font-size: 12px; }
+#mc-sim .mc-empty-page h3 { font-size: 23px; font-weight: 500; letter-spacing: -.035em; color: var(--mc-text); }
+
+/* Bindings: input chip + Assign / Clear / Test */
+#mc-sim .mc-binding-row { grid-template-columns: minmax(150px, 1fr) minmax(125px, .7fr) auto; }
+#mc-sim .mc-binding-input { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 7px 11px; border: 1px solid var(--mc-line); border-radius: 7px; background: var(--mc-input); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+#mc-sim .mc-binding-input svg.mc-icon { width: 14px; height: 14px; color: var(--mc-muted); }
+#mc-sim .mc-binding-input[data-empty="true"] { color: var(--mc-muted); }
+#mc-sim .mc-binding-input[data-capturing="true"] { border-color: var(--mc-accent); color: var(--mc-accent); background: var(--mc-active); }
+#mc-sim .mc-binding-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+#mc-sim .mc-binding-actions button[data-holding="true"] { background: var(--mc-active); color: var(--mc-accent); border-color: var(--mc-accent); }
+#mc-sim .mc-binding-name label { display: flex; align-items: center; gap: 7px; margin-top: 8px; font-size: 11px; color: var(--mc-muted); }
+#mc-sim .mc-binding-name label input[type="checkbox"] { width: 15px; height: 15px; }
+#mc-sim .mc-binding-result[data-tone="warn"] { color: var(--mc-amber); }
+#mc-sim .mc-bindings-group { margin-top: 0; }
+
+/* Profiles */
+#mc-sim .mc-profile-entry .mc-row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+#mc-sim .mc-profile-text strong .mc-pill { margin-left: 8px; vertical-align: middle; }
+#mc-sim .mc-aircraft-card { margin-bottom: 11px; border-style: dashed; background: transparent; }
+
+/* Dialog content */
+#mc-sim .mc-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 12px; margin: 12px 0; padding: 12px 14px; border: 1px solid var(--mc-line); border-radius: 8px; background: var(--mc-input); }
+#mc-sim .mc-kv dt { color: var(--mc-muted); }
+#mc-sim .mc-kv dd { margin: 0; font-family: "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; }
+#mc-sim .mc-report-list { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--mc-muted); line-height: 1.55; }
+#mc-sim .mc-dialog-body .mc-profile-entry { padding: 11px 13px; margin-top: 8px; }
+#mc-sim .mc-dialog-body .mc-profile-entry > span { flex: 1; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+#mc-sim .mc-dialog-body .mc-profile-entry small { display: block; color: var(--mc-muted); font-size: 11px; margin-top: 3px; }
+#mc-sim .mc-dialog-body .mc-section-label { margin-top: 18px; }
+#mc-sim .mc-toast[data-tone="error"] svg.mc-icon { color: var(--mc-danger); }
+#mc-sim .mc-toast[data-tone="warn"] svg.mc-icon { color: var(--mc-amber); }
+#mc-sim .mc-status button { min-height: 22px; padding: 2px 7px; font-size: 11px; color: var(--mc-danger); border: 1px solid var(--mc-line); }
+
+/* Settings */
+#mc-sim .mc-inline-field small { display: block; color: var(--mc-muted); font-size: 11px; margin-top: 4px; }
+#mc-sim .mc-inline-field .mc-unit { display: flex; align-items: center; gap: 7px; color: var(--mc-muted); }
+#mc-sim .mc-inline-field input[type="number"] { width: 110px; font-size: 12px; text-align: right; }
+#mc-sim .mc-section-label.mc-spaced { margin-top: 28px; }
+#mc-sim .mc-form-grid.mc-flush { margin-top: 0; }
+
+@media (max-width: 620px) {
+  #mc-sim .mc-binding-row { grid-template-columns: minmax(0, 1fr) auto; }
+  #mc-sim .mc-camera-heading { flex-wrap: wrap; }
+}
+
+/* Settings-driven presentation */
+#mc-sim[data-reduced-motion="true"] .mc-mini-region .mc-dock, #mc-sim[data-reduced-motion="true"] .mc-mini-handle svg, #mc-sim[data-reduced-motion="true"] .mc-switch::before { transition: none !important; }
+#mc-sim[data-mini-enabled="false"]:not([data-surface="mini"]) .mc-mini-region { display: none; }
+#mc-sim .mc-switch:disabled, #mc-sim input:disabled, #mc-sim select:disabled { opacity: .45; cursor: default; }
+
+/* -- Coherent GT compatibility: the mockup's grid layouts expressed with flexbox (same geometry) -- */
+#mc-sim .mc-camera-layout { display: flex; }
+#mc-sim .mc-camera-layout > .mc-browser { flex: 0 0 230px; width: 230px; }
+#mc-sim .mc-camera-layout > .mc-inspector { flex: 1 1 0; min-width: 0; }
+#mc-sim .mc-axis-grid { display: flex; }
+#mc-sim .mc-axis-grid > .mc-axis { flex: 1 1 0; min-width: 0; }
+#mc-sim .mc-select-card { display: flex; }
+#mc-sim .mc-select-card > button { flex: 1 1 0; min-width: 0; }
+#mc-sim .mc-form-grid { display: flex; }
+#mc-sim .mc-form-grid > * { flex: 1 1 0; min-width: 0; }
+#mc-sim .mc-profile-list { display: flex; flex-direction: column; }
+#mc-sim .mc-picker-views { display: flex; flex-wrap: wrap; }
+#mc-sim .mc-picker-views > button { flex: 0 0 calc(50% - 3px); width: calc(50% - 3px); min-width: 0; }
+#mc-sim .mc-binding-row { display: flex; }
+#mc-sim .mc-binding-row > .mc-binding-name { flex: 1 1 0; min-width: 150px; }
+#mc-sim .mc-binding-row > .mc-binding-input { flex: .7 1 0; min-width: 125px; }
+#mc-sim .mc-binding-row > .mc-binding-actions { flex: 0 0 auto; }
+#mc-sim .mc-kv { display: flex; flex-wrap: wrap; }
+#mc-sim .mc-kv dt { flex: 0 0 36%; min-width: 0; }
+#mc-sim .mc-kv dd { flex: 1 1 50%; min-width: 0; }
+@media (max-width: 880px) {
+  #mc-sim .mc-camera-layout > .mc-browser { flex-basis: 205px; width: 205px; }
+  #mc-sim .mc-binding-row { flex-wrap: wrap; }
+  #mc-sim .mc-binding-row > .mc-binding-name { flex: 0 0 100%; }
+  #mc-sim .mc-binding-row > .mc-binding-input { flex: 1 1 0; min-width: 0; }
+}
+@media (max-width: 700px) {
+  #mc-sim .mc-axis-grid { flex-direction: column; }
+  #mc-sim .mc-axis { display: flex; align-items: center; }
+  #mc-sim .mc-axis > label { flex: 0 0 90px; width: 90px; }
+  #mc-sim .mc-axis > .mc-stepper { flex: 1 1 0; min-width: 0; }
+}
+@media (max-width: 620px) {
+  #mc-sim .mc-camera-layout { flex-direction: column; }
+  #mc-sim .mc-camera-layout > .mc-browser { flex: none; width: auto; }
+  #mc-sim .mc-form-grid { flex-direction: column; }
+  #mc-sim .mc-axis > label { flex-basis: 93px; width: 93px; }
+}
+#mc-sim .mc-status { min-width: 0; overflow: hidden; } #mc-sim #mc-control-state { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* -- Scroll regions + custom scrollbar (Coherent GT shows no native scrollbars) -- */
+#mc-sim .mc-dialog { display: flex; flex-direction: column; max-height: 100%; }
+#mc-sim .mc-dialog > header, #mc-sim .mc-dialog-error, #mc-sim .mc-dialog-actions { flex: none; }
+#mc-sim .mc-dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+#mc-sim .mc-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+#mc-sim .mc-scroll::-webkit-scrollbar { width: 0; height: 0; }
+#mc-sim .mc-sb { position: absolute; width: 6px; border-radius: 3px; z-index: 5; display: none; }
+#mc-sim .mc-sb-x { height: 6px; }
+#mc-sim .mc-sb-thumb { position: absolute; left: 0; top: 0; width: 6px; border-radius: 3px; background: var(--mc-line); cursor: pointer; }
+#mc-sim .mc-sb-x .mc-sb-thumb { height: 6px; }
+#mc-sim .mc-sb:hover .mc-sb-thumb, #mc-sim .mc-sb[data-drag="true"] .mc-sb-thumb { background: var(--mc-muted); }
+
+/* Keep native cursor feedback and opaque controls over a configurable translucent dock. */
+#mc-sim #mc-drag-header { cursor: move; }
+#mc-sim .mc-save-current-view { margin: 0 0 18px; }
+#mc-sim .mc-axis .mc-pose-slider { display: block; margin-top: 8px; }
+#mc-sim .mc-dock-categories { display: none; }
+#mc-sim .mc-dock-body { display: flex; flex: 1; min-width: 0; align-items: center; gap: 14px; }
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock {
+  max-width: 1600px; width: calc(100% - 64px); left: 32px; right: 32px;
+  align-items: stretch; flex-wrap: nowrap; min-height: 0; max-height: 35vh; padding: 10px; gap: 10px;
+  background: rgba(14, 25, 35, var(--mc-mini-opacity, 0.65));
+}
+#mc-sim[data-theme="light"][data-surface="mini"] .mc-mini-region .mc-dock { background: rgba(238, 245, 248, var(--mc-mini-opacity, 0.65)); }
+#mc-sim[data-surface="mini"] .mc-dock-categories {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; flex: 0 0 220px; gap: 2px; overflow-y: auto;
+  border-right: 1px solid var(--mc-line); padding-right: 14px;
+}
+#mc-sim[data-surface="mini"] .mc-dock-categories button { text-align: left; justify-content: flex-start; font-size: 11px; min-height: 22px; padding: 3px 7px; flex-shrink: 0; }
+#mc-sim[data-surface="mini"] .mc-dock-categories button[aria-pressed="true"] { background: var(--mc-active); color: var(--mc-accent); }
+#mc-sim[data-surface="mini"] .mc-dock-body { flex-direction: row; flex-wrap: wrap; align-content: flex-start; align-items: center; gap: 6px; }
+#mc-sim[data-surface="mini"] .mc-dock-current { flex: none; }
+#mc-sim[data-surface="mini"] .mc-dock-favorites { order: 1; width: 100%; flex: 0 1 100%; align-content: flex-start; align-items: flex-start; padding: 0; border: 0; overflow-y: auto; }
+#mc-sim[data-surface="mini"] .mc-dock-favorites button { min-width: 100px; min-height: 28px; flex: 0 1 auto; padding: 4px 7px; font-size: 11px; justify-content: flex-start; background: var(--mc-raised); }
+#mc-sim[data-surface="mini"] .mc-dock-tools { justify-content: flex-end; margin-left: auto; }
+#mc-sim #mc-setting-mini-opacity { width: 180px; }
+@media(max-width:700px) {
+  #mc-sim .mc-axis { flex-wrap: wrap; }
+  #mc-sim .mc-axis .mc-pose-slider { flex: 1 1 100%; width: 100%; }
+  #mc-sim[data-surface="mini"] .mc-dock-categories { flex-basis: 135px; }
+  #mc-sim[data-surface="mini"] .mc-mini-region .mc-dock { left: 12px; right: 12px; width: calc(100% - 24px); }
+}
+/* Compact library and binding controls. */
+#mc-sim .mc-category-toggle { padding: 5px 8px; margin: 4px 0; min-height: 28px; color: var(--mc-muted); font-size: 11px; }
+#mc-sim .mc-camera-binding { display: flex; justify-content: flex-end; margin: 4px 0 8px; }
+#mc-sim .mc-binding-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+#mc-sim .mc-binding-filters .mc-search { flex: 1; min-width: 180px; margin: 0; }
+#mc-sim .mc-binding-filters select { width: auto; min-height: 34px; }
+#mc-sim .mc-binding-section { margin: 8px 0; }
+#mc-sim .mc-binding-section > summary { padding: 8px 0; font-size: 12px; font-weight: 600; cursor: pointer; }
+#mc-sim .mc-binding-section .mc-binding-row { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; padding: 7px 0; }
+#mc-sim .mc-binding-section .mc-binding-name { flex: 1; min-width: 140px; font-size: 12px; }
+#mc-sim .mc-binding-section .mc-binding-name small { font-size: 10px; margin-top: 2px; }
+#mc-sim .mc-binding-section .mc-binding-input { flex: 0 1 180px; min-width: 100px; min-height: 30px; padding: 5px 8px; font-size: 11px; }
+#mc-sim .mc-binding-section .mc-binding-actions { flex: 0 0 auto; }
+#mc-sim .mc-binding-section .mc-binding-actions button { padding: 5px 8px; min-height: 30px; font-size: 11px; }
+#mc-sim .mc-mouse-look-area { position: fixed; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; z-index: 1000; background: transparent; cursor: crosshair; pointer-events: auto; }
+#mc-sim .mc-mouse-look-area[hidden] { display: none; }
+#mc-sim .mc-mouse-look-area span { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); background: rgba(14,25,35,.75); padding: 10px 16px; border-radius: 8px; pointer-events: none; }
+@media (max-width: 620px) {
+  #mc-sim .mc-binding-section .mc-binding-row { flex-wrap: wrap; }
+  #mc-sim .mc-binding-section .mc-binding-name { flex-basis: 100%; }
+  #mc-sim .mc-binding-section .mc-binding-input { flex: 1; }
+}
+
+#mc-sim[data-surface="mini"] .mc-dock-tools button { min-height: 28px; padding: 4px 7px; font-size: 11px; }
+#mc-sim .mc-axis { display: block; min-width: 0; padding: 10px; background: var(--mc-subtle); border: 1px solid var(--mc-line); border-radius: 10px; }
+#mc-sim .mc-axis-grid { gap: 10px; align-items: stretch; }
+#mc-sim .mc-axis > label { display: flex; align-items: center; gap: 6px; color: var(--mc-text); margin-bottom: 10px; font-size: 11px; }
+#mc-sim .mc-axis-letter { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; background: var(--mc-raised); color: var(--mc-accent); }
+#mc-sim .mc-axis-illustration { width: 64px; height: 36px; display: block; margin: 0 auto 8px; color: var(--mc-accent); }
+#mc-sim .mc-axis-illustration path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#mc-sim .mc-axis .mc-stepper { width: 100%; min-width: 0; background: var(--mc-input); }
+#mc-sim .mc-axis .mc-stepper button { width: 25px; min-width: 25px; min-height: 34px; padding: 3px; }
+#mc-sim .mc-axis .mc-stepper input { min-width: 0; width: 100%; font-size: 12px; padding: 3px 0; }
+#mc-sim .mc-axis-unit { font-size: 10px; color: var(--mc-muted); padding-right: 2px; }
+#mc-sim .mc-axis .mc-pose-slider { margin-top: 8px; width: 100%; }
+#mc-sim .mc-axis-directions { display: flex; justify-content: space-between; gap: 4px; color: var(--mc-muted); font-size: 10px; }
+#mc-sim .mc-entity-name { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+#mc-sim .mc-entity-name > .mc-icon { width: 16px; height: 16px; flex: none; }
+#mc-sim[data-name-display="labels"] .mc-entity-name > svg { display: none; }
+#mc-sim[data-name-display="icons"] .mc-entity-name > .mc-entity-label { display: none; }
+#mc-sim[data-name-display="icons"] .mc-dock-categories { flex-basis: 76px; padding-right: 6px; }
+#mc-sim[data-name-display="icons"] .mc-dock-favorites button { min-width: 36px; }
+@media(max-width:620px) { #mc-sim .mc-axis-grid { flex-direction: column; } #mc-sim .mc-axis { flex: auto; width: 100%; } }
+#mc-sim .mc-camera-binding { gap: 7px; }
+#mc-sim .mc-icon-picker { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 8px; }
+#mc-sim .mc-icon-choice { flex-direction: column; min-height: 64px; border: 1px solid var(--mc-line); font-size: 11px; }
+#mc-sim .mc-icon-choice[aria-pressed="true"] { background: var(--mc-active); border-color: var(--mc-accent); }
+#mc-sim .mc-reorder-grip { width: 18px; min-width: 18px; flex: none; padding: 2px; color: var(--mc-muted); cursor: grab; }
+#mc-sim .mc-reorder-grip svg { width: 12px; }
+#mc-sim .mc-category-line > .mc-category-head { min-width: 0; }
+#mc-sim [data-drop-position="before"] { box-shadow: inset 0 2px var(--mc-accent); }
+#mc-sim [data-drop-position="after"] { box-shadow: inset 0 -2px var(--mc-accent); }
+#mc-sim [data-drop-position="inside"] { background: var(--mc-active); outline: 1px dashed var(--mc-accent); }
+#mc-sim.mc-reordering, #mc-sim.mc-reordering * { cursor: grabbing !important; user-select: none; }
+/* Illustrated pose workspace: explicit spacing also supports Coherent without flex gap. */
+#mc-sim .mc-pose-header{display:flex;align-items:center;margin:20px 0 8px}#mc-sim .mc-pose-header>svg{width:32px;height:32px;color:var(--mc-accent);margin-right:12px}#mc-sim .mc-pose-header h4{font-size:21px;margin:0 0 3px}#mc-sim .mc-pose-header>div{flex:1;min-width:0}#mc-sim .mc-pose-header span,#mc-sim .mc-pose-reference{color:var(--mc-muted);font-size:12px}#mc-sim .mc-pose-reference{margin-bottom:14px}#mc-sim .mc-live-preview{white-space:nowrap;margin-left:8px}#mc-sim .mc-live-preview:before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--mc-muted);margin-right:6px}#mc-sim .mc-live-preview[data-live=true]:before{background:var(--mc-accent);box-shadow:0 0 8px #63d8c080}
+#mc-sim .mc-precision-bar{display:flex;align-items:center;flex-wrap:wrap;padding:10px;border:1px solid var(--mc-line);border-radius:9px;background:var(--mc-subtle);margin-bottom:20px}#mc-sim .mc-precision-bar>span{font-size:12px;font-weight:600;margin-right:10px}#mc-sim .mc-precision-bar .mc-precision{padding:3px}#mc-sim .mc-precision-bar .mc-precision button{min-height:30px;padding:5px 12px}#mc-sim .mc-precision-bar .mc-precision button[aria-pressed=true]{background:var(--mc-accent);color:#062c28}#mc-sim .mc-step-summary{display:flex;margin-left:auto;font-size:11px;color:var(--mc-muted)}#mc-sim .mc-step-summary>span{margin-left:12px}#mc-sim .mc-step-summary strong{color:var(--mc-text);margin-left:4px;font-variant-numeric:tabular-nums}#mc-sim .mc-pose-section{margin:20px 0 10px;justify-content:flex-start}#mc-sim .mc-pose-section h4{font-size:18px;margin-right:12px}#mc-sim .mc-pose-section>span{font-size:12px;color:var(--mc-muted)}
+#mc-sim .mc-axis-grid{gap:0}#mc-sim .mc-axis-grid>.mc-axis+.mc-axis{margin-left:10px}#mc-sim .mc-axis-grid>.mc-axis{padding:12px 10px;background:linear-gradient(150deg,#122331,#0d1a25);border-color:#294354;border-radius:10px;min-width:0}#mc-sim .mc-axis>label{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:14px;font-weight:650;min-height:28px}#mc-sim .mc-axis-letter{background:#153139;color:#6de1ca;border:1px solid #396570;border-radius:5px;width:26px;height:26px;flex-shrink:0;font-size:14px}#mc-sim .mc-axis-description{display:block;font-size:11px;color:#9bb4c8;line-height:1.4;min-height:16px}#mc-sim .mc-axis-illustration{display:block;width:100%;height:auto;max-height:135px;margin:4px 0 10px;overflow:visible}#mc-sim .mc-axis-illustration path{stroke-width:1;fill:none;stroke:#69889e}#mc-sim .mc-axis-illustration .mc-diagram-grid path{stroke:#355164;opacity:.48;stroke-width:.7}#mc-sim .mc-axis-illustration .mc-diagram-arrow{stroke:#65e3cc;stroke-width:2.7;stroke-linecap:round;stroke-linejoin:round}#mc-sim .mc-axis-illustration .mc-diagram-guide{stroke:#7396ac;stroke-dasharray:4 4;opacity:.7}#mc-sim .mc-axis-illustration .mc-diagram-frustum{fill:#47687b40;stroke:#7498ae;stroke-width:.7}#mc-sim .mc-axis-illustration .mc-camera-body{stroke:#bed4e3;stroke-width:1.5;fill:revert}#mc-sim .mc-camera-detail{fill:#354e62;stroke:#afc9da;stroke-width:.7}#mc-sim .mc-camera-lens{fill:#1a3041;stroke:#c3d8e7;stroke-width:2}#mc-sim .mc-camera-glass{fill:#0b1b29;stroke:#688da5;stroke-width:1.4}#mc-sim .mc-camera-shine{fill:#91bbcd;opacity:.65}
+#mc-sim .mc-axis .mc-stepper{height:43px;border:1px solid #36576a;background:#081520;border-radius:7px;padding:3px;display:flex;align-items:center}#mc-sim .mc-axis .mc-stepper:focus-within{border-color:#64dfc4;box-shadow:0 0 0 1px #64dfc455}#mc-sim .mc-axis .mc-stepper button{width:27px;min-width:27px;min-height:35px;padding:3px;background:#192e3e;border:1px solid #294759;border-radius:4px}#mc-sim .mc-axis .mc-stepper input{flex:1;min-width:0;width:100%;font-size:16px;font-weight:650;font-variant-numeric:tabular-nums;padding:3px 0;text-align:center}#mc-sim .mc-axis-unit{font-size:11px;color:#9bb4c8;margin:0 5px 0 2px}#mc-sim .mc-axis .mc-pose-slider{margin:17px 0 9px;width:100%}#mc-sim .mc-axis-directions{font-size:11px;color:#9bb4c8}#mc-sim .mc-pose-toolbar{display:flex;flex-wrap:wrap;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--mc-line);gap:8px}#mc-sim .mc-pose-toolbar button{font-size:11px;padding:7px 9px}#mc-sim .mc-pose-toolbar small{font-size:11px;color:var(--mc-muted);margin-left:auto}
+@media(max-width:850px){#mc-sim .mc-step-summary{width:100%;margin:9px 0 0}#mc-sim .mc-step-summary>span{margin-left:0;margin-right:18px}#mc-sim .mc-pose-header h4{font-size:17px}#mc-sim .mc-axis>label{font-size:12px}#mc-sim .mc-axis-grid>.mc-axis{padding:10px 7px}#mc-sim .mc-axis .mc-stepper input{font-size:14px}#mc-sim .mc-axis .mc-stepper button{width:22px;min-width:22px}#mc-sim .mc-axis-unit{margin-right:3px}}
+@media(max-width:620px){#mc-sim .mc-axis-grid>.mc-axis+.mc-axis{margin-left:0;margin-top:10px}#mc-sim .mc-axis-illustration{height:115px;width:100%}#mc-sim .mc-pose-header{flex-wrap:wrap}#mc-sim .mc-live-preview{margin:8px 0}#mc-sim .mc-axis>label{font-size:15px}#mc-sim .mc-axis .mc-stepper input{font-size:18px}#mc-sim .mc-axis-grid>.mc-axis{padding:12px}#mc-sim .mc-pose-toolbar small{margin-left:0}}
+#mc-sim .mc-axis-reset{display:flex!important;align-items:center;justify-content:center;width:100%;margin-top:10px;font-size:11px!important;min-height:27px!important;padding:4px!important;background:transparent!important;color:var(--mc-muted)!important;border:1px solid #294354!important}#mc-sim .mc-axis-reset:hover{color:var(--mc-accent)!important;background:#16313b!important}#mc-sim .mc-axis-reset svg{width:12px;height:12px;margin-right:5px}
+/* Keep the complete pose editor in view at normal toolbar-window sizes. */
+#mc-sim .mc-inspector{padding:14px 18px}
+#mc-sim .mc-camera-heading{margin-bottom:4px}#mc-sim .mc-camera-heading h3{font-size:21px;margin:2px 0}#mc-sim .mc-camera-subtitle{display:none}#mc-sim .mc-camera-binding{margin:0 0 5px}#mc-sim .mc-camera-binding button{min-height:27px;padding:4px 8px;font-size:11px}
+#mc-sim .mc-section-tabs{margin:0 0 10px;padding:0;min-height:30px}#mc-sim .mc-section-tabs button{padding:6px 10px;min-height:30px}
+#mc-sim .mc-pose-header{float:right;display:block;margin:0 0 8px}#mc-sim .mc-pose-header>div,#mc-sim .mc-pose-header>svg{display:none}#mc-sim .mc-pose-reference{font-size:11px;margin:0 0 8px}#mc-sim .mc-pose-header .mc-live-preview{font-size:11px}
+#mc-sim .mc-precision-bar{clear:both;padding:6px 8px;margin-bottom:7px}#mc-sim .mc-precision-bar .mc-precision button{min-height:25px;padding:4px 10px}#mc-sim .mc-pose-section{margin:10px 0 6px;min-height:20px}#mc-sim .mc-pose-section h4{font-size:14px}#mc-sim .mc-axis-grid>.mc-axis{padding:8px;background:linear-gradient(150deg,var(--mc-subtle),var(--mc-input))}
+#mc-sim .mc-axis>label{margin:0;font-size:13px;min-height:24px;gap:4px}#mc-sim .mc-axis-letter{width:22px;height:22px;font-size:12px;margin-left:auto}#mc-sim .mc-axis-description{font-size:10px;min-height:14px}#mc-sim .mc-axis-illustration{height:88px;width:100%;max-height:none;margin:0 0 3px}#mc-sim .mc-axis .mc-stepper{height:35px;padding:2px}#mc-sim .mc-axis .mc-stepper button{min-height:29px;width:26px;min-width:26px}#mc-sim .mc-axis .mc-stepper input{min-height:28px;font-size:16px;border:0;background:transparent}#mc-sim .mc-axis .mc-pose-slider{margin:9px 0 5px;height:12px}#mc-sim .mc-axis-directions{font-size:10px}#mc-sim .mc-axis-reset{width:24px!important;min-width:24px!important;min-height:24px!important;height:24px;margin:0 0 0 auto;font-size:0!important;padding:3px!important;border:0!important}#mc-sim .mc-axis-reset svg{width:13px;height:13px;margin:0}
+#mc-sim .mc-pose-toolbar{margin:10px 0 0;padding:8px 0 0;gap:6px}#mc-sim .mc-pose-toolbar button{min-height:28px;font-size:10px;padding:5px 7px;margin:0}#mc-sim .mc-pose-toolbar small{display:none}#mc-sim #mc-detail-position>.mc-divider{margin:10px 0}#mc-sim .mc-lens-top{margin:0 0 2px}#mc-sim .mc-lens-top h4{font-size:12px}#mc-sim .mc-value-input input{min-height:26px;padding:3px 6px}#mc-sim #mc-fov-range{margin:4px 0;height:12px}#mc-sim .mc-range-labels{font-size:10px}#mc-sim .mc-lens-presets{margin:4px 0 0}#mc-sim .mc-lens-presets button{min-height:25px;padding:3px 10px;font-size:11px}#mc-sim #mc-detail-position>.mc-pose-actions{display:none}
+@media(min-width:621px) and (max-width:850px){#mc-sim .mc-step-summary{width:auto;margin:0 0 0 auto}#mc-sim .mc-step-summary>span{margin:0 0 0 8px;font-size:10px}#mc-sim .mc-precision-bar>span{display:none}#mc-sim .mc-inspector{padding:12px}#mc-sim .mc-axis>label{font-size:11px}#mc-sim .mc-axis .mc-stepper input{font-size:14px}#mc-sim .mc-axis-letter{display:none}}
+@media(min-width:621px) and (max-height:900px){#mc-sim .mc-axis-illustration{height:65px}#mc-sim .mc-camera-binding{margin-top:-26px;margin-bottom:3px}#mc-sim .mc-camera-heading{padding-right:220px}#mc-sim .mc-camera-tools{position:absolute;right:18px;top:14px}#mc-sim .mc-camera-heading h3{font-size:18px}#mc-sim .mc-axis-description{display:none}}
+#mc-sim input.mc-camera-name-input{display:block;font-size:20px;font-weight:600;background:var(--mc-input);border:1px solid var(--mc-line);border-radius:6px;padding:4px 9px;min-height:34px;width:100%;max-width:none;color:var(--mc-text);cursor:text}#mc-sim input.mc-camera-name-input:hover{border-color:var(--mc-muted)}#mc-sim input.mc-camera-name-input:focus{border-color:var(--mc-accent);background:var(--mc-input);outline:none}
+#mc-sim .mc-name-row{display:flex;align-items:center;gap:7px;min-width:0}#mc-sim .mc-name-row #mc-camera-icon{flex:none;width:30px;height:30px;padding:5px;min-height:30px;color:var(--mc-accent)}#mc-sim .mc-name-row input.mc-camera-name-input{min-width:0;margin:0}
+#mc-sim .mc-effect-row{display:flex;align-items:center;padding:13px 0;border-bottom:1px solid var(--mc-line)}#mc-sim .mc-effect-row>span{flex:1;margin-right:16px}#mc-sim .mc-effect-row strong,#mc-sim .mc-effect-row small{display:block}#mc-sim .mc-effect-row small{color:var(--mc-muted);font-size:11px;margin-top:3px}#mc-sim .mc-effect-row input{width:32%;margin:0 10px}#mc-sim .mc-effect-row output{width:40px;text-align:right;font-variant-numeric:tabular-nums;color:var(--mc-accent)}
+@media(min-width:621px){#mc-sim .mc-inspector{position:relative}#mc-sim .mc-camera-binding{position:absolute;top:51px;right:18px;margin:0}#mc-sim .mc-camera-heading{min-height:54px;padding-right:0;margin-bottom:4px}#mc-sim .mc-camera-heading>div:first-child{flex:1;min-width:0;margin-right:24px}#mc-sim .mc-name-row{max-width:500px}#mc-sim .mc-precision-bar{padding:3px 8px}#mc-sim .mc-precision-bar .mc-precision{padding:1px}#mc-sim .mc-pose-section h4{margin:0 10px 0 0}#mc-sim .mc-pose-section{margin:7px 0 5px}#mc-sim .mc-axis-description{display:none}#mc-sim .mc-axis-illustration{height:100px}#mc-sim .mc-axis .mc-pose-slider{min-height:12px;margin:7px 0 4px}#mc-sim .mc-lens-controls{display:flex;align-items:center;flex-wrap:wrap}#mc-sim .mc-lens-controls .mc-lens-top{width:180px;margin:0 12px 0 0}#mc-sim .mc-lens-controls .mc-lens-top h4{max-width:100px;font-size:11px}#mc-sim .mc-lens-controls #mc-fov-range{flex:1;min-width:90px;min-height:12px;width:auto;margin:0 12px 0 0}#mc-sim .mc-lens-controls .mc-range-labels{display:none}#mc-sim .mc-lens-controls .mc-lens-presets{margin:0;gap:2px}#mc-sim .mc-lens-presets button{padding:3px 6px}#mc-sim .mc-camera-tools{position:static}}
+@media(min-width:621px) and (max-height:950px){#mc-sim .mc-axis-illustration{height:78px}#mc-sim .mc-axis-grid>.mc-axis{padding:7px}#mc-sim .mc-precision-bar{margin-bottom:4px}}
+/* Directional movement and direct angle arcs replace the six straight sliders. */
+#mc-sim .mc-direction-control{position:relative;height:142px;display:flex;align-items:center;justify-content:center}#mc-sim .mc-direction-control .mc-axis-illustration{width:100%;height:138px;margin:0}#mc-sim .mc-direction-control button{position:absolute;z-index:1;padding:4px 7px;font-size:10px;min-height:25px;background:var(--mc-raised);border:1px solid #345164;color:var(--mc-text);gap:3px}#mc-sim .mc-direction-control button:hover{background:var(--mc-active);border-color:var(--mc-accent)}#mc-sim .mc-direction-control button svg{width:12px;height:12px}#mc-sim [data-axis=x] .mc-direction-minus{left:0;top:60px}#mc-sim [data-axis=x] .mc-direction-plus{right:0;top:60px}#mc-sim [data-axis=y] .mc-direction-plus,#mc-sim [data-axis=z] .mc-direction-plus{top:2px;left:50%;transform:translateX(-50%)}#mc-sim [data-axis=y] .mc-direction-minus,#mc-sim [data-axis=z] .mc-direction-minus{bottom:2px;left:50%;transform:translateX(-50%)}#mc-sim [data-axis=y] .mc-direction-control>.mc-axis-illustration,#mc-sim [data-axis=z] .mc-direction-control>.mc-axis-illustration{height:100px;width:85%}
+#mc-sim .mc-axis-illustration[data-angle-control]{cursor:grab;touch-action:none;border-radius:7px}#mc-sim .mc-axis-illustration[data-angle-control]:focus{outline:1px solid var(--mc-accent)}#mc-sim .mc-axis-illustration[data-angle-control]:active{cursor:grabbing}#mc-sim .mc-axis-illustration .mc-angle-track{stroke:#476779;stroke-width:5;fill:none}#mc-sim .mc-axis-illustration .mc-angle-zone{fill:#52d7bf35;stroke:#62dbc280;stroke-width:1}#mc-sim .mc-axis-illustration .mc-angle-ray{stroke:var(--mc-accent);stroke-width:1.8}#mc-sim .mc-angle-handle{fill:#76efd5;stroke:#103f3d;stroke-width:3}#mc-sim .mc-angle-camera rect{fill:#223c50;stroke:#bed1df;stroke-width:1.5}#mc-sim .mc-angle-camera circle{fill:#102432;stroke:#85b2cb}#mc-sim .mc-angle-camera path{stroke:#bed1df;stroke-width:1.5}#mc-sim .mc-angle-limit,#mc-sim .mc-angle-zero{fill:var(--mc-muted);font-size:11px;font-family:'Segoe UI',sans-serif}#mc-sim .mc-angle-readout{fill:var(--mc-accent);font-size:16px;font-weight:600;font-family:'Segoe UI',sans-serif}#mc-sim .mc-axis .mc-stepper{justify-content:center}#mc-sim .mc-axis .mc-stepper input{flex:0 1 95px;width:95px}#mc-sim .mc-axis-unit{margin-right:5px}
+@media(min-width:621px) and (max-height:950px){#mc-sim .mc-direction-control{height:115px}#mc-sim .mc-direction-control .mc-axis-illustration{height:112px}#mc-sim [data-axis=x] .mc-direction-minus,#mc-sim [data-axis=x] .mc-direction-plus{top:45px}#mc-sim [data-axis=y] .mc-direction-control>.mc-axis-illustration,#mc-sim [data-axis=z] .mc-direction-control>.mc-axis-illustration{height:75px}}
+
+/* Explicit flex sizing and margins for Coherent (which does not reliably support flex gap). */
+#mc-sim .mc-camera-select{display:flex;flex-wrap:wrap;padding:7px 4px;align-items:center}
+#mc-sim .mc-camera-select>.mc-entity-name{flex:1 0 100%;width:100%;min-width:0;margin-bottom:3px}
+#mc-sim .mc-entity-label{flex:1;min-width:0;overflow-wrap:break-word}
+#mc-sim .mc-entity-name>.mc-icon{flex:0 0 16px;margin-right:6px}
+#mc-sim .mc-camera-select>.mc-live,#mc-sim .mc-camera-select>.mc-key{flex:0 0 auto;margin:2px 5px 0 0}
+#mc-sim .mc-camera-binding{position:static!important;display:flex;justify-content:flex-end;flex-wrap:wrap;margin:0 0 4px!important}
+#mc-sim .mc-camera-binding button{margin-left:4px;margin-bottom:3px;font-size:10px;padding:3px 6px}
+#mc-sim .mc-camera-heading{min-height:40px}
+#mc-sim .mc-color-palette{display:flex;flex-wrap:wrap}
+#mc-sim .mc-color-choice{border:1px solid var(--mc-line);margin:5px;padding:12px;min-width:100px}
+#mc-sim .mc-color-choice[aria-pressed=true]{border-color:var(--mc-accent);background:var(--mc-active)}
+#mc-sim .mc-reorder-grip,#mc-sim [data-drop-kind]{touch-action:none;user-select:none;-webkit-user-select:none}
+
+#mc-sim .mc-direction-control{height:130px}
+#mc-sim .mc-direction-control .mc-axis-illustration{height:126px}
+@media(min-width:621px) and (max-height:950px){#mc-sim .mc-direction-control{height:103px}#mc-sim .mc-direction-control .mc-axis-illustration{height:100px}}
+
+#mc-sim .mc-mouse-look-area{top:12%;height:88%;min-height:0;background:rgba(0,0,0,0.001)}
+
+/* Keep every arrow endpoint outside the button hit boxes. */
+#mc-sim [data-axis=x] .mc-direction-minus,#mc-sim [data-axis=x] .mc-direction-plus{top:2px}
+#mc-sim [data-axis=x] .mc-direction-control>.mc-axis-illustration{position:absolute;top:31px;left:0;width:100%;height:calc(100% - 31px)}
+#mc-sim [data-axis=y] .mc-direction-plus,#mc-sim [data-axis=z] .mc-direction-plus{left:0;top:6px;transform:none}
+#mc-sim [data-axis=y] .mc-direction-minus,#mc-sim [data-axis=z] .mc-direction-minus{left:0;bottom:6px;transform:none}
+#mc-sim [data-axis=y] .mc-direction-control>.mc-axis-illustration,#mc-sim [data-axis=z] .mc-direction-control>.mc-axis-illustration{position:absolute;right:0;top:0;width:65%;height:100%;margin:0}
+
+/* Use direct choices: native select popups are unreliable in the simulator host. */
+#mc-sim .mc-setting-choices{display:flex;flex-shrink:0;border:1px solid var(--mc-line);border-radius:8px;padding:3px}
+#mc-sim .mc-setting-choices button{min-width:56px;min-height:32px;margin:0 2px;padding:6px 10px;color:var(--mc-muted)}
+#mc-sim .mc-setting-choices button[aria-pressed="true"]{background:var(--mc-accent);color:var(--mc-accent-ink)}
+/* Explicit block widths avoid Coherent shrinking the name next to the Live badge. */
+#mc-sim .mc-camera-row{display:block;position:relative;padding:0 26px 0 18px}
+#mc-sim .mc-camera-row>.mc-reorder-grip{position:absolute;left:0;top:8px;width:18px}
+#mc-sim .mc-camera-row>.mc-row-star{position:absolute;right:0;top:8px;width:26px}
+#mc-sim .mc-camera-select{display:block;width:100%;padding:7px 3px;text-align:left}
+#mc-sim .mc-camera-select>.mc-entity-name{display:block;position:relative;width:100%;padding-left:22px;box-sizing:border-box;white-space:normal;overflow-wrap:normal}
+#mc-sim .mc-camera-select .mc-entity-name>.mc-icon{position:absolute;left:0;top:1px;width:16px;height:16px;margin:0}
+#mc-sim .mc-camera-select .mc-entity-label{display:block;width:100%;overflow-wrap:break-word;word-break:normal}
+#mc-sim[data-name-display="labels"] .mc-camera-select>.mc-entity-name{padding-left:0}
+#mc-sim[data-name-display="icons"] .mc-camera-select>.mc-entity-name{min-height:18px}
+#mc-sim[data-name-display="icons"] .mc-camera-select .mc-entity-label{display:none}
+#mc-sim .mc-camera-select>.mc-live,#mc-sim .mc-camera-select>.mc-key{display:inline-block;vertical-align:middle;margin:3px 5px 0 0}
+/* Only the library list scrolls; Add camera stays at the bottom. */
+#mc-sim[data-surface="main"] .mc-camera-layout>.mc-browser{display:flex;flex-direction:column;overflow:hidden}
+#mc-sim .mc-browser-title,#mc-sim .mc-browser>.mc-search,#mc-sim .mc-category-toggle,#mc-sim .mc-browser-bottom{flex-shrink:0}
+#mc-sim .mc-browser>.mc-tree{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;position:relative}
+#mc-sim .mc-browser-bottom{margin-top:auto;padding-top:10px}
+#mc-sim .mc-color-palette{border-bottom:1px solid var(--mc-line);padding:0 0 10px;margin-bottom:10px}
+#mc-sim .mc-color-choice{min-width:76px;padding:7px;margin:3px}
+@media(max-width:620px){#mc-sim[data-surface="main"][data-browser-open="false"] .mc-camera-layout>.mc-browser{display:none}}
+/* Category headings also avoid nested shrinking flex items in Coherent. */
+#mc-sim .mc-category-line{display:block;position:relative;padding:0 22px 0 18px}
+#mc-sim .mc-category-line>.mc-reorder-grip{position:absolute;left:0;top:7px;width:18px}
+#mc-sim .mc-category-line>.mc-category-menu{position:absolute;right:0;top:7px;width:22px}
+#mc-sim .mc-category-head{display:block;position:relative;width:100%;padding:9px 18px 9px 15px;text-align:left;min-width:0}
+#mc-sim .mc-category-head>svg{position:absolute;left:0;top:10px;width:13px;height:13px}
+#mc-sim .mc-category-head>.mc-count{position:absolute;right:0;top:9px;margin:0}
+#mc-sim .mc-category-head>.mc-entity-name{position:relative;display:block;padding-left:19px;width:100%;box-sizing:border-box}
+#mc-sim .mc-category-head .mc-entity-name>svg{position:absolute;left:0;top:1px;width:15px;height:15px;margin:0}
+#mc-sim .mc-category-head .mc-entity-label{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mc-sim[data-name-display="labels"] .mc-category-head>.mc-entity-name{padding-left:0}
+#mc-sim[data-name-display="icons"] .mc-category-head .mc-entity-label{display:none}
+
+/* Remove redundant mini category/camera picker. */
+#mc-sim #mc-mini-panel #mc-quick-picker{display:none}
+
+/* On-demand airport creation dialog. */
+#mc-sim .mc-airport-results label { display:flex; align-items:center; gap:8px; padding:5px 0; }
+#mc-sim .mc-airport-results input { width:auto; }
+#mc-sim .mc-airport-results details { margin:8px 0; }
+#mc-sim .mc-airport-options { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; }
+#mc-sim .mc-airport-shade .mc-dialog { width:620px; max-width:calc(100vw - 32px); }
+#mc-sim .mc-airport-results label > span { white-space:normal; min-width:0; }
+#mc-sim #mc-airport-codes { width:100%; }
+#mc-sim .mc-airport-options label { display:flex; align-items:center; gap:6px; min-width:0; }
+#mc-sim .mc-airport-options input[type="checkbox"] { width:auto; flex:none; }
+#mc-sim .mc-airport-options input[type="number"] { width:65px; }
+#mc-sim #mc-airport-nearby button { margin:3px; }
+#mc-sim .mc-airport-results > section { border-top:1px solid var(--mc-border); margin-top:12px; padding-top:8px; }
+
+/* Airport creation: explicit controls also work in the simulator's embedded browser. */
+#mc-sim .mc-airport-shade .mc-dialog { width:680px; max-height:calc(100vh - 32px); }
+#mc-sim .mc-airport-shade #mc-dialog-body { padding:4px 14px 0 0; }
+#mc-sim .mc-airport-shade .mc-airport-heading { margin:16px 0 9px; color:var(--mc-text); font-size:13px; }
+#mc-sim .mc-airport-saved { padding:10px 12px; border:1px solid var(--mc-line); border-radius:8px; background:var(--mc-raised); margin:10px 0; }
+#mc-sim .mc-airport-saved summary { color:var(--mc-muted); cursor:pointer; font-size:12px; }
+#mc-sim .mc-airport-chips { display:flex; flex-wrap:wrap; margin:0 -3px 8px; }
+#mc-sim .mc-airport-code-label { display:block; margin-bottom:6px; color:var(--mc-muted); font-size:12px; }
+#mc-sim #mc-airport-codes { text-transform:uppercase; letter-spacing:.07em; margin-bottom:5px; }
+#mc-sim .mc-airport-options { display:flex; flex-wrap:wrap; margin:0; gap:0; }
+#mc-sim .mc-airport-choice { width:calc(50% - 8px); margin:4px; min-height:70px; padding:10px; border:1px solid var(--mc-line); border-radius:8px; text-align:left; white-space:normal; justify-content:flex-start; background:var(--mc-input); }
+#mc-sim .mc-airport-choice[aria-checked="true"] { border-color:var(--mc-accent); background:var(--mc-active); }
+#mc-sim .mc-airport-check { display:flex; justify-content:center; align-items:center; width:23px; height:23px; flex:none; border:1px solid var(--mc-muted); border-radius:5px; margin-right:10px; font-size:16px; }
+#mc-sim .mc-airport-choice[aria-checked="true"] .mc-airport-check { background:var(--mc-accent); color:var(--mc-bg); border-color:var(--mc-accent); }
+#mc-sim .mc-airport-choice-copy { display:flex; flex-direction:column; min-width:0; flex:1; }
+#mc-sim .mc-airport-choice-copy strong { font-size:12px; color:var(--mc-text); }
+#mc-sim .mc-airport-choice-copy small { font-size:11px; color:var(--mc-muted); line-height:1.4; margin-top:4px; }
+#mc-sim .mc-airport-placement { display:flex; margin:0 0 16px; }
+#mc-sim .mc-airport-measure { display:flex; flex-direction:column; width:calc(50% - 10px); margin:0 5px; font-size:12px; color:var(--mc-muted); }
+#mc-sim .mc-airport-value { display:flex; align-items:center; border:1px solid var(--mc-line); border-radius:7px; background:var(--mc-input); margin-top:7px; }
+#mc-sim .mc-airport-value input { flex:1; min-width:0; width:100%; border:0; background:transparent; text-align:left; }
+#mc-sim .mc-airport-value > span { padding:0 12px; flex:none; }
+#mc-sim #mc-airport-preview { width:100%; min-height:40px; margin-bottom:8px; }
+#mc-sim .mc-airport-shade #mc-dialog-body > details { padding:10px 0; border-top:1px solid var(--mc-line); }
+#mc-sim .mc-airport-shade #mc-dialog-actions { padding-top:12px; }
+/* Bounded dock: additional cameras scroll rather than covering more of the scene. */
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock { height:164px; max-height:164px; overflow:hidden; flex-wrap:nowrap; }
+#mc-sim[data-surface="mini"] .mc-dock-categories { min-height:0; height:142px; max-height:142px; overflow-y:auto; padding-right:12px; }
+#mc-sim[data-surface="mini"] .mc-dock-body { min-height:0; height:142px; flex:1; min-width:0; overflow:hidden; }
+#mc-sim[data-surface="mini"] .mc-dock-tools { max-width:calc(100% - 84px); flex-wrap:nowrap; gap:3px; overflow-x:auto; min-height:32px; justify-content:flex-start; }
+#mc-sim[data-surface="mini"] .mc-dock-tools button { min-height:25px; padding:4px 6px; font-size:10px; flex:none; }
+#mc-sim[data-surface="mini"] .mc-dock-favorites { height:82px; max-height:82px; min-height:0; overflow-y:auto; overflow-x:hidden; padding-right:12px; flex-wrap:wrap; }
+#mc-sim[data-surface="mini"] .mc-dock-favorites button { flex:none; max-width:100%; }
+#mc-sim .mc-dock-tools button[aria-pressed="true"],#mc-sim .mc-camera-tools button[aria-pressed="true"] { color:var(--mc-accent); background:var(--mc-active); }
+#mc-sim .mc-dock-airport { grid-column:1/-1; }
+#mc-sim .mc-dock-airport button { margin-left:8px; }
+#mc-sim .mc-dock-airport summary { padding:4px; cursor:pointer; }
+#mc-sim .mc-dock-favorites button[aria-pressed="true"] { outline:2px solid var(--mc-accent, #63dbc4); outline-offset:-2px; box-shadow:inset 0 -3px var(--mc-accent, #63dbc4); }

@@ -60,6 +60,7 @@ struct ManualInput {
     double lookRight = 0, lookUp = 0;
     double moveForward = 0, moveRight = 0, moveUp = 0;
     double zoomIn = 0;
+    bool fast = false;
 };
 
 struct ManualSpeeds {
@@ -109,7 +110,10 @@ public:
     void select(const CameraPose& target, const TransitionSpec& spec, bool resetLook);
     // Places the camera immediately (used for initial seeding and live draft previews).
     void place(const CameraPose& pose);
-    void tick(double dtSeconds, const ManualInput& input);
+    void tick(double dtSeconds, const ManualInput& input, std::optional<Quat> movementOrientation = {});
+    void offsetLook(double headingDeg, double pitchDeg);
+    void offsetPosition(const Vec3& delta);
+    void offsetFov(double deltaRad);
     void freeze();  // simulator suspension: stop time and held motion
     void recenterLook() { look_ = {}; mover_.neutralize(); }
     void setSpeeds(const ManualSpeeds& s) { mover_.setSpeeds(s); }

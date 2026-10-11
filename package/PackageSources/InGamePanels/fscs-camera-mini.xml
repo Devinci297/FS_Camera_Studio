@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Mini control panel: a bounded strip centred in the bottom safe area (design 2.0 section 2.2, section 4.4). Hover mode needs about
-     110 px of height (dock plus the handle band). Whether hover inside
-     a toolbar window and click-through around it behave as designed is qualification gate H01. -->
+<!-- Keep explicit fallback dimensions: on the installed MSFS build, the preset alone produced a 67px viewport.
+     FULL_SCREEN remains a live qualification item. The page reports only the bottom strip/dock for hit testing. -->
 <SimBase.Document Type="InGamePanels" version="1,0">
     <Filename>fscs-camera-mini.spb</Filename>
-    <InGamePanels.InGamePanelDefinition id="PANEL_FSCS_CAMERA_MINI" Name="Camera Studio Mini"
-        url="html_ui/InGamePanels/FSCameraStudio/mini.html" resizeDirections="Both"
-        minWidth="30" minHeight="11" defaultWidth="52" defaultHeight="13" defaultTop="85" defaultRight="24"
+    <InGamePanels.InGamePanelDefinition id="PANEL_FSCS_CAMERA_MINI_DOCK" Name="Camera Studio Mini"
+        url="html_ui/InGamePanels/FSCameraStudio/mini.html" resizeDirections="None"
+        headerVisible="false" collapsible="false"
+        defaultWidth="100" defaultHeight="100" defaultTop="0" HAnchor="CENTER"
         icon="ICON_TOOLBAR_FSCS_CAMERA_MINI" buttonVisible="true">
+        <Preset PanelLayout="FULL_SCREEN" HAnchor="CENTER" />
+        <ShowOnEvent>CHAIN_MESSAGE_FLIGHT_END_LOADING</ShowOnEvent>
     </InGamePanels.InGamePanelDefinition>
 </SimBase.Document>
