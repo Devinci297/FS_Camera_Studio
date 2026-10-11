@@ -96,7 +96,7 @@ TEST_CASE("module: creating a profile for the loaded aircraft opens it and match
     CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{1});
     CHECK(m.app.workingProfile().is_object());
     CHECK(m.app.coordinator().canActivate() == false);  // adapter not qualified by default
-    CHECK(m.app.coordinator().blockReason().find("not qualified") != std::string::npos);
+    CHECK(m.app.coordinator().blockReason().find("axis check") != std::string::npos);
 }
 
 TEST_CASE("module: drafts are module-owned, mirrored to every surface, and saved as one transaction") {

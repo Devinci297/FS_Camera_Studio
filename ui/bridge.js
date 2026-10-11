@@ -139,6 +139,13 @@
       } else if (message.type === 'event') {
         if (message.to && message.to !== uiInstanceId) return;
         if (message.name === 'Snapshot') snapshotSeen = true;
+        // Every event envelope carries the module's boot id and session epoch: keep the echo fields current.
+        if (message.moduleBootId) {
+          const rebooted = context.moduleBootId !== null && message.moduleBootId !== context.moduleBootId;
+          context.moduleBootId = message.moduleBootId;
+          if (rebooted && message.name !== 'Snapshot') post('RequestSnapshot', {});
+        }
+        if (typeof message.sessionEpoch === 'number') context.sessionEpoch = message.sessionEpoch;
         emit('event', message);
       }
     });

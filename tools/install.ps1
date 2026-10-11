@@ -36,6 +36,11 @@ if (Get-Process -Name 'FlightSimulator2024' -ErrorAction SilentlyContinue) {
     throw 'Close Microsoft Flight Simulator 2024 before installing or removing add-ons.'
 }
 
+# Never remove the installed copy unless a complete new package is ready to replace it.
+if (-not $Uninstall -and -not (Test-Path (Join-Path $package 'layout.json'))) {
+    throw "No built package at $package. Run tools\build.ps1, then tools\package.ps1 -Compile."
+}
+
 $target = Join-Path $Community 'fs-camera-studio'
 if (Test-Path $target) {
     $item = Get-Item $target -Force
@@ -45,9 +50,6 @@ if (Test-Path $target) {
 }
 if ($Uninstall) { return }
 
-if (-not (Test-Path (Join-Path $package 'layout.json'))) {
-    throw "No built package at $package. Run tools\build.ps1, then tools\package.ps1 -Compile."
-}
 if ($Copy) {
     Copy-Item -Recurse $package $target
 } else {

@@ -48,8 +48,11 @@ $simHead = @'
 <link rel="import" href="/templates/ingameUi/ingameUi.html" />
 '@
 $panels = @(
-    @{ Surface = 'main'; File = 'main.html'; PanelId = 'PANEL_FSCS_CAMERA_STUDIO'; Title = 'Camera Studio' },
-    @{ Surface = 'mini'; File = 'mini.html'; PanelId = 'PANEL_FSCS_CAMERA_MINI'; Title = 'Camera Studio Mini' }
+    # Main: the simulator's own window frame gives a title bar to drag and native resizing; the editor fills it.
+    @{ Surface = 'main'; File = 'main.html'; PanelId = 'PANEL_FSCS_CAMERA_STUDIO'; Title = 'Camera Studio'; Id = 'FSCSMain'; Attrs = 'class="ingameUiFrame"' },
+    # Mini: borderless; the window height follows the content (content-fit + horizontal-only resize), so no
+    # invisible slack blocks cockpit clicks.
+    @{ Surface = 'mini'; File = 'mini.html'; PanelId = 'PANEL_FSCS_CAMERA_MINI'; Title = 'Camera Studio Mini'; Id = 'FSCSMini'; Attrs = 'class="ingameUiFrame panelInvisible" content-fit="true" min-height="0" resize="x"' }
 )
 foreach ($p in $panels) {
     $html = $index
@@ -61,7 +64,7 @@ foreach ($p in $panels) {
     $html = [regex]::Replace($html, '<meta http-equiv="Content-Security-Policy"[^>]*>\s*', '')
     $html = $html.Replace('<link rel="stylesheet" href="app.css">',
         $simHead + '<link rel="stylesheet" href="app.css">' + "`n" + '<link rel="stylesheet" href="panel-host.css">')
-    $open = '<ingame-ui id="FSCSPanel" panel-id="' + $p.PanelId + '" title="' + $p.Title + '" class="ingameUiFrame panelInvisible">'
+    $open = '<ingame-ui id="' + $p.Id + '" panel-id="' + $p.PanelId + '" title="' + $p.Title + '" ' + $p.Attrs + '>'
     $html = [regex]::Replace($html, '<div id="mc-sim"', ($open + "`n<div id=`"mc-sim`""), 1)
     # The surface is set by a script file, not an inline script.
     $surfaceJs = 'surface-' + $p.Surface + '.js'

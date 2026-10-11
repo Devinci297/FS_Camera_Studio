@@ -99,6 +99,7 @@ private:
     void diag(const std::string& line);
 
     IModuleServices& services_;
+    profiles::IStorageDriver& storage_;
     profiles::Repository repo_;
     Coordinator coord_;
     InputRouter router_;
@@ -127,6 +128,9 @@ private:
     double testUntil_ = 0;
     std::vector<std::pair<int, std::string>> controllers_;
     std::deque<std::string> diagnostics_;
+    bool diagDirty_ = false, diagWriting_ = false;
+    double lastDiagWrite_ = -10;
+    void writeDiagnostics(double now);
     double now_ = 0;
 };
 

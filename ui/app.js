@@ -35,8 +35,25 @@
   let textFocus = false;
   const isTextEntry = el => !!el && (el.tagName === 'TEXTAREA' ||
     (el.tagName === 'INPUT' && ['text', 'search', 'number'].indexOf(el.type) >= 0) || el.isContentEditable);
+  // MSFS panels must also claim the keyboard from the simulator while a text field has focus, otherwise
+  // typing triggers sim shortcuts: Coherent FOCUS_INPUT_FIELD / UNFOCUS_INPUT_FIELD with a stable id per input.
+  let coherentFieldId = null, inputIdSeq = 0;
+  const hasCoherent = () => typeof window.Coherent !== 'undefined' && window.Coherent && typeof window.Coherent.trigger === 'function';
+  function inputFieldId(el) {
+    if (!el.getAttribute('data-fscs-input')) el.setAttribute('data-fscs-input', 'fscs-' + (el.id || 'input-' + (++inputIdSeq)));
+    return el.getAttribute('data-fscs-input');
+  }
+  function claimKeyboard(el) {
+    const id = el ? inputFieldId(el) : null;
+    if (id === coherentFieldId) return;
+    if (coherentFieldId && hasCoherent()) { try { window.Coherent.trigger('UNFOCUS_INPUT_FIELD', coherentFieldId); } catch (error) { /* host without input focus API */ } }
+    coherentFieldId = id;
+    if (id && hasCoherent()) { try { window.Coherent.trigger('FOCUS_INPUT_FIELD', id, '', '', '', el.type === 'number'); } catch (error) { /* host without input focus API */ } }
+  }
   const reportTextFocus = () => {
-    const now = isTextEntry(document.activeElement);
+    const active = document.activeElement;
+    const now = isTextEntry(active);
+    claimKeyboard(now ? active : null);
     if (now !== textFocus) { textFocus = now; bridge.send('TextFocus', { focused: now }); }
   };
   document.addEventListener('focusin', reportTextFocus, true);
@@ -50,6 +67,13 @@
   const pad2 = n => (n < 10 ? '0' : '') + n;
   const fmt = (value, digits) => { const t = Number(value).toFixed(digits); return /^-0(\.0+)?$/.test(t) ? t.slice(1) : t; };
   const fmtFov = deg => String(Math.round(deg * 10) / 10);
+  /** Next animation frame, or 50 ms if frames are not delivered (hidden/occluded panels): runs once. */
+  function nextFrame(fn) {
+    let done = false;
+    const run = () => { if (done) return; done = true; fn(typeof performance !== 'undefined' ? performance.now() : Date.now()); };
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(run);
+    setTimeout(run, 50);
+  }
   function empty(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
   function add(parent) { for (let i = 1; i < arguments.length; i++) { const c = arguments[i]; if (c === null || c === undefined) continue; parent.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); } return parent; }
   function make(tag, text, className) {
@@ -152,7 +176,7 @@
     profiles: [], working: null, pendingCommit: null, look: null, userReleased: false, fault: null,
     page: 'cameras', tab: 'position', precision: 'normal', expanded: {}, angleCache: null,
     queue: [], inflight: null, flushTimer: 0, lastFlush: 0, idleWaiters: [], commitWaiters: {},
-    pendingCapture: null, dismissedAircraftKey: null, miniPicking: false, editTimer: 0,
+    snapshotWaiters: [], pendingCapture: null, dismissedAircraftKey: null, miniPicking: false, editTimer: 0,
     assign: null, manualOpen: false, peekToken: null,
   };
   const W = () => S.working;
@@ -256,12 +280,32 @@
   const saveBindings = () => queueOps([{ op: 'setBindings', bindings: S.working.bindings }]);
 
   /** Send a camera command after pending edits reached the module (recall uses the working draft). */
-  function command(action, payload, quietReasons) {
-    return whenIdle().then(() => bridge.request(action, payload)).then(ack => {
-      if ((ack.status === 'Rejected' || ack.status === 'TimedOut') && !(quietReasons && quietReasons.indexOf(ack.reason) >= 0)) {
+  // Camera-motion actions carry the session epoch; on staleEpoch/staleBoot they are retried once after a fresh snapshot.
+  const MOTION_ACTIONS = ['ActivateCamera', 'EnableCamera', 'BeginPeek', 'CycleCamera', 'NextCategory', 'ReturnToPilot', 'CaptureView', 'SeedFromDefinition', 'BakeTemporaryLook'];
+  function waitForSnapshot(ms) {
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { S.snapshotWaiters = S.snapshotWaiters.filter(fn => fn !== done); resolve(false); }, ms);
+      function done() { clearTimeout(timer); resolve(true); }
+      S.snapshotWaiters.push(done);
+    });
+  }
+  /** Send a camera command after pending edits reached the module. options.quiet: no toast on rejection. */
+  function command(action, payload, options) {
+    const opts = options || {};
+    const send = () => whenIdle().then(() => bridge.request(action, payload));
+    return send().then(ack => {
+      const stale = ack.status === 'Rejected' && (ack.reason === 'staleEpoch' || ack.reason === 'staleBoot');
+      if (stale && MOTION_ACTIONS.indexOf(action) >= 0) {
+        const fresh = waitForSnapshot(2000);
+        bridge.send('RequestSnapshot', {});
+        return fresh.then(send);
+      }
+      if (stale) bridge.send('RequestSnapshot', {});
+      return ack;
+    }).then(ack => {
+      if ((ack.status === 'Rejected' || ack.status === 'TimedOut') && !opts.quiet) {
         const text = reasonText(ack.reason);
         if (text) toast(text, 'warn');
-        if (ack.reason === 'staleEpoch' || ack.reason === 'staleBoot') bridge.send('RequestSnapshot', {});
       }
       return ack;
     });
@@ -298,6 +342,9 @@
     applySettings();
     render();
     renderVisiblePage();
+    const waiters = S.snapshotWaiters;
+    S.snapshotWaiters = [];
+    waiters.forEach(fn => fn());
   }
   const EVENTS = {
     Snapshot: applySnapshot,
@@ -511,7 +558,7 @@
     empty($('mc-dialog-actions'));
     $('mc-dialog-error').textContent = '';
     $('mc-dialog-shade').hidden = false;
-    requestAnimationFrame(() => { fitDialog(); if (!$('mc-dialog-shade').contains(document.activeElement)) $('mc-dialog-close').focus(); });
+    nextFrame(() => { fitDialog(); if (!$('mc-dialog-shade').contains(document.activeElement)) $('mc-dialog-close').focus(); });
     return $('mc-dialog-body');
   }
   function closeDialog(silent) {
@@ -534,7 +581,7 @@
     const host = empty($('mc-dialog-actions'));
     actions.forEach(entry => add(host, button(entry[0], entry[1], entry[2] || 'mc-secondary', entry[3])));
     fitDialog();
-    requestAnimationFrame(fitDialog);
+    nextFrame(() => { fitDialog(); updateScrollbars(); });
   }
   const dialogError = text => { $('mc-dialog-error').textContent = text || ''; };
   function field(labelText, initial, type) {
@@ -558,7 +605,7 @@
     };
     name.input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
     dialogActions([['Cancel', () => closeDialog()], [actionLabel || 'Save', submit, 'mc-primary']]);
-    requestAnimationFrame(() => { name.input.focus(); name.input.select(); });
+    nextFrame(() => { name.input.focus(); name.input.select(); });
   }
   function confirmDialog(title, message, action, actionLabel) {
     const body = openDialog(title);
@@ -606,6 +653,7 @@
       $('mc-page-' + tab.getAttribute('data-page')).hidden = !on;
     });
     renderVisiblePage();
+    nextFrame(updateScrollbars);
   }
   function renderVisiblePage() {
     if (S.page === 'profiles') renderProfiles();
@@ -952,13 +1000,13 @@
     const start = performance.now() + (reducedMotion() ? 0 : t.delaySeconds * 1000);
     function tick(time) {
       if (token !== motionToken) return;
-      if (time < start) { requestAnimationFrame(tick); return; }
+      if (time < start) { nextFrame(tick); return; }
       const u = duration ? Math.min(1, (time - start) / duration) : 1;
       marker.style.left = (M.ease(t.kind, u) * 100) + '%';
-      if (u < 1) requestAnimationFrame(tick);
+      if (u < 1) nextFrame(tick);
     }
     marker.style.left = '0%';
-    requestAnimationFrame(tick);
+    nextFrame(tick);
   }
 
   /* Camera & category operations */
@@ -1528,13 +1576,16 @@
   }
   function assignDialog(spec) {
     const existing = findBinding(spec.action, spec.viewId);
-    const body = openDialog('Assign ' + spec.name, () => { S.assign = null; });
+    // Closing the dialog always hands the keyboard back to the simulator.
+    const body = openDialog('Assign ' + spec.name, () => { S.assign = null; claimKeyboard(null); setTimeout(reportTextFocus, 0); });
     S.assign = { spec, staged: null, held: {}, controllers: null, tested: { down: false, up: false } };
     body.appendChild(make('p', 'Press a key combination now. Esc cancels. Up to two modifier keys (Ctrl, Alt, Shift) plus one key.'));
-    const capture = make('div', existing ? existing.input.label : 'Waiting for a key...', 'mc-binding-input');
-    capture.tabIndex = 0;
+    // A (read-only) text input, so the panel claims the keyboard from the sim while capturing.
+    const capture = make('input', undefined, 'mc-binding-input');
+    capture.type = 'text';
+    capture.readOnly = true;
+    capture.value = existing ? existing.input.label : 'Waiting for a key...';
     capture.id = 'mc-assign-capture';
-    capture.setAttribute('role', 'textbox');
     capture.setAttribute('aria-label', 'Key capture. Press a key combination');
     capture.setAttribute('data-capturing', 'true');
     body.appendChild(capture);
@@ -1552,7 +1603,7 @@
       event.preventDefault();
       event.stopPropagation();
       const result = keyCapture(event, S.assign.held);
-      if (result.pending) { capture.textContent = Object.keys(S.assign.held).filter(c => S.assign.held[c]).map(c => MODIFIERS[c][1]).join(' + ') + ' + ...'; return; }
+      if (result.pending) { capture.value = Object.keys(S.assign.held).filter(c => S.assign.held[c]).map(c => MODIFIERS[c][1]).join(' + ') + ' + ...'; return; }
       if (result.error) { dialogError(result.error); S.assign.held = {}; return; }
       stageInput(result.input, result.note);
       S.assign.held = {};
@@ -1561,13 +1612,13 @@
     dialogActions([['Cancel', () => closeDialog()], ['Assign', applyAssign, 'mc-primary']]);
     updateAssignButton();
     bridge.send('ListControllers', {});
-    requestAnimationFrame(() => capture.focus());
+    nextFrame(() => capture.focus());
   }
   function stageInput(input, note) {
     const a = S.assign;
     if (!a) return;
     a.staged = input;
-    $('mc-assign-capture').textContent = input.label;
+    $('mc-assign-capture').value = input.label;
     const noteEl = $('mc-assign-note');
     noteEl.hidden = !note;
     noteEl.textContent = note || '';
@@ -1783,7 +1834,7 @@
         showImportReport(ack.result || {});
       });
     }, 'mc-primary']]);
-    requestAnimationFrame(() => input.focus());
+    nextFrame(() => input.focus());
   }
   function showImportReport(result) {
     const report = result.report || {};
@@ -1907,7 +1958,7 @@
     nodes.forEach(node => add(body, node));
     dialogError('');
     dialogActions(actions);
-    requestAnimationFrame(() => { const target = $('mc-dialog-actions').querySelector('.mc-primary') || $('mc-dialog-close'); if (target) target.focus(); });
+    nextFrame(() => { const target = $('mc-dialog-actions').querySelector('.mc-primary') || $('mc-dialog-close'); if (target) target.focus(); });
   }
   function endQualification() {
     if (Q && Q.started) bridge.send('QualificationEnd', {});
@@ -1935,17 +1986,33 @@
         || [S.selection.cameraId, P().defaultCameraId].map(camIn).filter(c => c && modeAvailability(c.mode).available)[0];
       if (!target) { dialogError('Choose a cockpit camera in this profile first.'); return null; }
       q.cameraId = target.id;
-      return command('ActivateCamera', { cameraId: target.id })
-        .then(() => waitFor(() => Q !== q || (S.ownership.state === 'Active' && S.active.cameraId === q.cameraId && !S.active.transitioning), 8000))
+      let activation = null;
+      // State events are coalesced: wait (max 2 s) for the CapabilitiesChanged that follows QualificationStart.
+      return waitFor(() => Q !== q || S.caps.canActivate, 2000)
+        .then(() => (Q === q ? command('ActivateCamera', { cameraId: target.id }, { quiet: true }) : null))
+        .then(ack => {
+          activation = ack;
+          if (!ack || ack.status === 'Rejected' || ack.status === 'TimedOut') return false;
+          return waitFor(() => Q !== q || (S.ownership.state === 'Active' && S.active.cameraId === q.cameraId && !S.active.transitioning), 8000);
+        })
         .then(ok => {
           if (Q !== q) return;
           if (!ok) {
-            wizardStep('Simulator axis check', [make('p', 'Camera Studio could not take control of the view: ' + statusText() + '.')], [['Close', () => closeDialog()], ['Try again', startAxisCheck, 'mc-primary']]);
+            wizardStep('Simulator axis check', [make('p', 'Camera Studio could not take control of the view: ' + activationFailure(activation))], [['Close', () => closeDialog()], ['Try again', startAxisCheck, 'mc-primary']]);
             return;
           }
           probeStep();
         });
     });
+  }
+  /** The real reason activation did not reach Active: the ack's reason, else ownership, else capabilities. */
+  function activationFailure(ack) {
+    let text;
+    if (ack && (ack.status === 'Rejected' || ack.status === 'TimedOut')) text = reasonText(ack.reason);
+    else if (S.ownership.reason && S.ownership.state !== 'Active') text = reasonText(S.ownership.reason) + ' (' + (STATUS_TEXT[S.ownership.state] || S.ownership.state) + ')';
+    else if (S.ownership.state !== 'Active') text = STATUS_TEXT[S.ownership.state] || S.ownership.state;
+    else text = S.caps.blockReason || 'The view did not settle in time.';
+    return /[.!?]$/.test(text) ? text : text + '.';
   }
   function stepTitle(q, label) { return 'Step ' + (q.index + 1) + ' of ' + (q.axes.length + 1) + ' - ' + label; }
   function probeStep() {
@@ -2024,6 +2091,120 @@
     }
     wizardStep('Axis check result', nodes, [['Close', () => closeDialog(), 'mc-primary']]);
     renderSettings();
+  }
+
+  /* ------------- Custom scrollbars (Coherent GT shows no native scrollbars) ------------- */
+  const scrollers = [];
+  function attachScrollbar(el, axis) {
+    if (!el || el.getAttribute('data-fscs-scroll')) return;
+    const horizontal = axis === 'x';
+    const host = el.parentNode;
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    const track = make('div', undefined, 'mc-sb' + (horizontal ? ' mc-sb-x' : ''));
+    const thumb = make('div', undefined, 'mc-sb-thumb');
+    track.setAttribute('aria-hidden', 'true');
+    track.appendChild(thumb);
+    host.appendChild(track);
+    el.setAttribute('data-fscs-scroll', axis || 'y');
+    el.classList.add('mc-scroll');
+    const entry = { el, host, track, thumb, horizontal, thumbLen: 0, trackLen: 0 };
+    const metric = () => (horizontal
+      ? { size: el.clientWidth, total: el.scrollWidth, pos: el.scrollLeft }
+      : { size: el.clientHeight, total: el.scrollHeight, pos: el.scrollTop });
+    const setPos = v => { if (horizontal) el.scrollLeft = v; else el.scrollTop = v; };
+    entry.metric = metric;
+    el.addEventListener('scroll', () => updateScrollbar(entry));
+    // Wheel: let native scrolling work; if the host did not scroll the element, scroll it ourselves.
+    const onWheel = event => {
+      if (event.fscsScrolled) return;
+      const m = metric();
+      if (m.total <= m.size + 1) return;
+      let delta;
+      if (typeof event.deltaY === 'number') {
+        delta = horizontal && Math.abs(event.deltaX || 0) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+        if (event.deltaMode === 1) delta *= 16; else if (event.deltaMode === 2) delta *= m.size;
+      } else delta = -(event.wheelDelta || 0) * 0.4;
+      if (!delta || (delta < 0 && m.pos <= 0) || (delta > 0 && m.pos >= m.total - m.size - 1)) return; // let an outer region scroll
+      event.fscsScrolled = true;
+      const before = m.pos;
+      setTimeout(() => {
+        if (metric().pos === before) setPos(M.clamp(before + delta, 0, m.total - m.size));
+        updateScrollbar(entry);
+      }, 0);
+    };
+    el.addEventListener('wheel', onWheel);
+    el.addEventListener('mousewheel', onWheel);
+    // Thumb dragging and paging on the track.
+    thumb.addEventListener('mousedown', event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const start = horizontal ? event.clientX : event.clientY;
+      const startPos = metric().pos;
+      track.setAttribute('data-drag', 'true');
+      const move = e => {
+        const m = metric();
+        const room = Math.max(1, entry.trackLen - entry.thumbLen);
+        setPos(M.clamp(startPos + ((horizontal ? e.clientX : e.clientY) - start) * (m.total - m.size) / room, 0, m.total - m.size));
+        updateScrollbar(entry);
+      };
+      const up = () => { track.removeAttribute('data-drag'); document.removeEventListener('mousemove', move, true); document.removeEventListener('mouseup', up, true); };
+      document.addEventListener('mousemove', move, true);
+      document.addEventListener('mouseup', up, true);
+    });
+    track.addEventListener('mousedown', event => {
+      if (event.target === thumb || event.button !== 0) return;
+      event.preventDefault();
+      const rect = thumb.getBoundingClientRect();
+      const m = metric();
+      const forward = horizontal ? event.clientX > rect.right : event.clientY > rect.bottom;
+      setPos(M.clamp(m.pos + (forward ? 1 : -1) * m.size * 0.9, 0, m.total - m.size));
+      updateScrollbar(entry);
+    });
+    scrollers.push(entry);
+    updateScrollbar(entry);
+  }
+  function updateScrollbar(entry) {
+    const el = entry.el, track = entry.track, host = entry.host;
+    const m = entry.metric();
+    const visible = el.getClientRects().length > 0 && el.offsetParent !== null;
+    if (!visible || m.total <= m.size + 1) { if (track.style.display !== 'none') track.style.display = 'none'; return; }
+    const hostRect = host.getBoundingClientRect(), r = el.getBoundingClientRect();
+    const left = r.left - hostRect.left - host.clientLeft + host.scrollLeft;
+    const top = r.top - hostRect.top - host.clientTop + host.scrollTop;
+    track.style.display = 'block';
+    if (entry.horizontal) {
+      entry.trackLen = Math.max(0, r.width - 8);
+      track.style.left = (left + 4) + 'px';
+      track.style.top = (top + r.height - 8) + 'px';
+      track.style.width = entry.trackLen + 'px';
+    } else {
+      entry.trackLen = Math.max(0, r.height - 8);
+      track.style.left = (left + r.width - 8) + 'px';
+      track.style.top = (top + 4) + 'px';
+      track.style.height = entry.trackLen + 'px';
+    }
+    entry.thumbLen = Math.min(entry.trackLen, Math.max(24, entry.trackLen * m.size / m.total));
+    const offset = (entry.trackLen - entry.thumbLen) * (m.pos / Math.max(1, m.total - m.size));
+    if (entry.horizontal) { entry.thumb.style.width = entry.thumbLen + 'px'; entry.thumb.style.left = offset + 'px'; }
+    else { entry.thumb.style.height = entry.thumbLen + 'px'; entry.thumb.style.top = offset + 'px'; }
+  }
+  function updateScrollbars() { scrollers.forEach(updateScrollbar); }
+  function attachScrollbars() {
+    $$('.mc-panel > [role="tabpanel"]').forEach(el => attachScrollbar(el));
+    attachScrollbar(root.querySelector('.mc-browser'));
+    attachScrollbar($('mc-inspector'));
+    attachScrollbar($('mc-dialog-body'));
+    attachScrollbar($('mc-dock-favorites'), 'x');
+    // Resize events are unreliable in-sim: poll the window size and content every 500 ms as well.
+    let lastSize = '';
+    const tick = () => {
+      const size = document.body.clientWidth + 'x' + window.innerHeight;
+      if (size !== lastSize) { lastSize = size; if (SURFACE === 'demo') sizeMiniClearance(); }
+      updateScrollbars();
+    };
+    window.addEventListener('resize', tick);
+    setInterval(tick, 500);
   }
 
   /* ------------- Wiring ------------- */
@@ -2183,6 +2364,7 @@
   window.FSCIcons.hydrateIcons(root);
   $$('button,summary,label').forEach(control => control.classList.add('cursor-interaction'));
   wire();
+  attachScrollbars();
   setTab('position');
   setPage('cameras');
   render();

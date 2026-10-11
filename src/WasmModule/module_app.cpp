@@ -4,6 +4,7 @@
 #include "fscs/profiles/json_util.hpp"
 
 #include <algorithm>
+#include <cstdio>
 
 namespace fscs::host {
 
@@ -17,6 +18,7 @@ namespace {
 
 constexpr const char* kSlotA = "\\work\\fscs-store-a.json";
 constexpr const char* kSlotB = "\\work\\fscs-store-b.json";
+constexpr const char* kDiagnosticsFile = "\\work\\fscs-diagnostics.log";
 
 // Latest-state events: only the newest payload matters, so they are coalesced and flushed at <= 10 Hz.
 bool isStateEvent(const std::string& n) {
@@ -61,6 +63,7 @@ core::ManualInput manualFromJson(const json& j) {
 ModuleApp::ModuleApp(ICameraBackend& camera, IModuleServices& services, profiles::IStorageDriver& storage, std::string bootId,
                      std::string appVersion)
     : services_(services),
+      storage_(storage),
       repo_(storage, kSlotA, kSlotB),
       coord_(camera, [this](const std::string& name, json payload) { onCoordinatorEvent(name, std::move(payload)); },
              [this](const std::string& v) { return qualification(v); }),
@@ -123,6 +126,7 @@ void ModuleApp::update(double now) {
 
     coord_.tick(now);
     flushState(now, false);
+    writeDiagnostics(now);
 }
 
 void ModuleApp::onEvent(const BackendEvent& ev, double now) {
@@ -192,6 +196,7 @@ void ModuleApp::broadcastSnapshot(const std::string& to) {
 }
 
 void ModuleApp::reply(const Command& c, AckStatus s, const std::string& reason, json result) {
+    if (s == AckStatus::Rejected) diag("rejected " + c.action + " from " + c.uiInstanceId + ": " + reason);
     send(protocol::makeAck(c, s, reason, std::move(result)));
 }
 
@@ -257,7 +262,13 @@ void ModuleApp::onPanelText(const std::string& text, double now) {
 // ---------------------------------------------------------------------------------------------------------------
 // Commands
 
-json ModuleApp::forward(const Command& c, double now) { return coord_.handle(c, now); }
+json ModuleApp::forward(const Command& c, double now) {
+    json ack = coord_.handle(c, now);
+    const std::string status = js::str(ack, "status");
+    diag(c.action + " -> " + status + (status == "Rejected" ? ": " + js::str(ack, "reason") : std::string()) +
+         " (epoch sent " + std::to_string(c.sessionEpoch) + ", current " + std::to_string(coord_.epoch()) + ")");
+    return ack;
+}
 
 void ModuleApp::handle(const Command& c, double now) {
     const std::string& a = c.action;
@@ -1003,8 +1014,25 @@ Qualification ModuleApp::qualification(const std::string& simVersion) const {
 }
 
 void ModuleApp::diag(const std::string& line) {
-    diagnostics_.push_back(line.substr(0, 300));
-    if (diagnostics_.size() > 200) diagnostics_.pop_front();
+    char stamp[24];
+    std::snprintf(stamp, sizeof(stamp), "%9.2f ", now_);
+    diagnostics_.push_back(stamp + line.substr(0, 400));
+    if (diagnostics_.size() > 300) diagnostics_.pop_front();
+    diagDirty_ = true;
+}
+
+// Bounded diagnostics also go to \work so they can be read after a session (design 2.0 section 12.2: no raw key
+// streams, no flight paths; only states, reasons and versions).
+void ModuleApp::writeDiagnostics(double now) {
+    if (!diagDirty_ || diagWriting_ || now - lastDiagWrite_ < 2.0) return;
+    std::string text = "FS Camera Studio " + appVersion_ + " boot " + bootId_ + "\nsimulator " + coord_.simVersion() +
+                       "\ncamera " + toString(coord_.ownership()) + " (" + coord_.stateReason() + ")\nblock: " +
+                       coord_.blockReason() + "\n\n";
+    for (const auto& l : diagnostics_) text += l + "\n";
+    diagDirty_ = false;
+    diagWriting_ = true;
+    lastDiagWrite_ = now;
+    storage_.writeFile(kDiagnosticsFile, std::move(text), [this](bool, std::string) { diagWriting_ = false; });
 }
 
 }  // namespace fscs::host

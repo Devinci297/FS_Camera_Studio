@@ -101,7 +101,7 @@ std::string Coordinator::blockReason() const {
     if (profile_->readOnly) return "This profile needs a newer version of Camera Studio.";
     if (!qual_.adapterQualified && !settings_.allowUnqualifiedAdapter && !qualificationSession_)
         return "Axis mapping for simulator build " + (simVersion_.empty() ? std::string("(unknown)") : simVersion_) +
-               " is not qualified yet. Run the conformance check, or allow testing in Settings.";
+               " is not checked yet. Run the axis check in Settings > Simulator.";
     if (state_ == Ownership::UserDisabled) return "Camera control by add-ons is disabled in the simulator.";
     return {};
 }

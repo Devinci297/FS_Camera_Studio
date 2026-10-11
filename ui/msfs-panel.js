@@ -5,9 +5,11 @@
 (function (root) {
   'use strict';
 
-  const HIDING_CLASSES = ['hide', 'panelInvisible'];
+  // Only 'hide' is removed. Each packaged page chooses its frame up front (main: simulator frame, mini: borderless
+  // panelInvisible); stripping panelInvisible later did not give a draggable frame in-sim and undid the mini's look.
+  const HIDING_CLASSES = ['hide'];
 
-  /** Some MSFS 2024 toolbar windows stay hidden behind these classes; remove them shortly after load. */
+  /** Some MSFS 2024 toolbar windows start with a 'hide' class; remove it shortly after load. */
   function msfsPanelFixups() {
     const inSim = typeof root.RegisterCommBusListener === 'function' || Boolean(document.querySelector('ingame-ui'));
     if (!inSim) return;

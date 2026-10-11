@@ -7,7 +7,8 @@
 html, body { margin: 0; padding: 0; }
 body.surface-demo { background: #fff; padding: 16px; }
 @media (prefers-color-scheme: dark) { body.surface-demo { background: #181818; } }
-html.surface-main, html.surface-mini, body.surface-main, body.surface-mini { height: 100%; background: transparent; overflow: hidden; }
+html.surface-main, body.surface-main { height: 100%; background: transparent; overflow: hidden; }
+html.surface-mini, body.surface-mini { background: transparent; overflow: hidden; } /* mini window height follows its content */
 #mc-sim button, #mc-sim summary, #mc-sim label { cursor: pointer; }
 /* -- Ported from the approved mockup, rule by rule (colour pairs split into the two data-theme palettes) -- */
 #mc-sim{--mc-bg:#101923;--mc-raised:#17222f;--mc-subtle:#121e2b;--mc-input:#0e1823;--mc-text:#edf3f8;--mc-muted:#9aacbe;--mc-faint:#8fa2b5;--mc-line:#2a3847;--mc-accent:#66dec4;--mc-accent-ink:#082d29;--mc-active:#1a3939;--mc-hover:#213141;--mc-amber:#f4c779;--mc-danger:#f8a5a0;font:13px/1.45 "Segoe UI",Arial,sans-serif;color:var(--mc-text);width:100%;min-width:0;position:relative;isolation:isolate;box-sizing:border-box}
@@ -277,27 +278,43 @@ html.surface-main, html.surface-mini, body.surface-main, body.surface-mini { hei
 
 /* Main editor panel: fills its toolbar window, transparent outside the card. */
 #mc-sim[data-surface="main"] { height: 100%; background: transparent; }
-#mc-sim[data-surface="main"] .mc-stage { height: 100%; min-height: 0; padding: 12px; }
-#mc-sim[data-surface="main"][data-mode="edit"] .mc-stage { padding-bottom: 12px; }
+/* The editor card fills the simulator's window frame edge to edge; only the middle region scrolls. */
+#mc-sim[data-surface="main"] .mc-stage { height: 100%; min-height: 0; padding: 0; }
+#mc-sim[data-surface="main"][data-mode="edit"] .mc-stage { padding: 0; }
 #mc-sim[data-surface="main"][data-mode="edit"] .mc-mini-region { display: none; }
-#mc-sim[data-surface="main"] .mc-panel { height: 100%; display: flex; flex-direction: column; }
+#mc-sim[data-surface="main"] .mc-panel { height: 100%; max-width: none; margin: 0; display: flex; flex-direction: column; }
 #mc-sim[data-surface="main"] .mc-panel > header, #mc-sim[data-surface="main"] .mc-panel > nav, #mc-sim[data-surface="main"] .mc-panel > footer, #mc-sim[data-surface="main"] .mc-banners { flex: none; }
-#mc-sim[data-surface="main"] .mc-panel > [role="tabpanel"] { flex: 1 1 auto; min-height: 0; overflow: auto; }
+#mc-sim[data-surface="main"] .mc-panel > [role="tabpanel"] { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 #mc-sim[data-surface="main"] .mc-page { min-height: 0; }
+#mc-sim[data-surface="main"] #mc-page-cameras { display: flex; flex-direction: column; overflow: hidden; }
+#mc-sim[data-surface="main"] #mc-page-cameras > * { flex: none; }
+#mc-sim[data-surface="main"] #mc-page-cameras > .mc-camera-layout { flex: 1 1 auto; min-height: 0; }
+#mc-sim[data-surface="main"] .mc-browser, #mc-sim[data-surface="main"] .mc-inspector { min-height: 0; overflow-y: auto; overflow-x: hidden; }
+#mc-sim[data-surface="main"] .mc-dialog-shade { padding-top: 40px; padding-bottom: 20px; }
+@media (max-width: 620px) {
+  #mc-sim[data-surface="main"] .mc-camera-layout > .mc-browser { max-height: 45%; }
+  #mc-sim[data-surface="main"] .mc-camera-layout > .mc-inspector { flex: 1 1 auto; }
+}
 
 /* Mini control panel: only the dock, always visible, filling its window. */
-#mc-sim[data-surface="mini"] { height: 100%; background: transparent; }
-#mc-sim[data-surface="mini"] .mc-stage { padding: 0; min-height: 0; height: 100%; }
+#mc-sim[data-surface="mini"] { background: transparent; }
+#mc-sim[data-surface="mini"] .mc-stage { padding: 0; min-height: 0; }
 #mc-sim[data-surface="mini"] .mc-panel, #mc-sim[data-surface="mini"] .mc-flight-context { display: none !important; }
-/* hover (default): the mockup's .mc-mini-region - handle at the bottom of the window, dock revealed above it */
+/* hover (default): handle + dock in normal flow at a stable height (the window height follows the content);
+   the dock keeps its space while hidden and is revealed with the mockup's opacity/transform transition only. */
+#mc-sim[data-surface="mini"] .mc-mini-region { position: relative; height: auto; padding: 0 24px 36px; }
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock { position: relative; left: auto; right: auto; bottom: auto; margin: 0 auto; }
+@media (max-width: 880px) { #mc-sim[data-surface="mini"] .mc-mini-region { padding-left: 17px; padding-right: 17px; } }
+@media (max-width: 620px) { #mc-sim[data-surface="mini"] .mc-mini-region { padding-left: 10px; padding-right: 10px; } }
+@media (pointer: coarse) { #mc-sim[data-surface="mini"] .mc-mini-region { padding-bottom: 48px; } }
 /* always: the dock alone, filling the window */
 #mc-sim[data-surface="mini"][data-mini-mode="always"] .mc-mini-trigger { display: none !important; }
-#mc-sim[data-surface="mini"][data-mini-mode="always"] .mc-mini-region { position: static; height: auto; }
-#mc-sim[data-surface="mini"][data-mini-mode="always"] .mc-mini-region .mc-dock { position: relative; left: auto; right: auto; bottom: auto; margin: 0 auto; opacity: 1; transform: none; visibility: visible; pointer-events: auto; transition: none; }
+#mc-sim[data-surface="mini"][data-mini-mode="always"] .mc-mini-region { padding: 0; }
+#mc-sim[data-surface="mini"][data-mini-mode="always"] .mc-mini-region .mc-dock { opacity: 1; transform: none; visibility: visible; pointer-events: auto; transition: none; }
 /* off: only a short note */
 #mc-sim .mc-mini-off { display: none; }
 #mc-sim[data-surface="mini"][data-mini-mode="off"] .mc-mini-region { display: none; }
-#mc-sim[data-surface="mini"][data-mini-mode="off"] .mc-mini-off { display: flex; position: absolute; left: 0; right: 0; bottom: 8px; justify-content: center; }
+#mc-sim[data-surface="mini"][data-mini-mode="off"] .mc-mini-off { display: flex; justify-content: center; padding: 8px; }
 #mc-sim .mc-mini-off span { font-size: 11px; color: var(--mc-muted); background: var(--mc-bg); border: 1px solid var(--mc-line); border-radius: 6px; padding: 4px 12px; }
 #mc-sim[data-surface="mini"] .mc-toast { bottom: auto; top: 50%; transform: translate(-50%, -50%); }
 #mc-sim .mc-dock[data-picking="true"] .mc-dock-favorites { flex-wrap: nowrap; overflow-x: auto; }
@@ -421,3 +438,15 @@ html.surface-main, html.surface-mini, body.surface-main, body.surface-mini { hei
   #mc-sim .mc-axis > label { flex-basis: 93px; width: 93px; }
 }
 #mc-sim .mc-status { min-width: 0; overflow: hidden; } #mc-sim #mc-control-state { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* -- Scroll regions + custom scrollbar (Coherent GT shows no native scrollbars) -- */
+#mc-sim .mc-dialog { display: flex; flex-direction: column; max-height: 100%; }
+#mc-sim .mc-dialog > header, #mc-sim .mc-dialog-error, #mc-sim .mc-dialog-actions { flex: none; }
+#mc-sim .mc-dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+#mc-sim .mc-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+#mc-sim .mc-scroll::-webkit-scrollbar { width: 0; height: 0; }
+#mc-sim .mc-sb { position: absolute; width: 6px; border-radius: 3px; z-index: 5; display: none; }
+#mc-sim .mc-sb-x { height: 6px; }
+#mc-sim .mc-sb-thumb { position: absolute; left: 0; top: 0; width: 6px; border-radius: 3px; background: var(--mc-line); cursor: pointer; }
+#mc-sim .mc-sb-x .mc-sb-thumb { height: 6px; }
+#mc-sim .mc-sb:hover .mc-sb-thumb, #mc-sim .mc-sb[data-drag="true"] .mc-sb-thumb { background: var(--mc-muted); }
