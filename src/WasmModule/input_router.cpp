@@ -99,6 +99,17 @@ std::vector<ActionEvent> InputRouter::press(std::size_t b, const std::string& ph
     const auto& binding = bindings_[b];
     if (textFocus_ && binding.action != Action::ReleaseCamera) return {};
     if (held_.count(physical)) return {};
+    // Alternate bindings share one logical hold (particularly Peek). Releasing either
+    // physical input must not restore the view while the other is still pressed.
+    if (profiles::actionIsContinuous(binding.action) || binding.action == Action::PeekView) {
+        for (const auto& [key, active] : held_) {
+            const auto& other = bindings_[active.binding];
+            if (other.action == binding.action && other.viewId == binding.viewId) {
+                held_[physical] = {b, active.holdId};
+                return {};
+            }
+        }
+    }
     const std::uint64_t id = nextHoldId_++;
     held_[physical] = {b, id};
     return {{binding.action, binding.viewId, true, id}};
@@ -111,6 +122,7 @@ std::vector<ActionEvent> InputRouter::release(const std::string& physical) {
     const auto& binding = bindings_[it->second.binding];
     ActionEvent e{binding.action, binding.viewId, false, it->second.holdId};
     held_.erase(it);
+    for (const auto& [key, active] : held_) if (active.holdId == e.holdId) return {};
     return {e};
 }
 
@@ -188,10 +200,11 @@ std::vector<ActionEvent> InputRouter::setTextFocus(bool focused) {
     textFocus_ = focused;
     if (!focused) return {};
     std::vector<ActionEvent> out;
+    std::set<std::uint64_t> released;
     for (auto it = held_.begin(); it != held_.end();) {
         const auto& b = bindings_[it->second.binding];
         if (b.action != Action::ReleaseCamera) {
-            out.push_back({b.action, b.viewId, false, it->second.holdId});
+            if (released.insert(it->second.holdId).second) out.push_back({b.action, b.viewId, false, it->second.holdId});
             mustRelease_.insert(it->first);
             it = held_.erase(it);
         } else {
@@ -203,9 +216,10 @@ std::vector<ActionEvent> InputRouter::setTextFocus(bool focused) {
 
 std::vector<ActionEvent> InputRouter::releaseAll() {
     std::vector<ActionEvent> out;
+    std::set<std::uint64_t> released;
     for (const auto& [physical, h] : held_) {
         const auto& b = bindings_[h.binding];
-        out.push_back({b.action, b.viewId, false, h.holdId});
+        if (released.insert(h.holdId).second) out.push_back({b.action, b.viewId, false, h.holdId});
     }
     held_.clear();
     mustRelease_ = physicallyDown_;  // anything still held must come back to neutral first

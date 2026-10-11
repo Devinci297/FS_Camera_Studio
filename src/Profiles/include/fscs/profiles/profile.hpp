@@ -45,6 +45,14 @@ struct ValidationResult {
 // Upgrades older schemas, then validates and normalises `doc` in place.
 ValidationResult validateProfile(json& doc);
 
+struct AirportCameraOverrides {
+    std::optional<std::string> aircraftTracking;
+    std::optional<bool> trackingHorizonGuard;
+    std::optional<bool> autoZoomEnabled;
+    std::optional<double> autoZoomFrameMeters, autoZoomMinFovDeg, autoZoomMaxFovDeg, autoZoomResponseSeconds;
+    std::optional<double> heightMeters;
+};
+
 struct CameraEntry {
     std::string id;
     std::string categoryId;
@@ -60,6 +68,9 @@ struct CameraEntry {
     bool interaction = true;
     std::string trackingPolicy = "nativeIfQualified";
     std::string aircraftTracking = "off";
+    AirportCameraOverrides airportOverrides;
+    std::string airportHeightCategory;
+    double airportHeightBaseAltitudeMeters = 0, airportHeightMinimumMeters = 0;
     bool retainLook = false;
     bool resetMouseLookOnRelease = false;
     core::EffectsSettings effects;

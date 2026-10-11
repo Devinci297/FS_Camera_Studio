@@ -22,14 +22,14 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await page.keyboard.press('Escape');await tip.waitFor({state:'hidden'});
   for(const mode of ['icons','labels','both']) {
    await page.locator('#mc-nav-settings').click();
-   assert.equal(await page.locator('#mc-name-display-label').textContent(),'Category display');
+   assert.equal(await page.locator('#mc-name-display-label').textContent(),'Mini panel category display');
    await page.locator('#mc-setting-name-display [data-value="'+mode+'"]').click();
    await page.locator('#mc-nav-cameras').click();
    if((await page.locator('#mc-toggle-categories').textContent()).includes('Expand'))await page.locator('#mc-toggle-categories').click();
    assert.ok(await page.locator('.mc-camera-select .mc-entity-label').first().isVisible(),'Main camera names remain visible: '+mode);
    assert.ok(await page.locator('.mc-camera-select .mc-entity-name>svg').first().isVisible(),'Main camera icons remain visible: '+mode);
-   assert.equal(await page.locator('.mc-category-head .mc-entity-label').first().isVisible(),mode!=='icons');
-   assert.equal(await page.locator('.mc-category-head .mc-entity-name>svg').first().isVisible(),mode!=='labels');
+   assert.equal(await page.locator('.mc-category-head .mc-entity-label').first().isVisible(),true,'Main category labels always visible');
+   assert.equal(await page.locator('.mc-category-head .mc-entity-name>svg').first().isVisible(),true,'Main category icons always visible');
   }
   await page.locator('#mc-nav-settings').click();
   for(const opacity of [15,100]) {
@@ -52,13 +52,13 @@ const assert=require('node:assert/strict'),path=require('node:path');
     const s=FSCApp.state;s.miniCategory=s.working.profile.categories[airport?s.working.profile.categories.length-1:0].id;
     document.querySelector('#mc-setting-name-display [data-value="'+mode+'"]').click();FSCDemo.setOwnership('Observing');
    },{airport,mode});
-   const dock=await page.locator('#mc-mini-panel').boundingBox();assert.ok(dock.x<=1&&dock.width>=1199&&dock.height<=85,'Full-width compact mini panel');
+   const dock=await page.locator('#mc-mini-panel').boundingBox();assert.ok(dock.x<=1&&dock.width>=1199&&dock.height<=150,'Full-width compact mini panel');
    assert.ok(await page.locator('#mc-dock-favorites .mc-entity-label').first().isVisible(),'Mini camera names remain visible: '+airport+'/'+mode);
    assert.ok(await page.locator('#mc-dock-favorites .mc-entity-name>svg').first().isVisible(),'Mini camera icons remain visible: '+airport+'/'+mode);
    assert.equal(await page.locator('#mc-dock-categories .mc-entity-label').first().isVisible(),mode!=='icons');
    assert.equal(await page.locator('#mc-dock-categories .mc-entity-name>svg').first().isVisible(),mode!=='labels');
-   await page.locator('#mc-dock-favorites button').first().hover();await tip.waitFor();
-   assert.match(await tip.textContent(),/Right-click for camera actions/);
+   await page.locator('#mc-dock-favorites button').first().hover();await page.waitForTimeout(450);assert.equal(await tip.isVisible(),false,'Labeled cameras do not show redundant tooltips');
+   await page.locator('#mc-dock-categories button').first().hover();await tip.waitFor();assert.ok((await tip.textContent()).length>0,'Category tooltip remains available');
    const rect=await tip.boundingBox();assert.ok(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=1201&&rect.y+rect.height<=1001,'Tooltip stays in viewport');
   }
   await page.locator('#mc-mini-panel').screenshot({path:'build/review/mini-compact-full-width.png'});

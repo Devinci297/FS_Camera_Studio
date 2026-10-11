@@ -1,5 +1,6 @@
 #include "test.hpp"
 #include <set>
+#include <algorithm>
 
 #include "fake_backend.hpp"
 #include "module_app.hpp"
@@ -10,6 +11,32 @@ using namespace fscs::host;
 using fscs::protocol::json;
 namespace be = backend_event;
 namespace js = fscs::js;
+
+TEST_CASE("input: primary and secondary holds share lifetime and movement magnitude") {
+    for (const auto* action : {"peekView", "moveUp", "moveFast"}) {
+        json doc{{"schemaVersion",2},{"bindings",json::array({
+            {{"action",action},{"viewId",1},{"slot","primary"},{"input",{{"kind","key"},{"definition","K"},{"label","K"}}}},
+            {{"action",action},{"viewId",1},{"slot","secondary"},{"input",{{"kind","joystick"},{"deviceId",2},{"deviceName","Yoke"},{"definition","joystick:2:button:3"},{"label","Button 4"}}}}
+        })}};
+        const auto parsed=fscs::profiles::parseBindings(doc); CHECK(parsed.problems.empty()); CHECK_EQ(parsed.bindings.size(),std::size_t{2});
+        InputRouter router; router.setBindings(parsed.bindings);
+        const auto index=[&](const std::string& def){const auto& defs=router.definitions();return static_cast<std::size_t>(std::find(defs.begin(),defs.end(),def)-defs.begin());};
+        auto down=router.onInput(index("K"),true,1); CHECK_EQ(down.size(),std::size_t{1});
+        CHECK(router.onInput(index("joystick:2:button:3"),true,1).empty());
+        if(std::string(action)=="moveUp") CHECK_NEAR(router.manualInput().moveUp,1,1e-9);
+        CHECK(router.onInput(index("K"),false,0).empty());
+        if(std::string(action)=="moveUp") CHECK_NEAR(router.manualInput().moveUp,1,1e-9);
+        if(std::string(action)=="moveFast") CHECK(router.manualInput().fast);
+        auto up=router.onInput(index("joystick:2:button:3"),false,0);CHECK_EQ(up.size(),std::size_t{1});CHECK_EQ(up[0].holdId,down[0].holdId);
+        CHECK_NEAR(router.manualInput().moveUp,0,1e-9); CHECK(!router.manualInput().fast);
+        router.onInput(index("K"),true,1);router.onInput(index("joystick:2:button:3"),true,1);
+        CHECK_EQ(router.setTextFocus(true).size(),std::size_t{1});CHECK(router.releaseAll().empty());
+        router.setTextFocus(false);CHECK(router.onInput(index("K"),true,1).empty());
+        router.onInput(index("K"),false,0); router.onInput(index("joystick:2:button:3"),false,0);
+        router.onInput(index("K"),true,1);router.onInput(index("joystick:2:button:3"),true,1);
+        CHECK_EQ(router.releaseAll().size(),std::size_t{1});
+    }
+}
 
 namespace {
 
@@ -99,6 +126,93 @@ TEST_CASE("module: creating a profile for the loaded aircraft opens it and match
     CHECK(m.app.workingProfile().is_object());
     CHECK(m.app.coordinator().canActivate());  // automatic mapping requires no wizard
     CHECK(m.app.coordinator().blockReason().empty());
+}
+
+TEST_CASE("module: imported views can be copied to any loaded aircraft without replacing either profile") {
+    for (const auto* aircraft : {"SimObjects\\Airplanes\\Custom-Turboprop\\aircraft.cfg", "SimObjects\\Airplanes\\Custom-Helicopter\\aircraft.cfg"}) {
+        ModuleRig m; m.flight(aircraft);
+        m.panel("CreateProfile", {{"name", "Existing target views"}, {"forAircraft", true}});
+        const json existing = m.app.workingProfile();
+        const auto targetKey = js::str(existing["aircraftMatch"], "modelKey");
+        auto source = fscs::profiles::makeA320Profile("other-aircraft", "Source airliner");
+        source["cameras"][0]["positionMetersFRD"] = {1.25, -0.75, 0.2};
+        source["cameras"][0]["projection"]["value"] = 45.0 * fscs::core::kDegToRad;
+        const auto importedRequest = m.panel("ImportProfile", {{"code", source.dump()}});
+        const auto importAck = m.ackFor(importedRequest);
+        CHECK_EQ(js::str(importAck,"status"), std::string("Pending"));
+        const auto importedId = js::str(importAck["result"], "profileId");
+        CHECK(!importedId.empty());
+        const json imported = m.app.repository().committed().profiles.at(importedId).current;
+        const auto request = m.panel("CreateProfile", {{"name", "Adapted views"}, {"from", "profile"}, {"profileId", importedId},
+            {"forAircraft", true}, {"expectedAircraftModelKey", targetKey}});
+        CHECK_EQ(js::str(m.ackFor(request), "status"), std::string("Pending"));
+        const json copied = m.app.workingProfile();
+        const auto copiedId = js::str(copied, "profileId");
+        CHECK(copiedId != importedId);
+        CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{3});
+        CHECK(m.app.repository().committed().profiles.at(importedId).current == imported);
+        CHECK(m.app.repository().committed().profiles.at(js::str(existing,"profileId")).current == existing);
+        CHECK_EQ(js::str(copied["aircraftMatch"], "modelKey"), targetKey);
+        CHECK(copied["calibration"] == imported["calibration"]);
+        CHECK_EQ(copied["cameras"].size(), imported["cameras"].size());
+        for (std::size_t i=0; i<copied["cameras"].size(); ++i) {
+            auto before = imported["cameras"][i], after = copied["cameras"][i];
+            CHECK(before["id"] != after["id"]);
+            CHECK(before["categoryId"] != after["categoryId"]);
+            before.erase("id"); before.erase("categoryId"); after.erase("id"); after.erase("categoryId");
+            CHECK(before == after); // poses, lens, motion, behaviour and future optional settings survive
+        }
+        auto validCopy = copied;
+        CHECK(fscs::profiles::validateProfile(validCopy).ok());
+        CHECK(m.app.coordinator().canActivate());
+        CHECK(m.app.coordinator().blockReason().empty());
+        m.panel("ActivateCamera", {{"cameraId", js::str(copied,"defaultCameraId")}});
+        m.app.onEvent(be::CameraStatus{SdkAvailability::Acquired, false}, m.t); m.frame();
+        CHECK(m.app.coordinator().ownership() == Ownership::Active);
+        CHECK(!m.camera.submitted.empty());
+        // The copied profile is preferred even when the target already had views.
+        m.flight("SimObjects\\Airplanes\\Unrelated\\aircraft.cfg");
+        m.flight(aircraft); m.frame(2);
+        CHECK_EQ(js::str(m.app.workingProfile(), "profileId"), copiedId);
+    }
+}
+
+TEST_CASE("module: cross-aircraft copy checks the current aircraft and preserves unsaved drafts") {
+    ModuleRig m;
+    auto request = m.panel("CreateProfile", {{"name", "No aircraft"}, {"forAircraft", true}});
+    CHECK_EQ(js::str(m.ackFor(request), "status"), std::string("Rejected"));
+    CHECK(m.app.repository().committed().profiles.empty());
+    m.flight(); m.panel("CreateProfile", {{"name", "Original"}, {"forAircraft", true}});
+    const json original = m.app.workingProfile();
+    const auto originalId = js::str(original,"profileId");
+    json cam = original["cameras"][0]; cam["name"] = "Unsaved view";
+    m.panel("UpdateDraft", {{"ops", {{{"op", "setCamera"}, {"camera", cam}}}}}, "main-1", m.app.draftRevision());
+    auto payload = json{{"name", "Copied"}, {"from", "profile"}, {"profileId", originalId}, {"forAircraft", true}};
+    request = m.panel("CreateProfile", payload);
+    CHECK_EQ(js::str(m.ackFor(request), "reason"), std::string("unsavedChanges"));
+    payload["discard"] = true; payload["expectedAircraftModelKey"] = "previous-aircraft";
+    request = m.panel("CreateProfile", payload);
+    CHECK_EQ(js::str(m.ackFor(request), "status"), std::string("Rejected"));
+    CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{1});
+    CHECK_EQ(js::str(m.app.workingProfile()["cameras"][0],"name"), std::string("Unsaved view"));
+    // Legacy Save as New must include the draft, without modifying its source.
+    request = m.panel("CreateProfile", {{"name", "Saved draft copy"}, {"copyOf", originalId}, {"forAircraft", false}});
+    CHECK_EQ(js::str(m.ackFor(request), "status"), std::string("Pending"));
+    CHECK_EQ(js::str(m.app.workingProfile()["cameras"][0],"name"), std::string("Unsaved view"));
+    CHECK(m.app.repository().committed().profiles.at(originalId).current == original);
+    CHECK(!m.app.dirty());
+}
+
+TEST_CASE("module: copying read-only imported profiles cannot bypass feature requirements") {
+    ModuleRig m; m.flight();
+    auto source = fscs::profiles::makeStarterProfile("Future profile", "other-aircraft", "Other aircraft");
+    source["requiredSchemaFeatures"] = {"future-camera-feature"};
+    const auto importedRequest = m.panel("ImportProfile", {{"code", source.dump()}});
+    const auto importedId = js::str(m.ackFor(importedRequest)["result"], "profileId");
+    CHECK(!importedId.empty());
+    const auto request = m.panel("CreateProfile", {{"name", "Unsafe copy"}, {"from", "profile"}, {"profileId", importedId}, {"forAircraft", true}});
+    CHECK_EQ(js::str(m.ackFor(request), "status"), std::string("Rejected"));
+    CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{1});
 }
 
 TEST_CASE("module: drafts are module-owned, mirrored to every surface, and saved as one transaction") {
@@ -907,4 +1021,200 @@ TEST_CASE("module: explicit airport regeneration discards only target edits and 
     m.panel("SaveAirportPreview",request);CHECK_EQ(js::str(m.lastEvent("CommitCompleted")["payload"],"status"),std::string("Committed"));
     m.panel("RequestSnapshot");auto snap=m.lastEvent("Snapshot")["payload"];CHECK_EQ(snap["working"]["profile"]["cameras"].size(),m.app.workingProfile()["cameras"].size()+1);CHECK_EQ(m.app.workingProfile()["name"],json("Unsaved aircraft title"));
     m.panel("SelectAirport",{{"icao","KBBB"}});m.panel("RequestSnapshot");const auto otherSnapshot=m.lastEvent("Snapshot");CHECK_EQ(otherSnapshot["payload"]["working"]["profile"]["cameras"].back()["name"],json("KBBB unsaved edit"));CHECK(m.app.dirty());
+}
+
+TEST_CASE("module: airport preview uses global category heights and vertical edits become overrides") {
+ ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});
+ m.panel("RequestSnapshot");auto settings=m.lastEvent("Snapshot")["payload"]["working"]["settings"];
+ settings["host"]["airportCategoryHeights"]={{"runways",8},{"gates",12},{"apron",6},{"taxi",9},{"tower",50}};
+ auto set=m.panel("UpdateDraft",{{"ops",{{{"op","setSettings"},{"settings",settings}}}}},"main-1",m.app.draftRevision());
+ CHECK_EQ(js::str(m.ackFor(set),"status"),std::string("Completed"));
+ m.app.onEvent(be::AircraftPosition{40,-90,100},m.t);
+ m.panel("PreviewAirportSource",{{"facility",airportFixture()}});auto airport=m.lastEvent("AirportPreview")["payload"]["profile"];
+ CHECK_NEAR(airport["cameras"][0]["positionMetersFRD"][2].get<double>(),-8,1e-6);
+ CHECK_NEAR(airport["cameras"].back()["positionMetersFRD"][2].get<double>(),-50,1e-6);
+ json ids=json::array();for(const auto& cam:airport["cameras"])ids.push_back(cam["id"]);
+ m.panel("SaveAirportPreview",{{"icao","KAAA"},{"cameraIds",ids}});
+ m.panel("RequestSnapshot");auto snapshot=m.lastEvent("Snapshot")["payload"];
+ auto cam=snapshot["working"]["profile"]["cameras"][0];cam["positionMetersFRD"][2]=-70;
+ const auto changed=m.panel("UpdateDraft",{{"ops",{{{"op","setCamera"},{"camera",cam}}}}},"main-1",m.app.draftRevision());
+ CHECK_EQ(js::str(m.ackFor(changed),"status"),std::string("Completed"));
+ m.panel("RequestSnapshot");snapshot=m.lastEvent("Snapshot")["payload"];
+ CHECK_NEAR(snapshot["working"]["profile"]["cameras"][0]["airportOverrides"]["heightMeters"].get<double>(),70,1e-6);
+ cam=snapshot["working"]["profile"]["cameras"][0];cam["airportOverrides"].erase("heightMeters");
+ m.panel("UpdateDraft",{{"ops",{{{"op","setCamera"},{"camera",cam}}}}},"main-1",m.app.draftRevision());
+ m.panel("RequestSnapshot");snapshot=m.lastEvent("Snapshot")["payload"];
+ CHECK(!snapshot["working"]["profile"]["cameras"][0]["airportOverrides"].contains("heightMeters"));
+}
+
+TEST_CASE("module: controller capture selects the chosen device and completes on release") {
+    ModuleRig m; m.flight(); m.panel("Hello",{{"surface","main"}});m.drain();
+    CHECK_EQ(js::str(m.ackFor(m.panel("StartControllerCapture",{{"deviceId",2}})),"status"),std::string("Rejected"));
+    m.app.onEvent(be::ControllersList{{{2,"Yoke"},{3,"Pedals"}}},m.t);m.drain();
+    CHECK_EQ(js::str(m.ackFor(m.panel("StartControllerCapture",{{"deviceId",2},{"captureId","listen-1"}})),"status"),std::string("Accepted"));
+    CHECK_EQ(m.services.captureDevice,2); CHECK(!m.services.nativeMouseEnabled);
+    const auto shortcut = static_cast<std::size_t>(std::find(m.services.mapped.begin(),m.services.mapped.end(),"VK_LCONTROL+VK_LMENU+M")-m.services.mapped.begin());
+    CHECK(shortcut < m.services.mapped.size());
+    m.app.onEvent(be::InputEvent{shortcut,true,1,false},m.t);
+    CHECK(m.lastEvent("SurfaceRequest").is_null());
+    m.app.onEvent(be::ControllerButton{3,4,true,m.services.captureGeneration},m.t);m.app.onEvent(be::ControllerButton{3,4,false,m.services.captureGeneration},m.t);
+    m.app.onEvent(be::ControllerButton{2,4,false,m.services.captureGeneration},m.t);CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+    m.app.onEvent(be::ControllerButton{2,4,true,m.services.captureGeneration},m.t);CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+    m.app.onEvent(be::ControllerButton{2,5,true,m.services.captureGeneration},m.t);m.app.onEvent(be::ControllerButton{2,5,false,m.services.captureGeneration},m.t);
+    CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+    m.app.onEvent(be::ControllerButton{2,4,false,m.services.captureGeneration},m.t);
+    const auto result=m.lastEvent("ControllerInputCaptured");
+    CHECK_EQ(js::str(result,"to"),std::string("main-1"));
+    CHECK_EQ(js::str(result["payload"],"captureId"),std::string("listen-1"));
+    CHECK_EQ(js::str(result["payload"]["input"],"definition"),std::string("joystick:2:button:4"));
+    CHECK(fscs::profiles::InputSpec::fromJson(result["payload"]["input"]).has_value());
+    CHECK_EQ(m.services.captureDevice,-1);
+    m.app.onEvent(be::ControllerButton{2,4,false,m.services.captureGeneration},m.t);CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+}
+
+TEST_CASE("module: controller capture cleanup handles cancel timeout and device loss") {
+    ModuleRig m; m.flight();m.panel("Hello",{{"surface","main"}});
+    const auto start=[&](){m.app.onEvent(be::ControllersList{{{2,"Yoke"}}},m.t);m.panel("StartControllerCapture",{{"deviceId",2}});m.drain();CHECK_EQ(m.services.captureDevice,2);};
+    start();m.panel("StopControllerCapture");CHECK_EQ(m.services.captureDevice,-1);
+    start();m.t+=21;m.app.update(m.t);CHECK_EQ(m.services.captureDevice,-1);CHECK_EQ(js::str(m.lastEvent("ControllerCaptureStatus")["payload"],"state"),std::string("timeout"));
+    start();m.app.onEvent(be::ControllersList{{}},m.t);CHECK_EQ(m.services.captureDevice,-1);CHECK_EQ(js::str(m.lastEvent("ControllerCaptureStatus")["payload"],"state"),std::string("disconnected"));
+    start();m.app.onEvent(be::Disconnected{"unplugged"},m.t);CHECK_EQ(m.services.captureDevice,-1);
+}
+
+TEST_CASE("module: dual bindings preserve slots on save and reject physical conflicts") {
+    ModuleRig m;m.flight();
+    json document{{"schemaVersion",2},{"bindings",json::array({
+        {{"action","nextCamera"},{"slot","primary"},{"input",{{"kind","key"},{"definition","K"},{"label","K"}}}},
+        {{"action","nextCamera"},{"slot","secondary"},{"input",{{"kind","joystick"},{"deviceId",2},{"deviceName","Yoke"},{"definition","joystick:2:button:3"},{"label","Button 4"}}}}
+    })}};
+    auto request=m.panel("UpdateDraft",{{"ops",json::array({{{"op","setBindings"},{"bindings",document}}})}});
+    CHECK_EQ(js::str(m.ackFor(request),"status"),std::string("Completed"));
+    m.panel("CommitChanges");m.frame();
+    CHECK(m.app.repository().committed().bindings==document);
+    auto conflict=document;conflict["bindings"][1]["input"]=conflict["bindings"][0]["input"];
+    request=m.panel("UpdateDraft",{{"ops",json::array({{{"op","setBindings"},{"bindings",conflict}}})}});
+    CHECK_EQ(js::str(m.ackFor(request),"status"),std::string("Rejected"));
+    CHECK(m.app.repository().committed().bindings==document);
+}
+
+TEST_CASE("module: hat capture waits for neutral and returns each cardinal direction") {
+    const char* directions[] = {"up", "right", "down", "left"};
+    for (int direction = 0; direction < 4; ++direction) {
+        ModuleRig m; m.flight(); m.panel("Hello",{{"surface","main"}});
+        m.app.onEvent(be::ControllersList{{{2,"T.16000M"},{3,"Pedals"}}},m.t);
+        m.panel("StartControllerCapture",{{"deviceId",2},{"captureId","hat-listen"}});m.drain();
+        const auto generation=m.services.captureGeneration;
+        m.app.onEvent(be::ControllerHat{2,0,0xffffffffu,generation},m.t);
+        m.app.onEvent(be::ControllerHat{3,0,9000,generation},m.t);
+        m.app.onEvent(be::ControllerHat{3,0,0xffffffffu,generation},m.t);
+        m.app.onEvent(be::ControllerHat{2,1,9000,generation},m.t);
+        m.app.onEvent(be::ControllerHat{2,1,0xffffffffu,generation},m.t);
+        CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+        m.app.onEvent(be::ControllerHat{2,0,static_cast<std::uint32_t>(direction*9000),generation},m.t);
+        CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+        // A different direction while held does not replace the first choice.
+        m.app.onEvent(be::ControllerHat{2,0,static_cast<std::uint32_t>(((direction+1)%4)*9000),generation},m.t);
+        m.app.onEvent(be::ControllerButton{2,4,true,generation},m.t);
+        m.app.onEvent(be::ControllerButton{2,4,false,generation},m.t);
+        CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+        m.app.onEvent(be::ControllerHat{2,0,0xffffffffu,generation},m.t);
+        const auto result=m.lastEvent("ControllerInputCaptured");
+        CHECK(!result.is_null());if(result.is_null())continue;
+        CHECK_EQ(js::str(result,"to"),std::string("main-1"));
+        CHECK_EQ(js::str(result["payload"],"captureId"),std::string("hat-listen"));
+        const auto input=result["payload"]["input"];
+        CHECK_EQ(js::str(input,"definition"),std::string("joystick:2:POV:0"));
+        CHECK_EQ(js::str(input,"pov"),std::string(directions[direction]));
+        CHECK(fscs::profiles::InputSpec::fromJson(input).has_value());
+        CHECK_EQ(m.services.captureDevice,-1);
+        m.app.onEvent(be::ControllerHat{2,0,0xffffffffu,generation},m.t);
+        CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+    }
+}
+
+TEST_CASE("module: hat diagonals select one clockwise cardinal") {
+    const char* directions[] = {"right", "down", "left", "up"};
+    for (int diagonal = 0; diagonal < 4; ++diagonal) {
+        ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});
+        m.app.onEvent(be::ControllersList{{{2,"Yoke"}}},m.t);
+        m.panel("StartControllerCapture",{{"deviceId",2}});m.drain();
+        const auto generation=m.services.captureGeneration;
+        m.app.onEvent(be::ControllerHat{2,0,static_cast<std::uint32_t>(4500+diagonal*9000),generation},m.t);
+        m.app.onEvent(be::ControllerHat{2,0,0xffffffffu,generation},m.t);
+        const auto result=m.lastEvent("ControllerInputCaptured");
+        CHECK(!result.is_null());if(result.is_null())continue;
+        CHECK_EQ(js::str(result["payload"]["input"],"pov"),std::string(directions[diagonal]));
+    }
+}
+
+TEST_CASE("module: capture rejects old generations and a held button locks out hats") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});
+    m.app.onEvent(be::ControllersList{{{2,"Yoke"}}},m.t);
+    m.panel("StartControllerCapture",{{"deviceId",2},{"captureId","old"}});m.drain();
+    const auto oldGeneration=m.services.captureGeneration;
+    m.app.onEvent(be::ControllerHat{2,0,9000,oldGeneration},m.t);
+    m.panel("StartControllerCapture",{{"deviceId",2},{"captureId","current"}});m.drain();
+    const auto generation=m.services.captureGeneration;CHECK(generation!=oldGeneration);
+    m.app.onEvent(be::ControllerHat{2,0,0xffffffffu,oldGeneration},m.t);
+    m.app.onEvent(be::ControllerHat{2,0,9000,oldGeneration},m.t);
+    m.app.onEvent(be::ControllerHat{2,0,0xffffffffu,oldGeneration},m.t);
+    m.app.onEvent(be::ControllerButton{2,3,true,oldGeneration},m.t);
+    m.app.onEvent(be::ControllerButton{2,3,false,oldGeneration},m.t);
+    CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+    m.app.onEvent(be::ControllerButton{2,3,true,generation},m.t);
+    m.app.onEvent(be::ControllerHat{2,0,9000,generation},m.t);
+    m.app.onEvent(be::ControllerHat{2,0,0xffffffffu,generation},m.t);
+    CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+    m.app.onEvent(be::ControllerButton{2,3,false,generation},m.t);
+    const auto result=m.lastEvent("ControllerInputCaptured");
+    CHECK(!result.is_null());if(result.is_null())return;
+    CHECK_EQ(js::str(result["payload"],"captureId"),std::string("current"));
+    CHECK_EQ(js::str(result["payload"]["input"],"definition"),std::string("joystick:2:button:3"));
+    CHECK(!result["payload"]["input"].contains("pov"));
+}
+
+TEST_CASE("module: cancel timeout and disconnect discard a pending hat") {
+    for (int reason=0;reason<3;++reason) {
+        ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});
+        m.app.onEvent(be::ControllersList{{{2,"Yoke"}}},m.t);
+        m.panel("StartControllerCapture",{{"deviceId",2}});m.drain();
+        const auto generation=m.services.captureGeneration;
+        m.app.onEvent(be::ControllerHat{2,0,18000,generation},m.t);
+        if(reason==0)m.panel("StopControllerCapture");
+        if(reason==1){m.t+=21;m.app.update(m.t);}
+        if(reason==2)m.app.onEvent(be::ControllersList{{}},m.t);
+        CHECK_EQ(m.services.captureDevice,-1);
+        m.app.onEvent(be::ControllerHat{2,0,0xffffffffu,generation},m.t);
+        CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+    }
+}
+
+TEST_CASE("module: capture mapping failures surface errors and ignore stale attempts") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});
+    m.app.onEvent(be::ControllersList{{{2,"T.16000M"}}},m.t);
+    m.panel("StartControllerCapture",{{"deviceId",2},{"captureId","previous"}});m.drain();
+    const auto oldGeneration=m.services.captureGeneration;
+    m.panel("StartControllerCapture",{{"deviceId",2},{"captureId","current"}});m.drain();
+    const auto generation=m.services.captureGeneration;
+    m.app.onEvent(be::ControllerCaptureMappingStatus{2,oldGeneration,false,"","state",1},m.t);
+    m.app.onEvent(be::ControllerCaptureMappingStatus{3,generation,false,"","state",1},m.t);
+    CHECK_EQ(m.services.captureDevice,2);
+    CHECK(m.lastEvent("ControllerCaptureStatus").is_null());
+    // One unsupported optional button does not disable the valid buttons or hat.
+    m.app.onEvent(be::ControllerCaptureMappingStatus{2,generation,true,"joystick:2:button:31","input",1},m.t);
+    CHECK_EQ(m.services.captureDevice,2);
+    CHECK(m.lastEvent("ControllerCaptureStatus").is_null());
+    m.app.onEvent(be::ControllerHat{2,0,9000,generation},m.t);
+    m.app.onEvent(be::ControllerCaptureMappingStatus{2,generation,false,"","enable",1},m.t);
+    CHECK_EQ(m.services.captureDevice,-1);
+    const auto status=m.lastEvent("ControllerCaptureStatus");
+    CHECK_EQ(js::str(status["payload"],"state"),std::string("error"));
+    CHECK_EQ(js::str(status["payload"],"captureId"),std::string("current"));
+    m.app.onEvent(be::ControllerHat{2,0,0xffffffffu,generation},m.t);
+    CHECK(m.lastEvent("ControllerInputCaptured").is_null());
+    m.panel("StartControllerCapture",{{"deviceId",2},{"captureId","retry"}});m.drain();
+    const auto retryGeneration=m.services.captureGeneration;
+    m.app.onEvent(be::ControllerButton{2,0,true,retryGeneration},m.t);
+    m.app.onEvent(be::ControllerButton{2,0,false,retryGeneration},m.t);
+    CHECK(!m.lastEvent("ControllerInputCaptured").is_null());
 }

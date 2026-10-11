@@ -129,6 +129,12 @@ bool ModuleApp::airportEvent(const BackendEvent& ev,double now){
 }
 bool ModuleApp::handleAirport(const protocol::Command& c,double now){
  const auto& a=c.action;const auto& p=c.payload;
+ // Resolve defaults on the module side too, so previews from either UI or imported
+ // scenery sources cannot silently fall back to a stale client-side height.
+ auto generationOptions=[&](){auto options=js::object(p,"options");
+  options["categoryHeights"]=js::object(js::object(working_.settings,"host"),"airportCategoryHeights");
+  return options;
+ };
  if(a=="SetAirportAuto") {const bool ok=setAirportAuto(js::boolean(p,"enabled",false),now);reply(c,ok?AckStatus::Completed:AckStatus::Rejected,ok?"":"Load or generate nearby airport cameras and resume the flight before enabling Auto switch.");return true;}
  if(a=="DiscoverAirports"){nearbyFacilities_=json::array();bool ok=position_.valid()&&services_.requestNearbyAirports();reply(c,ok?AckStatus::Accepted:AckStatus::Rejected,ok?"":"Load a flight before finding nearby airports.");return true;}
  if(a=="SelectAirport"){
@@ -141,11 +147,11 @@ bool ModuleApp::handleAirport(const protocol::Command& c,double now){
   reply(c,AckStatus::Accepted);
   for(const auto& v:codes){auto code=js::str(v);if(!profiles::airport::validCode(code)){emitNow("AirportPreview",{{"icao",code},{"error","Invalid airport code."}},c.uiInstanceId);continue;}
    auto id=++airportRequestId_;if(!services_.requestAirport(code,id)){emitNow("AirportPreview",{{"icao",code},{"error","Airport data request failed."}},c.uiInstanceId);continue;}
-   airportJobs_[id]={code,c.uiInstanceId,js::object(p,"options"),now+20};
+   airportJobs_[id]={code,c.uiInstanceId,generationOptions(),now+20};
   }return true;
  }
  if(a=="PreviewAirportSource"){
-  std::vector<std::string> notes;auto doc=profiles::airport::generate(js::get(p,"facility"),js::object(p,"options"),notes);
+  std::vector<std::string> notes;auto doc=profiles::airport::generate(js::get(p,"facility"),generationOptions(),notes);
   if(!doc.is_object()){reply(c,AckStatus::Rejected,notes.empty()?"No airport data.":notes.front());return true;}
   auto code=js::str(js::object(doc,"airport"),"icao");airportPreviews_[code]=doc;reply(c,AckStatus::Completed);emitNow("AirportPreview",{{"icao",code},{"profile",doc},{"notes",notes}},c.uiInstanceId);return true;
  }

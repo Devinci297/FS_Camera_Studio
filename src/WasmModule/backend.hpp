@@ -40,13 +40,23 @@ struct CommBusMessage { std::string data; };  // one CommBus payload from a pane
 struct InputMappingStatus { bool ready = false; std::size_t definitions = 0; std::size_t failedCalls = 0; std::uint32_t code = 0; };
 struct InputEvent { std::size_t index = 0; bool down = true; std::uint32_t value = 0; bool test = false; };
 struct ControllersList { std::vector<std::pair<int, std::string>> controllers; };
+struct ControllerButton { int deviceId = -1; int button = -1; bool down = false; std::uint64_t captureGeneration = 0; };
+struct ControllerHat { int deviceId = -1; int hat = 0; std::uint32_t angle = 0xffffffffu; std::uint64_t captureGeneration = 0; };
+struct ControllerCaptureMappingStatus {
+    int deviceId = -1;
+    std::uint64_t generation = 0;
+    bool ready = false;
+    std::string definition;
+    std::string stage;
+    std::uint32_t code = 0;
+};
 }  // namespace backend_event
 
 using BackendEvent = std::variant<backend_event::Connected, backend_event::Disconnected, backend_event::CameraStatus,
                                   backend_event::CameraData, backend_event::DefinitionList, backend_event::AircraftLoaded,
                                   backend_event::AircraftTitle, backend_event::FlightLoaded, backend_event::SimRunning,
                                   backend_event::Paused, backend_event::CameraException,
-                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity>;
+                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::ControllerButton, backend_event::ControllerHat, backend_event::ControllerCaptureMappingStatus, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity>;
 
 enum class CameraFlag { Interaction, AboveGround };
 
@@ -71,6 +81,9 @@ public:
     virtual bool submitPose(const SdkPose& pose) = 0;
     virtual bool setFlag(CameraFlag flag, bool enabled) = 0;
     virtual bool requestCameraData(Referential ref) = 0;
+    // Read-only current world position, separate from capture/seed replies.
+    // MSFS may lift airport cameras above terrain or buildings after submission.
+    virtual std::optional<core::Vec3> worldCameraPosition() { return std::nullopt; }
     virtual bool enumerateDefinitions() = 0;
     virtual bool setUsingDefinition(const std::string& name) = 0;
     virtual std::optional<bool> headTracking() { return std::nullopt; }
@@ -88,6 +101,9 @@ public:
     virtual bool mapInputs(const std::vector<std::string>& definitions) = 0;
     // A separate group for the Bindings test dialog (InputEvent.test = true); empty string clears it.
     virtual bool mapTestInput(const std::string& definition) = 0;
+    // Temporary selected-controller discovery; -1 clears the group. Buttons 0..31 and POV 0.
+    // Generation tags reject delayed events from a previous listening request.
+    virtual bool captureControllerInputs(int deviceId, std::uint64_t generation = 0) { return deviceId < 0; }
     // Native mouse registration is lazy: never subscribe during startup/flight loading.
     virtual void setNativeMouseEnabled(bool enabled) = 0;
     virtual bool enumerateControllers() = 0;

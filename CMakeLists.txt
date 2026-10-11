@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(FSCameraStudio VERSION 0.1.1 LANGUAGES CXX)
+project(FSCameraStudio VERSION 0.3.0 LANGUAGES CXX)
 
 # Native build: the portable libraries and their tests, run on the development PC (design 2.0 §15 allows host-side
 # tests of pure code as development tools; nothing native ships). The shipping WASM module and MSFS package are

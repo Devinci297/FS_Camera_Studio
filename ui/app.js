@@ -143,6 +143,8 @@
   }
   /* Delegated help covers rebuilt lists and dialogs as well as fixed controls in both surfaces. */
   function controlHelp(control) {
+    if(control.closest('[data-no-tooltip="true"]'))return '';
+    if(control.tagName==='SELECT' && !control.title)return control.getAttribute('aria-label') || (control.options[control.selectedIndex] && control.options[control.selectedIndex].textContent) || 'Choose an option';
     // Camera names are already readable on labeled buttons. Keep help only for icon-only cameras.
     if(control.dataset.cameraName) {
       const label=control.querySelector('.mc-entity-label')||control.querySelector('span');
@@ -174,7 +176,7 @@
       'mc-dock-release':'Release camera control to the simulator.',
       'mc-save':'Save the current adjusted view and all pending changes (Ctrl+S by default).',
       'mc-revert':'Discard unsaved changes and restore the saved profile.',
-      'mc-save-current-view':'Store the current simulator view in this camera, including mouse look and movement.',
+      'mc-save-current-view':'Capture the simulator view, including mouse look and movement, into this camera. Review it, then Save all changes to keep it.',
       'mc-restore-pose':'Restore this camera to its last saved position and orientation.',
       'mc-center-look':'Reset pitch, yaw and roll for this camera.',
       'mc-fov-number':'Field of view in degrees. Smaller values zoom in; larger values show a wider view.',
@@ -581,8 +583,10 @@
     TemporaryLookChanged(p) { S.look = p && p.active ? p : null; renderTempLook(); renderPoseActions(); },
     ViewCaptured: onViewCaptured,
     DefinitionsListed() { /* not used by the editor yet */ },
-    ControllersListed(p) { if (S.assign) { S.assign.controllers = p.controllers || []; renderAssignControllers(); } },
+    ControllersListed(p) { if (S.assign) { const next = p.controllers || []; if (JSON.stringify(S.assign.controllers) !== JSON.stringify(next)) { S.assign.controllers = next; renderAssignControllers(); } } },
     InputTest: onInputTest,
+    ControllerInputCaptured: onControllerInputCaptured,
+    ControllerCaptureStatus: onControllerCaptureStatus,
     BindingTriggered(p) { if (S.page === 'bindings') setBindingResult('Triggered "' + actionName(p.action, p.viewId) + '"' + (p.result === 'recalled' ? ' - the view was recalled.' : '.')); },
     SurfaceRequest: onSurfaceRequest,
     FaultRaised(p) { S.fault = p; announce(p.message || 'The camera stopped after an error.', 'error'); render(); },
@@ -747,8 +751,8 @@
   function openDialog(title, onClose) {
     clearTimeout(toastTimer); $('mc-toast').hidden = true;
     $('mc-dialog-shade').classList.remove('mc-tracking-shade');
-    $('mc-dialog-shade').classList.remove('mc-context-shade', 'mc-airport-shade', 'mc-mouselook-shade', 'mc-walkaround-shade', 'mc-confirm-shade');
-    const panel = $('mc-dialog-shade').querySelector('.mc-dialog'); panel.style.left = ''; panel.style.top = '';
+    $('mc-dialog-shade').classList.remove('mc-binding-shade', 'mc-airport-override-shade', 'mc-context-shade', 'mc-airport-shade', 'mc-mouselook-shade', 'mc-walkaround-shade', 'mc-confirm-shade');
+    const panel = $('mc-dialog-shade').querySelector('.mc-dialog'); panel.style.left = ''; panel.style.top = ''; panel.style.maxHeight = ''; $('mc-dialog-body').style.maxHeight = '';
     if (dialogOpen()) closeDialog(true);
     dialogOpener = document.activeElement;
     dialogOnClose = onClose || null;
@@ -915,6 +919,12 @@
   function cycleCamera(delta) {
     const reason = controlBlockReason();
     if (reason) { announce(reason, 'warn'); return; }
+    if(IS_MINI){
+      const group=catIn(S.miniCategory)||(categoryOf((dockCamera()||{}).id)),views=group?group.cameraIds.map(camIn).filter(v=>v&&v.favorite):[];
+      if(!views.length)return;
+      const index=views.findIndex(v=>v.id===(dockCamera()||{}).id),next=index<0?(delta>0?0:views.length-1):(index+(delta>0?1:-1)+views.length)%views.length;
+      activateCamera(views[next].id);return;
+    }
     command('CycleCamera', { delta: delta > 0 ? 1 : -1 });
   }
 
@@ -1075,6 +1085,8 @@
   }
   function renderTree() {
     const tree = $('mc-camera-tree');
+    const toolbar=root.querySelector('.mc-browser-title');
+    if(toolbar && $('mc-toggle-categories').parentNode!==toolbar)toolbar.insertBefore($('mc-toggle-categories'),$('mc-add'));
     const groups = P() ? P().categories.filter(g => g.cameraIds.length) : [];
     const allOpen = groups.length > 0 && groups.every(g => S.expanded[g.id]);
     $('mc-toggle-categories').textContent = allOpen ? 'Collapse all' : 'Expand all';
@@ -1086,11 +1098,12 @@
       const query = $('mc-search').value.trim().toLowerCase();
       let visible = 0;
       const ro = readOnly();
-      let airportRoot=null;
+      let airportRoot=null, aircraftHeading=false;
       P().categories.forEach(group => {
+        if(!group.airportIcao && !aircraftHeading){tree.appendChild(make('div','Aircraft','mc-tree-scope'));aircraftHeading=true;}
         if(group.airportIcao && !airportRoot){
           airportRoot=make('section',undefined,'mc-airport-tree');
-          const toggle=button('Airport · '+group.airportIcao,()=>{S.airportExpanded=!S.airportExpanded;renderTree();},'mc-category-head',S.airportExpanded?'chevron-down':'chevron-right');toggle.setAttribute('aria-expanded',String(S.airportExpanded));airportRoot.appendChild(toggle);tree.appendChild(airportRoot);
+          const toggle=button('Airport '+group.airportIcao,()=>{S.airportExpanded=!S.airportExpanded;renderTree();},'mc-category-head mc-tree-scope-toggle',S.airportExpanded?'chevron-down':'chevron-right');toggle.setAttribute('aria-expanded',String(S.airportExpanded));airportRoot.appendChild(toggle);tree.appendChild(airportRoot);
         }
         if(group.airportIcao&&!S.airportExpanded&&!query)return;
         const views = group.cameraIds.map(camIn).filter(Boolean);
@@ -1124,10 +1137,14 @@
       if (!visible && query) tree.appendChild(make('div', 'No cameras match your search.', 'mc-empty'));
     });
   }
+  function cameraShortcutLabel(view) {
+    return view.viewId ? bindingsFor('selectView',view.viewId).map(b => (b.input.label || b.input.definition || '').replace(/\s*\+\s*/g,'+')).join(' / ') : '';
+  }
   function cameraRow(view, group, ro) {
     const row = make('div', undefined, 'mc-camera-row');
     const sel = current();
     row.setAttribute('data-current', String(Boolean(sel) && view.id === sel.id));
+    row.setAttribute('data-live', String(isLive(view.id)));
     const choose = button(view.name, () => recallFromLibrary(view.id), 'mc-camera-select');
     decorateName(choose, view.name, false, entityIcon(view, false), entityColor(view));
     choose.classList.toggle('mc-airport-camera-name',view.mode==='airport');
@@ -1135,7 +1152,16 @@
     choose.setAttribute('aria-pressed', String(Boolean(sel) && view.id === sel.id));
     let label = view.name;
     if (isLive(view.id)) { choose.appendChild(make('span', 'Live', 'mc-live')); label += ', showing in the simulator'; }
-    if (view.viewId) { choose.appendChild(make('span', String(view.viewId), 'mc-key')); label += ', view ID ' + view.viewId; }
+    const shortcut=cameraShortcutLabel(view);
+    if (shortcut) {
+      const compact=bindingsFor('selectView',view.viewId).map(b=>{
+        const input=b.input, buttonMatch=(input.definition||'').match(/:button:(\d+)$/i);
+        return input.kind==='joystick' ? (input.pov ? 'Hat '+input.pov : buttonMatch ? 'B'+(Number(buttonMatch[1])+1) : 'Pad') : (input.label||input.definition||'').replace(/\s*\+\s*/g,'+');
+      }).join(' / ');
+      const badge=make('span',compact,'mc-key'), badgeWidth=Math.min(64,Math.max(20,compact.length*6+8));
+      badge.style.maxWidth=badgeWidth+'px';choose.style.paddingRight=(badgeWidth+3)+'px';
+      choose.appendChild(badge); choose.classList.add('mc-has-shortcut'); label += ', shortcut ' + shortcut;
+    }
     if (!hasCommitted(view.id)) label += ', unsaved';
     choose.setAttribute('aria-label', label);
     choose.addEventListener('dblclick', () => { if (!ro) renameCamera(view); });
@@ -1192,7 +1218,7 @@
     $('mc-camera-icon').disabled = ro;
     setIcon($('mc-camera-icon'), entityIcon(view, false));
     const assigned = view.viewId ? findBinding('selectView', view.viewId) : null;
-    setLabel($('mc-camera-binding'), assigned ? assigned.input.label || assigned.input.definition : 'Assign binding');
+    setLabel($('mc-camera-binding'), assigned ? cameraShortcutLabel(view) : 'Assign binding');
     $('mc-camera-binding').disabled = ro;
     $('mc-camera-binding').setAttribute('aria-label', 'Assign binding for ' + view.name);
     renderViewButton();
@@ -1244,6 +1270,9 @@
     $('mc-level-note').textContent = level ? 'Stabilize roll for this camera.' : 'Not available until qualified.';
     $('mc-interaction').checked = Boolean(view.interaction);
     $('mc-tracking').value = S.working.settings.host.globalHeadTrackingEnabled === true ? 'on' : 'off';
+    let airportSettings=$('mc-camera-airport-settings');
+    if(!airportSettings){airportSettings=button('Airport camera settings',()=>airportCameraSettings(current()),'mc-secondary','view-tower');airportSettings.id='mc-camera-airport-settings';$('mc-detail-behavior').appendChild(airportSettings);}
+    airportSettings.hidden=view.mode!=='airport';airportSettings.disabled=ro;
     $$('#mc-inspector input, #mc-inspector select, #mc-inspector .mc-stepper button, #mc-inspector .mc-select-card button, #mc-inspector .mc-precision button', document).forEach(el => {
       if (el.id === 'mc-tracking' || el.id === 'mc-level' || el.id === 'mc-duration' || el.hasAttribute('data-fov')) return;
       el.disabled = ro;
@@ -1280,6 +1309,22 @@
     $('mc-bake-look').title = live ? 'Write the current in-sim view, including mouse look, into this camera' : 'Show this camera in the sim first.';
     $('mc-capture-view').disabled = ro || !S.snapshot || !aircraftLoaded();
     $('mc-save-current-view').disabled = $('mc-capture-view').disabled;
+    let hints = $('mc-movement-hints');
+    if (!hints) {
+      hints = make('div', undefined, 'mc-movement-hints'); hints.id = 'mc-movement-hints';
+      $('mc-position-fields').before(hints);
+    }
+    empty(hints);
+    const bindings = (S.working.bindings || {}).bindings || [];
+    [['moveForward','Forward'],['moveBack','Back'],['moveLeft','Left'],['moveRight','Right'],['moveUp','Up'],['moveDown','Down'],['moveFast','Faster']].forEach(entry => {
+      const binding = bindings.find(b => b.action === entry[0] && b.input && b.input.kind === 'key');
+      if (!binding) return;
+      const hint = make('span');
+      add(hint, make('kbd', binding.input.label || binding.input.definition.replace(/VK_/g,'')), make('span',entry[1]));
+      hints.appendChild(hint);
+    });
+    hints.appendChild(make('span','Hold adjustment buttons to repeat','mc-hold-hint'));
+
     $('mc-capture-view').title = "Read the simulator's current view and review it before using it";
   }
 
@@ -1295,7 +1340,16 @@
     S.angleCache = { id: view.id, q: q.slice(), hpb };
     return hpb;
   }
-  const poseValue = (view, key) => (linear(key) ? M.uiFromFrd(view.positionMetersFRD)[key] : anglesFor(view)[key]);
+  function effectiveAirportPosition(view) {
+    const position=view.positionMetersFRD.slice(),height=view.airportHeight;
+    if(view.mode==='airport'&&height){
+      const defaults=Object.assign({runways:3,gates:3,apron:3,taxi:3,tower:35},S.working.settings.host.airportCategoryHeights||{}),override=(view.airportOverrides||{}).heightMeters;
+      const meters=override==null?Math.max(defaults[height.category]||0,height.minimumMeters||0):override;
+      position[2]=Number((view.worldOrigin||{}).altitude)-height.baseAltitudeMeters-meters;
+    }
+    return position;
+  }
+  const poseValue = (view, key) => (linear(key) ? M.uiFromFrd(effectiveAirportPosition(view))[key] : anglesFor(view)[key]);
   const limits = key => (linear(key) ? [-10000, 10000] : key === 'pitch' ? [-89, 89] : [-180, 180]);
   function setAxis(key, value) {
     const view = current();
@@ -1304,6 +1358,7 @@
       const map = M.UI_AXIS_TO_FRD[key];
       const v = map.sign * M.clamp(value, -10000, 10000);
       view.positionMetersFRD[map.index] = Object.is(v, -0) ? 0 : v;
+      if(map.index===2&&view.mode==='airport'&&view.airportHeight)view.airportOverrides=Object.assign({},view.airportOverrides||{},{heightMeters:M.clamp(Number((view.worldOrigin||{}).altitude)-view.airportHeight.baseAltitudeMeters-v,0,1000)});
     } else {
       const hpb = Object.assign({}, anglesFor(view));
       hpb[key] = key === 'pitch' ? M.clamp(value, -89, 89) : M.wrapDeg(value);
@@ -1400,11 +1455,12 @@
       stepper.appendChild(input);
       input.setAttribute('aria-label', labelText + (linear(key) ? ' in meters' : ' in degrees'));
       stepper.appendChild(make('span', linear(key) ? 'm' : '°', 'mc-axis-unit'));
-      if (linear(key)) {
-        minus.className = 'mc-direction-minus'; plus.className = 'mc-direction-plus';
-        minus.appendChild(make('span', directions[key][0])); plus.appendChild(make('span', directions[key][1]));
-        add(diagram, minus, plus);
-      } else buildAngleControl(illustration, key, labelText);
+      minus.className = 'mc-direction-minus'; plus.className = 'mc-direction-plus';
+      minus.appendChild(make('span', directions[key][0])); plus.appendChild(make('span', directions[key][1]));
+      minus.title = 'Hold to ' + directions[key][0].toLowerCase();
+      plus.title = 'Hold to ' + directions[key][1].toLowerCase();
+      add(diagram, minus, plus);
+      if (!linear(key)) buildAngleControl(illustration, key, labelText);
       fieldEl.appendChild(stepper);
       const reset = button('Reset', () => setAxis(key, 0), 'mc-axis-reset', 'rotate-ccw');
       reset.setAttribute('aria-label', 'Reset ' + labelText + ' to zero');
@@ -1551,7 +1607,7 @@
       interaction: true, trackingPolicy: 'nativeIfQualified', effects: { enabled: false },
       temporaryLookPolicy: 'resetOnRecall', levelHorizon: false, seedDefinitionName: null,
     };
-    return Object.assign(base, { id: M.uuid(), categoryId, name, viewId: 0, favorite: false });
+    return Object.assign(base, { id: M.uuid(), categoryId, name, viewId: 0, favorite: true });
   }
   function addCamera() {
     if (!P() || readOnly()) return;
@@ -1762,19 +1818,33 @@
     },'mc-primary']]);
     compactEntityMenu();
   }
+  function addEntityAppearance(body, entity, isCategory) {
+    const list=body.querySelector('.mc-action-list'),appearance=make('details',undefined,'mc-context-appearance');
+    const summary=make('summary');add(summary,icon('aperture'),make('span','Appearance'));appearance.appendChild(summary);
+    const content=make('div',undefined,'mc-context-appearance-body');
+    add(content,button('Choose icon',()=>chooseEntityIcon(entity,isCategory),'','aperture'),entityColorPalette(entity,isCategory));appearance.appendChild(content);
+    const destructive=list.lastElementChild;destructive.classList.add('mc-context-delete');
+    list.insertBefore(appearance,destructive);
+    appearance.addEventListener('toggle',()=>{nextFrame(()=>{
+      const menu=body.closest('.mc-dialog'),rect=menu.getBoundingClientRect();
+      if(rect.bottom>window.innerHeight-8)menu.style.top=Math.max(8,window.innerHeight-menu.offsetHeight-8)+'px';
+      updateScrollbars();if(window.fscsUpdateMiniRect)window.fscsUpdateMiniRect();
+    });});
+  }
   function cameraActions() {
     const view = current(), group = category();
     if (!view || readOnly()) return;
     const index = group.cameraIds.indexOf(view.id);
     const body = actionDialog(view.name, [
-      ['Rename', 'pencil', () => renameCamera()],
-      ['Choose icon', 'aperture', () => chooseEntityIcon(view, false)],
+      ['Assign key binding', 'keyboard', () => assignCameraBinding(view)],
+      [view.favorite?'Remove star (hide in mini panel)':'Star camera (show in mini panel)', 'star', () => {setFavorite(view);closeDialog();}],
       ['Copy settings', 'copy', () => copyCameraSettings(view),false,'Copy this camera’s edited pose, lens, motion and behavior settings.'],
       ['Paste settings', 'paste', () => pasteCameraSettings(view),!readCameraSettingsClipboard(),'Choose copied settings to apply to this camera. Identity and shortcuts are preserved.'],
+      ['Rename', 'pencil', () => renameCamera()],
       [group.defaultCameraId===view.id?'Category default':'Make category default', 'check-circle-2', () => setCategoryDefault(view),group.defaultCameraId===view.id],
       ['Duplicate camera', 'copy', () => {
         const duplicate = clone(view);
-        duplicate.id = M.uuid(); duplicate.name = (view.name + ' copy').slice(0, 60); duplicate.viewId = 0; duplicate.favorite = false;
+        duplicate.id = M.uuid(); duplicate.name = (view.name + ' copy').slice(0, 60); duplicate.viewId = 0; duplicate.favorite = true;
         P().cameras.push(duplicate);
         group.cameraIds.splice(index + 1, 0, duplicate.id);
         queueOps([{ op: 'setCamera', camera: duplicate }, { op: 'setCategories', categories: P().categories }]);
@@ -1793,7 +1863,8 @@
         selectCamera(group.cameraIds[0], { preserveExpansion: true });
       }), group.cameraIds.length === 1],
     ]);
-    body.insertBefore(entityColorPalette(view, false), body.firstChild);
+    addEntityAppearance(body,view,false);
+    if(view.mode==='airport'){const list=body.querySelector('.mc-action-list');list.insertBefore(button('Airport camera settings',()=>airportCameraSettings(view),'','view-tower'),list.querySelector('.mc-context-appearance'));}
     compactEntityMenu();
   }
   function moveCategory(group, delta) {
@@ -1812,7 +1883,6 @@
       ['Move category up', 'arrow-up', () => moveCategory(group, -1), list.indexOf(group) === 0],
       ['Move category down', 'arrow-down', () => moveCategory(group, 1), list.indexOf(group) === list.length - 1],
       ['Rename category', 'pencil', () => namedDialog('Rename category', group.name, name => { group.name = name; saveCategories(); render(); })],
-      ['Choose icon', 'aperture', () => chooseEntityIcon(group, true)],
       ['Add category', 'folder-plus', ()=>addCategory(group)],
       ['Delete category', 'trash-2', () => confirmDialog('Delete category?', 'Remove "' + group.name + '" and its ' + group.cameraIds.length + ' cameras?', () => {
         const removed = group.cameraIds.slice();
@@ -1828,7 +1898,7 @@
         delete S.expanded[group.id];
       }), list.length === 1],
     ]);
-    body.insertBefore(entityColorPalette(group, true), body.firstChild);
+    addEntityAppearance(body,group,true);
     compactEntityMenu();
   }
 
@@ -1883,7 +1953,7 @@
       return;
     }
     const body = openDialog('Use the captured view?');
-    body.appendChild(make('p', 'Values read from the simulator for "' + view.name + '". ' + (pending.saveImmediately ? 'Use and save writes these values to this camera.' : 'Use these values applies them to the draft; Save changes keeps them.')));
+    body.appendChild(make('p', 'Values read from the simulator for "' + view.name + '". ' + (pending.saveImmediately ? 'Use and save writes these values to this camera.' : 'Use these values applies them to the draft. Save all changes keeps them.')));
     if (!p.qualified) {
       const warn = make('p', undefined, 'mc-warn');
       add(warn, make('strong', 'Not qualified: '), p.message || 'View capture is not qualified for this simulator build. The values may be inaccurate.');
@@ -1943,7 +2013,9 @@
       const b=button(label,()=>{S.working.settings.host.globalAircraftTracking=value;settingChanged();closeDialog();render();},'mc-secondary mc-tracking-choice');
       b.setAttribute('aria-label',label);b.setAttribute('aria-pressed',String((S.working.settings.host.globalAircraftTracking||'both')===value));
       b.appendChild(make('small',detail));body.appendChild(b);
-    });dialogActions([['Close',()=>closeDialog()]]);
+    });
+    if(view&&view.mode==='airport')body.appendChild(button('This airport camera’s settings',()=>airportCameraSettings(view),'mc-secondary'));
+    dialogActions([['Close',()=>closeDialog()]]);
     if(IS_MINI) {
       revealMini();
       const place=()=>{if(shade.hidden||!shade.classList.contains('mc-tracking-shade'))return;
@@ -1953,6 +2025,64 @@
         if(window.fscsUpdateMiniRect)window.fscsUpdateMiniRect();
       };nextFrame(place);
     }
+  }
+  function airportCameraSettings(view) {
+    if(!view||view.mode!=='airport'||readOnly())return;
+    const body=openDialog('Airport camera settings');
+    $('mc-dialog-shade').classList.add('mc-tracking-shade','mc-airport-override-shade');
+    body.appendChild(make('p',view.name,'mc-tracking-camera'));
+    body.appendChild(make('p','Global values follow your airport defaults. Turn off Global to customize this camera.','mc-note'));
+    const host=S.working.settings.host,overrides=()=>view.airportOverrides||{};
+    const save=(key,value)=>{
+      view.airportOverrides=Object.assign({},overrides());
+      if(value===undefined)delete view.airportOverrides[key];else view.airportOverrides[key]=value;
+      if(value!==undefined&&key==='autoZoomMinFovDeg'&&Object.prototype.hasOwnProperty.call(view.airportOverrides,'autoZoomMaxFovDeg'))view.airportOverrides.autoZoomMaxFovDeg=Math.max(value,view.airportOverrides.autoZoomMaxFovDeg);
+      if(value!==undefined&&key==='autoZoomMaxFovDeg'&&Object.prototype.hasOwnProperty.call(view.airportOverrides,'autoZoomMinFovDeg'))view.airportOverrides.autoZoomMinFovDeg=Math.min(value,view.airportOverrides.autoZoomMinFovDeg);
+      if(!Object.keys(view.airportOverrides).length)delete view.airportOverrides;
+      saveCamera(view);renderCameraTools();
+    };
+    const section=(title)=>{const group=make('section',undefined,'mc-override-section');group.appendChild(make('h4',title));body.appendChild(group);return group;};
+    const trackingGroup=section('Tracking'),zoomGroup=section('Auto zoom'),heightGroup=section('Height');
+    const select=(group,key,label,options)=>{
+      const row=make('label',undefined,'mc-override-select'),input=make('select');input.setAttribute('aria-label',label);
+      options.forEach(([value,text])=>{const option=make('option',text);option.value=value;input.appendChild(option);});
+      input.value=Object.prototype.hasOwnProperty.call(overrides(),key)?String(overrides()[key]):'global';
+      input.addEventListener('change',()=>save(key,input.value==='global'?undefined:(key==='autoZoomEnabled'||key==='trackingHorizonGuard')?input.value==='true':input.value));
+      add(row,make('span',label),input);group.appendChild(row);
+    };
+    const modeNames={off:'Off',heading:'Heading only',both:'Heading + pitch'};
+    select(trackingGroup,'aircraftTracking','Aircraft tracking',[['global','Global · '+modeNames[host.globalAircraftTracking||'both']],['off','Override · Off'],['heading','Override · Heading only'],['both','Override · Heading + pitch']]);
+    select(trackingGroup,'trackingHorizonGuard','Keep distant views near the horizon',[['global','Global · '+(host.airportTrackingHorizonGuard!==false?'On':'Off')],['true','Override · On'],['false','Override · Off']]);
+    trackingGroup.appendChild(make('p','Softens steep pitch at long distances caused by elevation differences. Heading still follows your aircraft. Turn off for unrestricted vertical tracking.','mc-note'));
+    select(zoomGroup,'autoZoomEnabled','Auto zoom',[['global','Global · '+(host.airportAutoZoomEnabled?'On':'Off')],['true','Override · On'],['false','Override · Off']]);
+    const categoryKey=view.airportHeight&&view.airportHeight.category||airportHeightCategory(view);
+    const heights=Object.assign({runways:3,gates:3,apron:3,taxi:3,tower:35},host.airportCategoryHeights||{});
+    const zoomFields=make('div',undefined,'mc-override-grid');zoomGroup.appendChild(zoomFields);
+    const fields=[['heightMeters','Height above feature',Math.max(heights[categoryKey],Number((view.airportHeight||{}).minimumMeters)||0),0,1000,1,'m'],
+      ['autoZoomFrameMeters','Framing size',host.airportAutoZoomFrameMeters==null?40:host.airportAutoZoomFrameMeters,5,200,1,'m'],
+      ['autoZoomMinFovDeg','Closest zoom (minimum FOV)',host.airportAutoZoomMinFovDeg==null?10:host.airportAutoZoomMinFovDeg,2,120,1,'deg'],
+      ['autoZoomMaxFovDeg','Widest zoom (maximum FOV)',host.airportAutoZoomMaxFovDeg==null?90:host.airportAutoZoomMaxFovDeg,2,120,1,'deg'],
+      ['autoZoomResponseSeconds','Smoothing time',host.airportAutoZoomResponseSeconds==null?1:host.airportAutoZoomResponseSeconds,0.1,5,0.1,'s']];
+    fields.forEach(([key,label,fallback,min,max,step,unit])=>{
+      const row=make('div',undefined,'mc-override-field'),caption=make('label',undefined,'mc-override-inherit'),inherit=make('input');inherit.type='checkbox';inherit.setAttribute('aria-label','Use global '+label.toLowerCase());
+      const legacyHeight=key==='heightMeters'&&!view.airportHeight;
+      inherit.checked=!legacyHeight&&!Object.prototype.hasOwnProperty.call(overrides(),key);
+      const input=make('input');Object.assign(input,{type:'number',min,max,step,value:legacyHeight?M.clamp(-view.positionMetersFRD[2],min,max):inherit.checked?fallback:overrides()[key],disabled:inherit.checked});input.setAttribute('aria-label',label);
+      const source=make('span',inherit.checked?'Global':'Override','mc-override-source');
+      const prepareHeight=()=>{if(key==='heightMeters'&&!view.airportHeight)view.airportHeight={category:categoryKey,baseAltitudeMeters:Number((view.worldOrigin||{}).altitude)||0,minimumMeters:0};};
+      inherit.addEventListener('change',()=>{prepareHeight();save(key,inherit.checked?undefined:Number(input.value));input.disabled=inherit.checked;if(inherit.checked)input.value=String(fallback);source.textContent=inherit.checked?'Global':'Override';});
+      input.addEventListener('change',()=>{prepareHeight();const n=Number(input.value),value=input.value.trim()!==''&&isFinite(n)?M.clamp(n,min,max):fallback;input.value=String(value);save(key,value);if(key==='autoZoomMinFovDeg'||key==='autoZoomMaxFovDeg')airportCameraSettings(view);});
+      add(caption,inherit,source);const line=make('div',undefined,'mc-override-value');add(line,input,make('span',unit,'mc-note'),caption);
+      add(row,make('span',label,'mc-override-label'),line);(key==='heightMeters'?heightGroup:zoomFields).appendChild(row);
+    });
+    if(!view.airportHeight)heightGroup.appendChild(make('p','Saved altitude is retained until you choose a height option.','mc-note'));
+    body.appendChild(button('Use global settings for everything',()=>{if(!view.airportHeight)view.airportHeight={category:categoryKey,baseAltitudeMeters:Number((view.worldOrigin||{}).altitude)||0,minimumMeters:0};delete view.airportOverrides;saveCamera(view);airportCameraSettings(view);},'mc-secondary mc-override-reset'));
+    dialogActions([['Close',()=>closeDialog()]]);
+    if(IS_MINI)nextFrame(()=>{const menu=$('mc-dialog-shade').querySelector('.mc-dialog'),dock=$('mc-mini-panel').getBoundingClientRect();menu.style.left=Math.max(8,Math.min(innerWidth-menu.offsetWidth-8,dock.right-menu.offsetWidth))+'px';menu.style.top=Math.max(8,dock.top-menu.offsetHeight-8)+'px';if(window.fscsUpdateMiniRect)window.fscsUpdateMiniRect();});
+  }
+  function airportHeightCategory(view) {
+    const key=view.generatedKey||'',name=((categoryOf(view.id)||{}).name||'').toLowerCase();
+    return key.indexOf('runway:')===0||name.indexOf('runway')>=0?'runways':key==='tower'||name.indexOf('tower')>=0?'tower':key.indexOf('sign:')===0||key.indexOf('junction:')===0||name.indexOf('taxi')>=0?'taxi':name.indexOf('gate')>=0?'gates':'apron';
   }
   async function saveAdjustedViews() {
     if(!S.snapshot||S.pendingCommit)return;
@@ -1965,26 +2095,67 @@
   }
   function renderCameraTools() {
     [['mc-editor-mouse-look',current],['mc-mouse-look',dockCamera]].forEach(([anchorId,getView])=>{
-      const anchor=$(anchorId);if(!anchor)return;setIcon(anchor,'mouse');const view=getView(),prefix=anchorId+'-';
+      const anchor=$(anchorId);if(!anchor)return;setIcon(anchor,'mouse');const view=getView(),prefix=anchorId+'-',editor=anchorId==='mc-editor-mouse-look';
       const ensure=(key,label,action)=>{let b=$(prefix+key);if(!b){b=button(label,action,'mc-secondary');b.id=prefix+key;anchor.parentNode.insertBefore(b,anchor);}return b;};
-      const status=S.caps.headTracking||{},host=S.working&&S.working.settings.host||{};
-      const enabled=host.globalHeadTrackingEnabled===true;
+      let globalTools=$(prefix+'global');
+      if(!globalTools){
+        globalTools=make('div',undefined,'mc-global-controls mc-tool-group');globalTools.id=prefix+'global';globalTools.setAttribute('role','group');globalTools.setAttribute('aria-label','Global camera controls');
+        globalTools.appendChild(make('span','Global','mc-tool-group-label'));
+        if(editor){const header=$('mc-drag-header');header.parentNode.insertBefore(globalTools,header.nextSibling);}else anchor.parentNode.insertBefore(globalTools,anchor);
+      }
+      const status=S.caps.headTracking||{},host=S.working&&S.working.settings.host||{},enabled=host.globalHeadTrackingEnabled===true;
       const head=ensure('head','Head tracking',()=>trackingPreference(null,S.working.settings.host.globalHeadTrackingEnabled===true?'off':'on'));
-      head.textContent='Head tracking: '+(enabled?'On':'Off');setIcon(head,'head-tracking');head.setAttribute('aria-pressed',String(enabled));head.disabled=!S.working;head.title=status.error||'Global head tracking for all cameras and profiles. Off by default. Save to keep this preference.';
-      const tracking=ensure('aircraft','Track aircraft',()=>aircraftTrackingOptions(getView()));tracking.hidden=false;const aircraftTracking=host.globalAircraftTracking||'both';tracking.textContent='Track: '+(aircraftTracking==='both'?'Heading + pitch':aircraftTracking==='heading'?'Heading':'Off');setIcon(tracking,'aircraft-tracking');tracking.disabled=!S.working;tracking.setAttribute('aria-pressed',String(aircraftTracking!=='off'));tracking.title='Global aircraft tracking for exterior and airport cameras. Cockpit cameras are excluded. This setting stays the same when changing views or profiles.';
-      const tour=ensure('walkaround','Walkaround',walkaroundDialog);setIcon(tour,'view-wheel');tour.hidden=!walkaroundAvailable(view);tour.setAttribute('aria-pressed',String(S.walkaround.running));tour.title='Start, stop or configure an automatic tour of exterior cameras';
+      head.textContent='Head tracking: '+(enabled?'On':'Off');setIcon(head,'head-tracking');head.setAttribute('aria-pressed',String(enabled));head.disabled=!S.working;head.title=status.error||'Global head tracking for all cameras and profiles. Save to keep this preference.';
+      const tracking=ensure('aircraft','Aircraft tracking',()=>aircraftTrackingOptions(null));const aircraftTracking=host.globalAircraftTracking||'both';
+      tracking.hidden=false;tracking.textContent='Aircraft: '+(aircraftTracking==='both'?'Heading + pitch':aircraftTracking==='heading'?'Heading':'Off');setIcon(tracking,'aircraft-tracking');tracking.disabled=!S.working;tracking.setAttribute('aria-pressed',String(aircraftTracking!=='off'));tracking.title='Global aircraft tracking for exterior and airport cameras. Cockpit cameras are excluded; individual airport cameras can override this default.';
       let automatic=$(prefix+'auto');
       if(!automatic){automatic=button('Auto switch',()=>command('SetAirportAuto',{enabled:!S.airports.autoSwitch}),'mc-secondary mc-airport-auto');automatic.id=prefix+'auto';}
-      const globalTools=anchorId==='mc-editor-mouse-look'?$('mc-drag-header'):anchor.parentNode;
-      if(automatic.parentNode!==globalTools)globalTools.insertBefore(automatic,anchorId==='mc-editor-mouse-look'?$('mc-compact'):anchor);
+      [head,tracking,automatic].forEach(b=>{if(b.parentNode!==globalTools)globalTools.appendChild(b);});
       setIcon(automatic,'auto-switch');automatic.hidden=false;automatic.setAttribute('aria-pressed',String(!!S.airports.autoSwitch));
       automatic.disabled=!S.snapshot||(!S.airports.autoSwitch&&(!cameras().some(c=>c.mode==='airport')||!S.airports.positionKnown));
-      automatic.title=automatic.disabled?'Load or generate cameras for a nearby airport first.':'Shared across all cameras and categories. Select the nearest airport camera automatically. Camera changes and manual movement pause switching for 3 seconds; releasing camera control pauses it until a camera is active again.';
-      if(anchorId==='mc-mouse-look'){const save=ensure('save','Save',saveAdjustedViews);setIcon(save,'save');save.title='Save adjusted view and all pending changes (Ctrl+S)';save.disabled=!S.snapshot||!!S.pendingCommit;}
+      automatic.title=automatic.disabled?'Load or generate cameras for a nearby airport first.':'Global: select the nearest airport camera automatically. Camera changes and manual movement pause switching for 3 seconds; releasing camera control pauses it until a camera is active again.';
+      const tour=ensure('walkaround','Walkaround',walkaroundDialog);setIcon(tour,'view-wheel');tour.hidden=!walkaroundAvailable(view);tour.setAttribute('aria-pressed',String(S.walkaround.running));tour.title='Start, stop or configure an automatic tour of exterior cameras';
+      let effective=$(prefix+'effective');
+      if(!effective){effective=make('span',undefined,'mc-effective-tracking');effective.id=prefix+'effective';anchor.parentNode.insertBefore(effective,anchor);}
+      const override=view&&view.mode==='airport'&&view.airportOverrides&&view.airportOverrides.aircraftTracking;
+      const effectiveTracking=override||aircraftTracking;
+      effective.hidden=!view||(!editor&&view.mode!=='airport');
+      effective.textContent=!view?'':view.mode==='aircraftCockpit'?'Cockpit · aircraft tracking excluded':(view.mode==='airport'?'Airport':'Exterior')+' · '+(effectiveTracking==='off'?'fixed direction':effectiveTracking==='heading'?'tracks heading':'tracks heading + pitch')+(override?' · override':' · global');
+      effective.title=override?'This camera overrides global aircraft tracking. Change it in Airport camera settings.':'Effective aircraft tracking for this camera. Cockpit cameras never track the aircraft.';
+      if(!editor){
+        const save=ensure('save','Save all',saveAdjustedViews);setIcon(save,'save');save.title='Save adjusted view and all pending changes (Ctrl+S)';save.disabled=!S.snapshot||!!S.pendingCommit;
+        let viewTools=$(prefix+'view');
+        if(!viewTools){viewTools=make('div',undefined,'mc-tool-group mc-view-controls');viewTools.id=prefix+'view';viewTools.setAttribute('role','group');viewTools.setAttribute('aria-label','Current camera actions');viewTools.appendChild(make('span','View','mc-tool-group-label'));globalTools.parentNode.appendChild(viewTools);}
+        [tour,anchor,save].forEach(b=>{if(b.parentNode!==viewTools)viewTools.appendChild(b);});
+        let panelTools=$(prefix+'panel');
+        if(!panelTools){panelTools=make('div',undefined,'mc-tool-group mc-panel-controls');panelTools.id=prefix+'panel';panelTools.setAttribute('role','group');panelTools.setAttribute('aria-label','Panel and camera control');globalTools.parentNode.appendChild(panelTools);}
+        ['mc-mini-pin','mc-expand','mc-dock-release'].forEach(id=>{if($(id).parentNode!==panelTools)panelTools.appendChild($(id));});
+        if(IS_MINI){
+          const dock=$('mc-mini-panel'),tools=globalTools.parentNode,body=dock.querySelector('.mc-dock-body');
+          [head,tracking,tour,anchor].forEach(b=>b.classList.add('mc-mini-secondary'));
+          let more=$(prefix+'more');
+          if(!more){
+            more=button('More',()=>{
+              const menu=openDialog('Mini panel controls');
+              const sections=[['Global settings',[prefix+'head',prefix+'aircraft']],['Camera',[prefix+'walkaround',anchorId]],['Panel',['mc-mini-pin','mc-expand','mc-dock-release']]];
+              sections.forEach(([label,ids])=>{
+                const available=ids.map($).filter(b=>b&&!b.hidden);if(!available.length)return;
+                menu.appendChild(make('div',label,'mc-section-label'));
+                const list=make('div',undefined,'mc-action-list');menu.appendChild(list);
+                available.forEach(original=>{const action=button(original.textContent.trim(),()=>{closeDialog();original.click();},'mc-secondary');action.disabled=original.disabled;action.title=original.title;const pressed=original.getAttribute('aria-pressed');if(pressed!==null)action.setAttribute('aria-pressed',pressed);list.appendChild(action);});
+              });
+              const active=dockCamera();if(active&&active.mode==='airport')menu.appendChild(button('Airport camera settings',()=>{closeDialog();airportCameraSettings(active);},'mc-secondary'));
+              compactEntityMenu();$('mc-dialog-close').focus();
+            },'mc-secondary');more.id=prefix+'more';more.setAttribute('aria-haspopup','dialog');more.title='Head tracking, aircraft tracking, mouse look and panel controls';tools.appendChild(more);
+          }
+          if(tools.parentNode!==dock)dock.insertBefore(tools,dock.firstChild);
+          const nav=dock.querySelector('.mc-dock-current');if(nav.parentNode!==viewTools)viewTools.insertBefore(nav,viewTools.children[1]);
+          if(effective.parentNode!==body)body.insertBefore(effective,body.firstChild);
+        }
+      }
     });
     const select=$('mc-tracking');if(select){select.hidden=true;let b=$('mc-head-tracking-options');if(!b){b=button('Global head-tracking options',trackingOptions,'mc-secondary');b.id='mc-head-tracking-options';select.parentNode.insertBefore(b,select);}const note=select.parentNode.querySelector('small');if(note)note.textContent='Shared by every camera and profile. Head tracking is off by default.';b.disabled=!S.working;}
     const id=$('mc-view-id');if(id){id.max='2147483647';const note=id.parentNode.querySelector('small');if(note)note.textContent='0 = unassigned. Each camera can have its own binding slot.';}
-
   }
 
   function dockCamera() { return (S.ownership.state === 'Active' && camIn(S.active.cameraId)) || current(); }
@@ -2067,18 +2238,20 @@
         let airportGroup=null;
         groups.forEach(g => {
           if(g.airportIcao&&!airportGroup){airportGroup=make('div',undefined,'mc-dock-airport mc-category-grid');airportGroup.appendChild(make('span',g.airportIcao,'mc-category-group-label'));airportGroup.setAttribute('aria-label','Airport '+g.airportIcao);categories.appendChild(airportGroup);}
-          const entry = button(g.name, () => { S.miniCategory = g.id; const first = camIn(g.defaultCameraId) || g.cameraIds.map(camIn).find(Boolean); if(first)activateCamera(first.id); renderDock(); });
+          const entry = button(g.name, () => { S.miniCategory = g.id; const preferred=camIn(g.defaultCameraId),first=preferred&&preferred.favorite?preferred:g.cameraIds.map(camIn).find(v=>v&&v.favorite); if(first)activateCamera(first.id); renderDock(); });
           decorateName(entry, g.name, true, entityIcon(g, true), g.color);
           wireContext(entry, () => categoryActions(catIn(g.id)));
           entry.setAttribute('aria-pressed', String(selectedGroup && g.id === selectedGroup.id));
           entry.setAttribute('data-focus-key', 'category:' + g.id);
           (g.airportIcao ? airportGroup : aircraftGroup).appendChild(entry);
         });
-        if (selectedGroup) selectedGroup.cameraIds.map(camIn).filter(Boolean).forEach(view => favorites.appendChild(dockViewButton(view, 'category-view:')));
+        const starred=selectedGroup?selectedGroup.cameraIds.map(camIn).filter(view=>view&&view.favorite):[];
+        starred.forEach(view => favorites.appendChild(dockViewButton(view, 'category-view:')));
+        if(!starred.length){favorites.appendChild(make('span','No starred cameras in this category. Star cameras in the main panel.','mc-note'));['mc-prev','mc-next'].forEach(id=>$(id).disabled=true);}
       } else if (IS_MINI && S.miniPicking && P()) {
         P().categories.forEach(g => {
           favorites.appendChild(make('span', g.name, 'mc-dock-group'));
-          g.cameraIds.map(camIn).filter(Boolean).forEach(view => favorites.appendChild(dockViewButton(view, 'pick:')));
+          g.cameraIds.map(camIn).filter(view=>view&&view.favorite).forEach(view => favorites.appendChild(dockViewButton(view, 'pick:')));
         });
         const done = button('Done', () => { S.miniPicking = false; renderDock(); $('mc-quick-picker').focus(); });
         done.setAttribute('data-focus-key', 'pick-done');
@@ -2097,29 +2270,31 @@
   function layoutMiniCategories() {
     if(!IS_MINI)return;
     const dock=$('mc-mini-panel'),pane=$('mc-dock-categories');
-    const allGroups=$$('.mc-category-grid',pane);
-    allGroups.forEach(g=>{g.hidden=!g.querySelector('button');});
-    const groups=allGroups.filter(g=>!g.hidden);
-    const icons=root.dataset.nameDisplay==='icons',cell=icons?52:112;
-    // Spend the existing dock height on readable categories before adding any new rows.
-    const limit=Math.max(cell*groups.length,Math.floor((dock.clientWidth-20)*.60));
-    let rows=2;
-    const count=g=>g.querySelectorAll('button').length;
-    const columns=g=>Math.ceil(count(g)/rows);
-    const width=()=>groups.reduce((sum,g)=>sum+columns(g)*cell+6,0);
-    while(width()>limit&&rows<Math.max(2,...groups.map(count)))rows++;
-    const usedRows=Math.min(rows,Math.max(0,...groups.map(count)));
-    const height=Math.max(108,18+usedRows*44+Math.max(0,usedRows-1)*2);
-    groups.forEach(g=>{
-      const groupRows=Math.ceil(count(g)/columns(g));
-      g.style.width=(columns(g)*cell)+'px';
-      g.style.gridTemplateColumns='repeat('+columns(g)+', minmax(0,1fr))';
-      g.style.gridAutoRows=Math.floor((height-18-Math.max(0,groupRows-1)*2)/groupRows)+'px';
-    });
-    pane.style.width=(width()+6)+'px';pane.style.height=height+'px';
-    dock.style.height=(height+10)+'px';dock.style.maxHeight=(height+10)+'px';
+    const groups=$$('.mc-category-grid',pane).filter(g=>!g.classList.contains('mc-category-flat'));
+    let flat=pane.querySelector('.mc-category-flat');
+    if(!flat){flat=make('div',undefined,'mc-category-grid mc-category-flat');flat.setAttribute('role','group');flat.setAttribute('aria-label','Aircraft and airport categories');pane.appendChild(flat);}
+    groups.forEach(g=>{const buttons=$$('button',g);if(buttons.length)g.dataset.hasCategories='true';buttons.forEach(b=>{b.dataset.categoryScope=g.querySelector('.mc-category-group-label').textContent;flat.appendChild(b);});g.hidden=true;});
+    const entries=$$('button',flat);
+    const width=dock.clientWidth,icons=root.dataset.nameDisplay==='icons',cell=icons?34:width<1100?88:94,narrow=width<1100;
+    dock.classList.remove('mc-dock-stacked');dock.classList.toggle('mc-mini-condensed',narrow);
+    const available=Math.max(cell,Math.floor((width-20)*(width<880?.5:.40)));
+    const columns=Math.max(1,Math.floor(available/cell));
+    const usedColumns=Math.min(columns,Math.max(1,entries.length));
+    const rows=Math.max(1,Math.ceil(entries.length/usedColumns));
+    let legend=pane.querySelector('.mc-dock-category-legend');
+    if(!legend){legend=make('span',undefined,'mc-dock-category-legend');pane.insertBefore(legend,pane.firstChild);}
+    legend.textContent=groups.filter(g=>g.dataset.hasCategories==='true').map(g=>g.querySelector('.mc-category-group-label').textContent).join(' / ');legend.hidden=narrow;
+    const height=Math.max(narrow?58:72,rows*28+Math.max(0,rows-1)*2+(narrow?0:14));
+    const categoryWidth=usedColumns*cell+4;
+    pane.style.width=categoryWidth+'px';pane.style.height=height+'px';flat.style.gridTemplateColumns='repeat('+usedColumns+',minmax(0,1fr))';
+    pane.style.paddingTop=(narrow?0:14)+'px';
+    dock.style.gridTemplateColumns=categoryWidth+'px minmax(0,1fr)';
+    const tools=dock.querySelector('.mc-dock-tools');tools.style.minHeight='28px';
+    const total=height+42;
+    dock.style.height=total+'px';dock.style.maxHeight=total+'px';
     sizeMiniClearance();
   }
+
   function dockViewButton(view, prefix) {
     const entry = button(view.name, () => { S.miniPicking = false; activateCamera(view.id); });
     decorateName(entry, view.name, false, entityIcon(view, false), entityColor(view));
@@ -2128,7 +2303,8 @@
     entry.setAttribute('data-focus-key', prefix + view.id);
     entry.setAttribute('data-favorite', view.id);
     entry.setAttribute('aria-pressed', String(isLive(view.id)));
-    if (view.viewId) entry.appendChild(make('span', String(view.viewId), 'mc-key'));
+    const shortcut=cameraShortcutLabel(view);
+    if (shortcut) entry.appendChild(make('span', shortcut, 'mc-key'));
     const reason = cameraBlockReason(view);
     entry.disabled = Boolean(reason);
     entry.dataset.cameraHelp = reason ? view.name + ': ' + reason : view.name;
@@ -2209,9 +2385,16 @@
     const saving = Boolean(S.pendingCommit);
     $('mc-save-state').setAttribute('data-dirty', String(dirty && !saving));
     setIcon($('mc-save-state'), dirty && !saving ? 'alert-triangle' : 'check');
-    $('mc-save-label').textContent = saving ? 'Saving...' : dirty ? 'Unsaved changes' : 'All changes saved';
+    $('mc-save-label').textContent = saving ? 'Saving cameras...' : dirty ? 'Unsaved changes' : 'All changes saved';
     $('mc-revert').disabled = !dirty || saving;
     $('mc-save').disabled = !dirty || saving || !S.snapshot;
+    const shortcut = $('mc-save').querySelector('.mc-save-shortcut');
+    if (shortcut) {
+      const binding = S.working && (S.working.bindings.bindings || []).find(b => b.action === 'saveViews' && b.input && b.input.kind === 'key');
+      shortcut.hidden = !binding;
+      shortcut.textContent = binding ? binding.input.label || binding.input.definition.replace(/VK_/g,'') : '';
+    }
+
     const exportButton = $('mc-export-profile');
     setLabel(exportButton, 'Export profile');
   }
@@ -2237,7 +2420,7 @@
           host.appendChild(banner('plane', ['"' + match.name + '" is the camera profile for ', make('strong', aircraftName()), '.'], [open, dismiss], true));
         } else if (!a.matchProfileId) {
           const create = button('Create profile for this aircraft', createProfileForAircraft, 'mc-secondary');
-          const use = button('Use current profile for this aircraft', useCurrentForAircraft, 'mc-secondary');
+          const use = button('Copy for current aircraft', useCurrentForAircraft, 'mc-secondary');
           create.setAttribute('data-focus-key', 'banner-create');
           use.setAttribute('data-focus-key', 'banner-use');
           host.appendChild(banner('plane', [make('strong', 'No camera profile for ' + aircraftName())], [create, use, dismiss]));
@@ -2323,7 +2506,23 @@
 
   /* ------------- Bindings ------------- */
   const bindingsList = () => (S.working ? S.working.bindings.bindings : []);
-  const findBinding = (action, viewId) => bindingsList().filter(b => b.action === action && (viewId ? b.viewId === viewId : !b.viewId))[0] || null;
+  const bindingsFor = (action, viewId) => bindingsList().filter(b => b.action === action && (b.viewId || 0) === (viewId || 0));
+  const findBinding = (action, viewId, slot) => {
+    const list = bindingsFor(action, viewId);
+    if (!slot) return list.filter(b => b.input.kind === 'key')[0] || list[0] || null;
+    const explicit = list.filter(b => b.slot === slot)[0];
+    if (explicit) return explicit;
+    const free = ['primary', 'secondary'].filter(key => !list.some(b => b.slot === key));
+    return list.filter(b => !b.slot)[free.indexOf(slot)] || null;
+  };
+  function preserveBindingSlots() {
+    bindingsList().forEach(b => {
+      if (b.slot) return;
+      const primary = findBinding(b.action, b.viewId, 'primary'), secondary = findBinding(b.action, b.viewId, 'secondary');
+      if (primary) primary.slot = 'primary';
+      if (secondary) secondary.slot = 'secondary';
+    });
+  }
   const sameInput = (a, b) => Boolean(a && b) && a.definition === b.definition && (a.pov || null) === (b.pov || null);
   function setBindingResult(text, tone) {
     const el = $('mc-binding-result');
@@ -2365,10 +2564,10 @@
       sections.forEach((section, index) => {
         total += section[1].length;
         const rows = section[1].filter(spec => {
-          const binding = findBinding(spec.action, spec.viewId);
+          const matches = bindingsFor(spec.action, spec.viewId), binding = matches[0];
           if (status === 'assigned' && !binding || status === 'unassigned' && binding) return false;
-          if (kind !== 'all' && (!binding || binding.input.kind !== kind)) return false;
-          return !query || [section[0],spec.name,spec.detail,binding && binding.input.label,binding && binding.input.definition].join(' ').toLowerCase().indexOf(query) >= 0;
+          if (kind !== 'all' && !matches.some(b => b.input.kind === kind)) return false;
+          return !query || [section[0],spec.name,spec.detail,matches.map(b => (b.input.label || '') + ' ' + b.input.definition).join(' ')].join(' ').toLowerCase().indexOf(query) >= 0;
         });
         shown += rows.length;
         if (!rows.length) return;
@@ -2390,37 +2589,30 @@
   }
   function bindingRow(spec) {
     const key = spec.action + (spec.viewId ? ':' + spec.viewId : '');
-    const binding = findBinding(spec.action, spec.viewId);
-    const ro = !S.snapshot;
-    const row = make('div', undefined, 'mc-binding-row');
+    const row = make('div', undefined, 'mc-binding-row mc-binding-dual');
     row.setAttribute('data-binding', key);
     const name = make('div', spec.name, 'mc-binding-name');
-    name.appendChild(make('small', spec.detail));
-    const chip = make('span', undefined, 'mc-binding-input');
-    chip.setAttribute('data-empty', String(!binding));
-    if (binding) add(chip, icon(binding.input.kind === 'key' ? 'keyboard' : 'radio'), make('span', binding.input.label || binding.input.definition));
-    else chip.textContent = 'Unassigned';
-    const actions = make('div', undefined, 'mc-binding-actions');
-    const assign = button('Assign', () => assignDialog(spec));
-    assign.setAttribute('data-focus-key', 'assign:' + key);
-    assign.setAttribute('aria-label', 'Assign an input to ' + spec.name);
-    assign.disabled = ro;
-    const clear = button('Clear', () => {
-      S.working.bindings.bindings = bindingsList().filter(b => b !== binding);
-      saveBindings();
-      renderBindings();
-      setBindingResult('Cleared "' + spec.name + '". Save changes to keep it.');
+    name.appendChild(make('small', spec.detail)); row.appendChild(name);
+    ['primary', 'secondary'].forEach(slot => {
+      const binding = findBinding(spec.action, spec.viewId, slot), title = slot === 'primary' ? 'Primary' : 'Secondary';
+      const group = make('div', undefined, 'mc-binding-slot'); group.setAttribute('data-slot', slot);
+      group.appendChild(make('small', title));
+      const assign = button(binding ? binding.input.label || binding.input.definition : 'Assign input', () => assignDialog(Object.assign({}, spec, {slot})), 'mc-binding-input', binding && binding.input.kind === 'key' ? 'keyboard' : 'radio');
+      assign.setAttribute('data-focus-key', 'assign:' + key + ':' + slot);
+      assign.setAttribute('aria-label', 'Assign ' + slot + ' input to ' + spec.name); assign.disabled = !S.snapshot;
+      assign.setAttribute('data-empty', String(!binding)); group.appendChild(assign);
+      const actions = make('div', undefined, 'mc-binding-actions');
+      const clear = button('Clear', () => {
+        preserveBindingSlots(); S.working.bindings.bindings = bindingsList().filter(b => b !== binding);
+        saveBindings(); renderBindings(); renderDetails(); renderTree(); renderDock();
+        setBindingResult(title + ' input cleared for "' + spec.name + '". Save changes to keep it.');
+      });
+      clear.setAttribute('aria-label', 'Clear ' + slot + ' input for ' + spec.name); clear.disabled = !S.snapshot || !binding;
+      const test = button(spec.peek ? 'Hold' : 'Test', spec.peek ? null : () => testBinding(binding, spec.name));
+      test.disabled = !S.snapshot || !binding; test.setAttribute('aria-label', 'Test ' + slot + ' input for ' + spec.name);
+      if(spec.peek) wirePeek(test, spec.viewId);
+      add(actions, clear, test); group.appendChild(actions); row.appendChild(group);
     });
-    clear.setAttribute('data-focus-key', 'clear:' + key);
-    clear.setAttribute('aria-label', 'Clear ' + spec.name);
-    clear.disabled = ro || !binding;
-    const test = button(spec.peek ? 'Hold' : 'Test', spec.peek ? null : () => testBinding(binding, spec.name));
-    test.setAttribute('data-focus-key', 'test:' + key);
-    test.setAttribute('aria-label', spec.peek ? 'Hold to peek at view ID ' + spec.viewId : 'Test ' + spec.name);
-    test.disabled = ro || !binding;
-    if (spec.peek) wirePeek(test, spec.viewId);
-    add(actions, assign, clear, test);
-    add(row, name, chip, actions);
     return row;
   }
   function testBinding(binding, name) {
@@ -2524,12 +2716,44 @@
     if (/^[0-9]$/.test(key || '')) return (event.location === 3 ? 'Numpad' : 'Digit') + key;
     return key;
   }
+  function assignCameraBinding(view) {
+    if(!view||readOnly())return;
+    if(!view.viewId){
+      const used=cameras().map(c=>c.viewId).concat(bindingsList().map(b=>b.viewId));
+      let id=1;while(used.indexOf(id)>=0)id++;
+      view.viewId=id;saveCamera(view);renderDetails();renderTree();
+    }
+    assignDialog({action:'selectView',viewId:view.viewId,name:view.name,detail:'View ID '+view.viewId});
+  }
+  function fitAssignmentDialog() {
+    const shade=$('mc-dialog-shade');
+    if(shade.hidden||!shade.classList.contains('mc-binding-shade'))return;
+    const menu=shade.querySelector('.mc-dialog'),body=$('mc-dialog-body');
+    const available=Math.max(160,window.innerHeight-16);
+    menu.style.maxHeight=available+'px';
+    const fixed=menu.querySelector('header').getBoundingClientRect().height+$('mc-dialog-error').getBoundingClientRect().height+$('mc-dialog-actions').getBoundingClientRect().height+4;
+    body.style.maxHeight=Math.max(40,available-fixed)+'px';
+    const dock=$('mc-mini-panel').getBoundingClientRect();
+    menu.style.left=Math.max(8,Math.min(innerWidth-menu.offsetWidth-8,IS_MINI?dock.right-menu.offsetWidth:(innerWidth-menu.offsetWidth)/2))+'px';
+    menu.style.top=Math.max(8,Math.min(innerHeight-menu.offsetHeight-8,IS_MINI?dock.top-menu.offsetHeight-8:(innerHeight-menu.offsetHeight)/2))+'px';
+    updateScrollbars();if(window.fscsUpdateMiniRect)window.fscsUpdateMiniRect();
+  }
+  window.addEventListener('resize',()=>nextFrame(fitAssignmentDialog));
   function assignDialog(spec) {
-    const existing = findBinding(spec.action, spec.viewId);
+    spec = Object.assign({slot:'primary'}, spec);
+    const existing = findBinding(spec.action, spec.viewId, spec.slot);
     // Closing the dialog always hands the keyboard back to the simulator.
-    const body = openDialog('Assign ' + spec.name, () => { S.assign = null; claimKeyboard(null); setTimeout(reportTextFocus, 0); });
+    const body = openDialog('Assign ' + spec.name + ' - ' + (spec.slot === 'secondary' ? 'Secondary' : 'Primary'), () => { bridge.send('StopControllerCapture', {}); S.assign = null; claimKeyboard(null); setTimeout(reportTextFocus, 0); });
     S.assign = { spec, staged: null, held: {}, controllers: null, tested: { down: false, up: false } };
-    body.appendChild(make('p', 'Press a key combination now. Esc cancels. Up to two modifier keys (Ctrl, Alt, Shift) plus one key.'));
+    $('mc-dialog-shade').classList.add('mc-binding-shade');
+    const slots = make('div', undefined, 'mc-assign-slots');
+    ['primary','secondary'].forEach(slot => {
+      const binding = findBinding(spec.action, spec.viewId, slot), title = slot === 'primary' ? 'Primary' : 'Secondary';
+      const choose = button(title, () => assignDialog(Object.assign({}, spec, {slot})), 'mc-secondary');
+      choose.setAttribute('data-slot',slot); choose.setAttribute('aria-pressed',String(slot === spec.slot));
+      choose.appendChild(make('small',binding ? binding.input.label || binding.input.definition : 'Unassigned')); slots.appendChild(choose);
+    }); body.appendChild(slots);
+    body.appendChild(make('p', 'Each input works independently. Press a key combination now. Esc cancels. Up to two modifier keys (Ctrl, Alt, Shift) plus one key.'));
     // A (read-only) text input, so the panel claims the keyboard from the sim while capturing.
     const capture = make('input', undefined, 'mc-binding-input');
     capture.type = 'text';
@@ -2571,25 +2795,31 @@
     capture.addEventListener('keyup', event => { const code = captureCode(event); if (S.assign && MODIFIERS[code]) S.assign.held[code] = false; });
     const actions = [['Cancel', () => closeDialog()]];
     if (existing) actions.push(['Clear assignment', () => {
-      S.working.bindings.bindings = bindingsList().filter(b => !(b.action === spec.action && (b.viewId || 0) === (spec.viewId || 0)));
-      closeDialog(); saveBindings(); renderBindings(); renderDetails();
+      preserveBindingSlots();
+      S.working.bindings.bindings = bindingsList().filter(b => b !== existing);
+      closeDialog(); saveBindings(); renderBindings(); renderDetails(); renderTree(); renderDock();
       announce('Assignment cleared. Save changes to keep it.');
     }]);
     actions.push(['Assign', applyAssign, 'mc-primary']);
     dialogActions(actions);
     updateAssignButton();
     bridge.send('ListControllers', {});
-    nextFrame(() => capture.focus());
+    if(IS_MINI){
+      $('mc-dialog-shade').classList.add('mc-tracking-shade');
+      nextFrame(()=>{const menu=$('mc-dialog-shade').querySelector('.mc-dialog'),dock=$('mc-mini-panel').getBoundingClientRect();menu.style.left=Math.max(8,Math.min(innerWidth-menu.offsetWidth-8,dock.right-menu.offsetWidth))+'px';menu.style.top=Math.max(8,dock.top-menu.offsetHeight-8)+'px';if(window.fscsUpdateMiniRect)window.fscsUpdateMiniRect();});
+    }
+    nextFrame(() => { capture.focus(); fitAssignmentDialog(); });
   }
   function stageInput(input, note) {
     const a = S.assign;
     if (!a) return;
+    if (a.listening) { a.listening = false; bridge.send('StopControllerCapture', {}); }
     a.staged = input;
     $('mc-assign-capture').value = input.label;
     const noteEl = $('mc-assign-note');
     noteEl.hidden = !note;
     noteEl.textContent = note || '';
-    const conflict = bindingsList().filter(b => sameInput(b.input, input) && !(b.action === a.spec.action && (b.viewId || 0) === (a.spec.viewId || 0)))[0];
+    const conflict = bindingsList().filter(b => sameInput(b.input, input) && b !== findBinding(a.spec.action, a.spec.viewId, a.spec.slot))[0];
     const conflictCamera = conflict && cameras().filter(c => c.viewId === conflict.viewId)[0];
     dialogError(conflict ? input.label + ' is assigned to "' + (conflictCamera ? conflictCamera.name : actionName(conflict.action, conflict.viewId)) + '". Replace it to move this input to "' + a.spec.name + '".' : '');
     a.conflict = Boolean(conflict);
@@ -2603,48 +2833,87 @@
     const controllerReady = !a.staged || a.staged.kind !== 'joystick' || (a.tested.down && a.tested.up);
     assignButton.textContent = a.conflict ? 'Replace existing assignment' : 'Assign';
     assignButton.disabled = !a.staged || !controllerReady;
+    nextFrame(fitAssignmentDialog);
   }
   function renderAssignControllers() {
-    const a = S.assign;
-    const host = $('mc-assign-controller');
+    const a = S.assign, host = $('mc-assign-controller');
     if (!a || !host) return;
     empty(host);
-    if (!a.controllers || !a.controllers.length) { host.appendChild(make('p', 'No controllers found. Connect one and reopen this dialog.')); return; }
+    const controllers = (a.controllers || []).filter(c => !/^(mouse|keyboard|touch pointer)$/i.test(c.name.trim()));
+    if (!controllers.length) { host.appendChild(make('p', 'No controllers found. Connect one, then refresh.')); host.appendChild(button('Refresh controllers', () => bridge.send('ListControllers', {}), 'mc-secondary')); nextFrame(fitAssignmentDialog); return; }
+    // Coherent cannot reliably open HTML select popups. Use ordinary in-panel
+    // buttons so controller options participate in the native panel hit region.
+    if(!controllers.some(c => c.deviceId === a.selectedDeviceId))a.selectedDeviceId=controllers[0].deviceId;
+    const currentDevice = () => controllers.filter(c => c.deviceId === a.selectedDeviceId)[0];
+    const deviceLabel=make('div',undefined,'mc-field mc-controller-picker');
+    deviceLabel.setAttribute('data-no-tooltip','true');
+    const caption=make('span','Controller');caption.id='mc-controller-caption';deviceLabel.appendChild(caption);
+    const choices=make('div',undefined,'mc-controller-choices');choices.id='mc-controller-choices';choices.hidden=true;
+    choices.setAttribute('role','group');choices.setAttribute('aria-label','Available controllers');
+    const setOpen=open=>{choices.hidden=!open;device.setAttribute('aria-expanded',String(open));nextFrame(fitAssignmentDialog);};
+    const device=button(currentDevice().name,()=>setOpen(choices.hidden),'mc-secondary');device.id='mc-assign-device';
+    device.setAttribute('aria-label','Choose controller: '+currentDevice().name);device.setAttribute('aria-controls',choices.id);device.setAttribute('aria-expanded','false');
+    controllers.forEach(c=>{
+      const choice=button(c.name,()=>{
+        a.selectedDeviceId=c.deviceId;a.listening=false;a.captureId=null;bridge.send('StopControllerCapture',{});
+        if(a.staged && a.staged.kind==='joystick'){a.staged=null;a.tested={down:false,up:false};$('mc-assign-capture').value='Waiting for controller input...';dialogError('');updateAssignButton();}
+        device.textContent=c.name;device.setAttribute('aria-label','Choose controller: '+c.name);
+        Array.from(choices.children).forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.deviceId===String(c.deviceId))));
+        listen.textContent='Listen for button or hat';status.textContent='Ready to listen on '+c.name+'.';setOpen(false);device.focus();
+      },'mc-secondary');
+      choice.dataset.deviceId=String(c.deviceId);choice.setAttribute('aria-pressed',String(c.deviceId===a.selectedDeviceId));choices.appendChild(choice);
+    });
+    deviceLabel.addEventListener('keydown',event=>{if(event.key==='Escape'&&!choices.hidden){event.preventDefault();event.stopPropagation();setOpen(false);device.focus();}});
+    add(deviceLabel,device,choices);
+    const status = make('p', 'Select a controller, then listen for a button or hat direction.', 'mc-note');
+    status.id = 'mc-assign-test'; status.setAttribute('aria-live', 'polite');
+    const listen = button('Listen for button or hat', () => {
+      if (a.listening) { a.listening = false; bridge.send('StopControllerCapture', {}); listen.textContent = 'Listen for button or hat'; status.textContent = 'Listening stopped.'; return; }
+      const c = currentDevice(); if(!c)return;
+      a.listening = true; a.captureDeviceId = c.deviceId; a.captureId = M.uuid(); const captureId = a.captureId; a.staged = null; a.tested = {down:false,up:false};
+      updateAssignButton(); listen.textContent = 'Stop listening'; status.textContent = 'Press and release a button, or move a hat and let it return to center on ' + c.name + '.';
+      bridge.request('StartControllerCapture', {deviceId:c.deviceId,captureId}).then(ack => {
+        if(S.assign !== a || a.captureId !== captureId)return;
+        if(ack.status === 'Rejected' || ack.status === 'TimedOut') { a.listening = false; listen.textContent = 'Listen for button or hat'; status.textContent = reasonText(ack.reason) || 'Could not listen. Try the manual input option below.'; }
+      });
+    }, 'mc-primary', 'radio'); listen.id = 'mc-assign-listen';
+    const manual = make('details', undefined, 'mc-controller-manual'); manual.appendChild(make('summary', 'Manual button or hat switch'));
+    manual.appendChild(make('p', 'Choose an input manually if listening cannot detect it. Test the control before assigning it.', 'mc-note'));
     const grid = make('div', undefined, 'mc-form-grid mc-flush');
-    const deviceLabel = make('label', 'Controller', 'mc-field'), device = make('select');
-    a.controllers.forEach(c => { const o = make('option', c.name); o.value = String(c.deviceId); device.appendChild(o); });
-    deviceLabel.appendChild(device);
     const kindLabel = make('label', 'Input', 'mc-field'), kind = make('select');
-    [['button', 'Button'], ['pov', 'Hat switch']].forEach(k => { const o = make('option', k[1]); o.value = k[0]; kind.appendChild(o); });
-    kindLabel.appendChild(kind);
-    const numberField = field('Button number', '1', 'number');
-    numberField.input.min = '1'; numberField.input.max = '128';
+    [['button', 'Button'], ['pov', 'Hat switch']].forEach(k => { const o = make('option', k[1]); o.value = k[0]; kind.appendChild(o); }); kindLabel.appendChild(kind);
+    const numberField = field('Button number', '1', 'number'); numberField.input.min = '1'; numberField.input.max = '128';
     const dirLabel = make('label', 'Direction', 'mc-field'), dir = make('select');
-    ['up', 'right', 'down', 'left'].forEach(d => { const o = make('option', d.charAt(0).toUpperCase() + d.slice(1)); o.value = d; dir.appendChild(o); });
-    dirLabel.appendChild(dir);
-    add(grid, deviceLabel, kindLabel, numberField.label, dirLabel);
-    const status = make('p', 'Choose the input, then press Test input and use the control once.');
-    status.id = 'mc-assign-test';
-    status.setAttribute('aria-live', 'polite');
+    ['up', 'right', 'down', 'left'].forEach(d => { const o = make('option', d.charAt(0).toUpperCase() + d.slice(1)); o.value = d; dir.appendChild(o); }); dirLabel.appendChild(dir);
+    add(grid, kindLabel, numberField.label, dirLabel);
     const testButton = button('Test input', () => {
-      const c = a.controllers.filter(x => String(x.deviceId) === device.value)[0];
-      if (!c) return;
+      const c = currentDevice(); if(!c)return;
       let input;
       if (kind.value === 'button') {
         const n = Math.max(1, Math.min(128, Math.round(Number(numberField.input.value) || 1)));
-        input = { kind: 'joystick', deviceId: c.deviceId, deviceName: c.name, definition: 'joystick:' + c.deviceId + ':button:' + (n - 1), label: c.name + ' - Button ' + n };
-      } else {
-        input = { kind: 'joystick', deviceId: c.deviceId, deviceName: c.name, definition: 'joystick:' + c.deviceId + ':POV:0', pov: dir.value, label: c.name + ' - Hat ' + dir.value };
-      }
-      a.tested = { down: false, up: false };
-      stageInput(input, null);
-      status.textContent = 'Waiting for ' + input.label + '... use the control now.';
-      bridge.send('TestInput', { input: clone(input) });
+        input = {kind:'joystick',deviceId:c.deviceId,deviceName:c.name,definition:'joystick:' + c.deviceId + ':button:' + (n - 1),label:c.name + ' - Button ' + n};
+      } else input = {kind:'joystick',deviceId:c.deviceId,deviceName:c.name,definition:'joystick:' + c.deviceId + ':POV:0',pov:dir.value,label:c.name + ' - Hat ' + dir.value};
+      a.tested = {down:false,up:false}; stageInput(input,null);
+      status.textContent = 'Press and release ' + input.label + '.'; bridge.send('TestInput',{input:clone(input)});
     }, 'mc-secondary');
-    const sync = () => { numberField.label.hidden = kind.value !== 'button'; dirLabel.hidden = kind.value === 'button'; };
-    kind.addEventListener('change', sync);
-    sync();
-    add(host, grid, status, testButton);
+    const sync = () => { numberField.label.hidden = kind.value !== 'button'; dirLabel.hidden = kind.value === 'button'; nextFrame(fitAssignmentDialog); };
+    kind.addEventListener('change',sync); manual.addEventListener('toggle',()=>nextFrame(fitAssignmentDialog)); sync();
+    add(manual,grid,testButton); add(host,deviceLabel,listen,status,manual); nextFrame(fitAssignmentDialog);
+  }
+  function onControllerInputCaptured(p) {
+    const a = S.assign;
+    if(!a || !a.listening || !p.input || p.input.deviceId !== a.captureDeviceId || p.captureId !== a.captureId)return;
+    a.listening = false; a.tested = {down:true,up:true}; stageInput(p.input,null);
+    const status=$('mc-assign-test'),listen=$('mc-assign-listen');
+    if(status)status.textContent='Detected ' + p.input.label + '. Choose Assign to use it.';
+    if(listen)listen.textContent='Listen for another input';
+  }
+  function onControllerCaptureStatus(p) {
+    const a=S.assign; if(!a || !a.listening || p.captureId !== a.captureId || p.state === 'listening')return;
+    a.listening=false;
+    const status=$('mc-assign-test'),listen=$('mc-assign-listen');
+    if(listen)listen.textContent='Listen for button or hat';
+    if(status)status.textContent=p.state === 'error' ? 'MSFS could not register controller listening. Try again or test an input manually. Details are available in Diagnostics.' : p.state === 'disconnected' ? 'Controller disconnected. Reconnect it and refresh controllers.' : p.state === 'timeout' ? 'No button or hat detected. Listen again or use the manual input option.' : 'Listening stopped.';
   }
   function onInputTest(p) {
     const a = S.assign;
@@ -2657,9 +2926,11 @@
   function applyAssign() {
     const a = S.assign;
     if (!a || !a.staged || readOnly() || (a.staged.kind === 'joystick' && !(a.tested.down && a.tested.up))) return;
-    // One draft transaction removes the conflict and replaces this action's previous input.
-    const list = bindingsList().filter(b => !sameInput(b.input, a.staged) && !(b.action === a.spec.action && (b.viewId || 0) === (a.spec.viewId || 0)));
-    const next = { action: a.spec.action };
+    // Replace only this slot and the exact conflicting input; retain all other inputs.
+    preserveBindingSlots();
+    const existing = findBinding(a.spec.action, a.spec.viewId, a.spec.slot);
+    const list = bindingsList().filter(b => !sameInput(b.input, a.staged) && b !== existing);
+    const next = { action: a.spec.action, slot: a.spec.slot };
     if (a.spec.viewId) next.viewId = a.spec.viewId;
     next.input = clone(a.staged);
     list.push(next);
@@ -2669,6 +2940,7 @@
     saveBindings();
     renderBindings();
     renderDetails();
+    renderTree(); renderDock();
     setBindingResult('Assigned ' + label + ' to "' + a.spec.name + '". Save changes to keep it.');
   }
 
@@ -2676,8 +2948,12 @@
 
   function renderAirportSummary() {
     const box=$('mc-airports-summary');if(!box)return;empty(box);
-    const state=S.airports;add(box,make('strong','Shared airport cameras'),make('p','Saved once per airport and available with every aircraft profile.','mc-note'),make('p',state.loaded?'Loaded: '+state.loaded:'No saved airport cameras within '+(state.radiusNm||25)+' NM.','mc-note'));
-    add(box,button('Generate / select airport',airportDialog,'mc-secondary','map-pin'));
+    const state=S.airports||{},heading=make('div',undefined,'mc-library-heading'),title=make('h4','Shared airport library');
+    add(heading,icon('view-tower'),title,make('span','All aircraft','mc-pill'));box.appendChild(heading);
+    box.appendChild(make('p','Airport cameras are saved separately and available with every aircraft.','mc-note'));
+    const loaded=make('p',state.loaded?'Loaded airport: '+state.loaded:'No saved airport loaded nearby.','mc-library-status');
+    add(box,loaded,button('Open airport library',airportDialog,'mc-secondary','map-pin'));
+    if(state.loaded)box.appendChild(make('small','Switching aircraft profiles keeps these airport cameras.','mc-note'));
   }
   function airportDialog() {
     const body=openDialog('Airport cameras');
@@ -2692,6 +2968,7 @@
       const mark=make('span',undefined,'mc-airport-check');mark.setAttribute('aria-hidden','true');mark.appendChild(icon('check'));const copy=make('span',undefined,'mc-airport-choice-copy'),heading=make('strong');add(heading,icon({runways:'view-runway',parking:'view-gate',taxi:'view-taxiway',tower:'view-tower'}[key]),make('span',label));add(copy,heading,make('small',hint));add(check,mark,copy);options.appendChild(check);
     });
     const placement=make('div',undefined,'mc-airport-placement');
+    const globalHeightRow=make('label',undefined,'mc-switch-row'),globalHeight=make('input');globalHeight.type='checkbox';globalHeight.checked=true;globalHeight.id='mc-airport-global-heights';globalHeight.setAttribute('aria-label','Use global category heights');add(globalHeightRow,make('span','Use global category heights'),globalHeight);body.appendChild(globalHeightRow);
     [['height','Height above feature',3,1,100],['offset','Horizontal offset',12,3,150]].forEach(([key,label,value,min,max])=>{const row=make('label',undefined,'mc-airport-measure'),n=make('input'),valueBox=make('span',undefined,'mc-airport-value');Object.assign(n,{type:'number',value,min,max,step:1,id:'mc-airport-'+key});n.setAttribute('aria-label',label);add(valueBox,n,make('span','m'));add(row,make('span',label),valueBox);placement.appendChild(row);});
     const generate=button('Preview cameras',()=>{
       const codes=$('mc-airport-codes').value.toUpperCase().split(/[\s,;]+/).filter(Boolean);
@@ -2704,6 +2981,7 @@
     },'mc-primary');generate.id='mc-airport-preview';
     const codeLabel=make('label','Airport ICAO codes','mc-airport-code-label');codeLabel.htmlFor=codes.id;
     add(body,codeLabel,codes,make('small','Enter one or more codes, separated by spaces.','mc-note'),make('h4','2. Camera types','mc-airport-heading'),options,make('h4','3. Camera placement','mc-airport-heading'),placement,generate);
+    placement.before(globalHeightRow);$('mc-airport-height').disabled=true;globalHeight.addEventListener('change',()=>{$('mc-airport-height').disabled=globalHeight.checked;});
     const source=make('details'),sourceTitle=make('summary','Use airport XML source (includes taxi signs)');const xml=make('textarea');xml.id='mc-airport-xml';xml.rows=5;xml.placeholder='Paste an Airport or FSData XML document';xml.setAttribute('aria-label','Airport XML source');
     add(source,sourceTitle,make('p','For source XML you can access. Compiled/encrypted BGL files cannot be pasted here.','mc-note'),xml,button('Preview from XML',()=>{
       try{if(!validAirportOptions())return;const facility=parseAirportXml(xml.value);command('PreviewAirportSource',{facility,options:airportOptions()});}catch(err){dialogError(err.message);}
@@ -2712,11 +2990,11 @@
     dialogActions([['Close',()=>closeDialog()]]);renderAirportNearby();renderAirportPreview();
     command('DiscoverAirports',{}, {quiet:true});
   }
-  function airportOptions() {const o={};['runways','parking','taxi','tower'].forEach(k=>o[k]=$('mc-airport-'+k).checked);['height','offset'].forEach(k=>o[k]=Number($('mc-airport-'+k).value));return o;}
+  function airportOptions() {const o={};['runways','parking','taxi','tower'].forEach(k=>o[k]=$('mc-airport-'+k).checked);['height','offset'].forEach(k=>o[k]=Number($('mc-airport-'+k).value));if($('mc-airport-global-heights').checked){delete o.height;o.categoryHeights=Object.assign({runways:3,gates:3,apron:3,taxi:3,tower:35},S.working.settings.host.airportCategoryHeights||{});}return o;}
   function validAirportOptions(){
     const o=airportOptions();
     if(!['runways','parking','taxi','tower'].some(k=>o[k])){dialogError('Choose at least one camera type.');return false;}
-    if(!isFinite(o.height)||o.height<1||o.height>100||!isFinite(o.offset)||o.offset<3||o.offset>150){dialogError('Use a height of 1–100 m and an offset of 3–150 m.');return false;}
+    if((o.height!==undefined&&(!isFinite(o.height)||o.height<1||o.height>100))||!isFinite(o.offset)||o.offset<3||o.offset>150){dialogError('Use a height of 1–100 m and an offset of 3–150 m.');return false;}
     return true;
   }
   function renderAirportNearby(){
@@ -2789,6 +3067,7 @@
     return f;
   }
   function renderProfiles() {
+    renderAirportSummary();
     const card = empty($('mc-aircraft-card'));
     const a = S.aircraft;
     const entry = make('div', undefined, 'mc-profile-entry mc-aircraft-card');
@@ -2801,12 +3080,12 @@
     } else {
       const isMatch = P() && a.matchProfileId === P().profileId;
       const other = a.matchProfileId && !isMatch ? S.profiles.filter(p => p.profileId === a.matchProfileId)[0] : null;
-      add(info, make('strong', 'Current aircraft - ' + aircraftName()), make('small', isMatch ? (a.matchReason || 'Matched') + ' - ' + P().name : other ? '"' + other.name + '" is the profile for this aircraft' : 'No camera profile for this aircraft yet'));
+      add(info, make('strong', 'Flying: ' + aircraftName()), make('small', isMatch ? (a.matchReason || 'Matched') + ' - ' + P().name : other ? '"' + other.name + '" is the profile for this aircraft' : 'No camera profile for this aircraft yet'));
       add(entry, mark, info);
       const actions = make('div', undefined, 'mc-row-actions');
       if (other) actions.appendChild(button('Open', () => openProfile(other.profileId), 'mc-secondary'));
       if (!isMatch && !other) actions.appendChild(button('Create profile for this aircraft', createProfileForAircraft, 'mc-secondary'));
-      if (!isMatch && P() && !readOnly()) actions.appendChild(button('Use current profile for this aircraft', useCurrentForAircraft, 'mc-secondary'));
+      if (!isMatch && P() && !readOnly()) actions.appendChild(button('Copy to this aircraft', useCurrentForAircraft, 'mc-secondary'));
       entry.appendChild(actions);
     }
     card.appendChild(entry);
@@ -2818,13 +3097,13 @@
         const row = make('div', undefined, 'mc-profile-entry');
         row.setAttribute('data-current', String(Boolean(isCurrent)));
         const pm = make('span', undefined, 'mc-profile-icon');
-        pm.appendChild(icon(profile.matchStrategy === 'none' ? 'map-pin' : 'plane'));
+        pm.appendChild(icon(profile.matchStrategy === 'none' ? 'folder' : 'plane'));
         const text = make('div', undefined, 'mc-profile-text');
         const title = make('strong', isCurrent ? P().name : profile.name);
         if (a && a.matchProfileId === profile.profileId) title.appendChild(make('span', 'This aircraft', 'mc-pill mc-accent'));
         if (profile.readOnly) title.appendChild(make('span', 'Read-only', 'mc-pill'));
         const count = isCurrent ? P().cameras.filter(c=>!c.airportIcao).length : profile.cameraCount;
-        add(text, title, make('small', (profile.displayName || 'No aircraft') + ' - ' + count + ' cameras' + (isCurrent && aircraftProfileDirty() ? ' - unsaved changes' : '')));
+        add(text, title, make('small', (profile.matchStrategy==='none'?'No aircraft assigned':'Aircraft: '+(profile.displayName || 'Unassigned')) + ' · ' + count + ' cameras' + (isCurrent && aircraftProfileDirty() ? ' - unsaved changes' : '')));
         add(row, pm, text);
         const actions = make('div', undefined, 'mc-row-actions');
         if (isCurrent) {
@@ -2844,6 +3123,11 @@
           del.setAttribute('aria-label', 'Delete ' + profile.name);
           del.setAttribute('data-focus-key', 'del:' + profile.profileId);
           add(actions, open, del);
+        }
+        if(aircraftLoaded()){
+          const copy=button('Copy to aircraft',()=>copyProfileForAircraft(profile.profileId,profile.name),'mc-secondary');
+          copy.setAttribute('aria-label','Copy '+profile.name+' for current aircraft');copy.setAttribute('data-focus-key','copy-aircraft:'+profile.profileId);
+          copy.title='Create a separate copy for '+aircraftName()+'. Camera positions may need adjustment.';copy.disabled=Boolean(profile.readOnly);actions.appendChild(copy);
         }
         row.appendChild(actions);
         list.appendChild(row);
@@ -2902,11 +3186,25 @@
     guardUnsaved('continuing').then(choice => { if (choice) createProfile({ name: aircraftName() || 'My cameras', forAircraft: true, copyOf: null }, 'Created a camera profile for ' + aircraftName() + '.'); });
   }
   function useCurrentForAircraft() {
-    if (!P() || !S.aircraft) return;
-    const name = P().name, title = aircraftName();
-    bridge.request('BindProfileToAircraft', { profileId: P().profileId }).then(ack => {
-      announce(ack.status === 'Completed' ? '"' + name + '" now opens for ' + title + '.' : reasonText(ack.reason), ack.status === 'Completed' ? 'ok' : 'warn');
-    });
+    if(P())copyProfileForAircraft(P().profileId,P().name);
+  }
+  async function copyProfileForAircraft(profileId,sourceName) {
+    if(!aircraftLoaded()){announce('Load a flight first.','warn');return;}
+    const modelKey=S.aircraft.modelKey,title=aircraftName();
+    closeDialog();
+    const choice=await guardUnsaved('continuing');if(!choice)return;
+    const body=openDialog('Copy profile for current aircraft');
+    body.appendChild(make('p','Copy "'+sourceName+'" for '+title+'. The original profile and any existing profiles for this aircraft are kept.'));
+    body.appendChild(make('p','Camera positions, zoom and behavior carry across as a starting point. Different cockpit dimensions and aircraft origins may require position adjustments.','mc-note'));
+    const field=make('label',undefined,'mc-field'),input=make('input');input.type='text';input.maxLength=60;input.value=(sourceName+' - '+title).slice(0,60);input.setAttribute('aria-label','New profile name');add(field,make('span','New profile name'),input);body.appendChild(field);
+    let copying=false;
+    dialogActions([['Cancel',()=>closeDialog()],['Create copy',async()=>{
+      if(copying)return;const name=input.value.trim();if(!name){dialogError('Enter a profile name.');return;}
+      if(!aircraftLoaded()||S.aircraft.modelKey!==modelKey){dialogError('The loaded aircraft changed. Close this dialog and try again.');return;}
+      copying=true;closeDialog();
+      await createProfile({name,from:'profile',profileId,forAircraft:true,expectedAircraftModelKey:modelKey,discard:choice==='discard'},'Created "'+name+'" for '+title+'. Adjust the camera positions as needed.');
+    },'mc-primary']]);
+    nextFrame(()=>{input.focus();input.select();});
   }
   function importProfile() {
     const body = openDialog('Import a camera profile');
@@ -3065,7 +3363,12 @@
       unsupported.forEach(item => ul.appendChild(make('li', typeof item === 'string' ? item : (item.message || item.name || ''))));
       body.appendChild(ul);
     } else body.appendChild(make('p', 'Everything in the code was imported.'));
-    dialogActions([['Close', () => closeDialog()], ['Open profile', () => { closeDialog(); if (result.profileId) openProfile(result.profileId); }, 'mc-primary']]);
+    const actions=[['Close', () => closeDialog()], ['Open profile', () => { closeDialog(); if (result.profileId) openProfile(result.profileId); }, 'mc-secondary']];
+    if(aircraftLoaded()&&result.profileId){
+      body.appendChild(make('p','You can also copy these views for '+aircraftName()+', even if this profile was made for a different aircraft.','mc-note'));
+      actions.push(['Copy for current aircraft',()=>copyProfileForAircraft(result.profileId,report.name||'Imported profile'),'mc-primary']);
+    }
+    dialogActions(actions);
   }
   function exportProfile() {
     const body = openDialog('Export a camera profile');
@@ -3214,14 +3517,113 @@
       add(copy,make('span','Head tracking'),make('small','TrackIR and compatible MSFS inputs. Shared by all cameras and profiles; off by default.'));
       const toggle=make('input',undefined,'mc-switch');toggle.type='checkbox';toggle.id='mc-setting-global-head-tracking';
       toggle.addEventListener('change',()=>trackingPreference(null,toggle.checked?'on':'off'));add(head,copy,toggle);group.appendChild(head);
-      const row=make('div',undefined,'mc-inline-field'),text=make('span','Aircraft tracking');text.appendChild(make('small','Shared by exterior and airport cameras. Cockpit cameras are excluded.'));
-      const choose=button('Heading + pitch',()=>aircraftTrackingOptions(current()),'mc-secondary');choose.id='mc-setting-global-aircraft-tracking';add(row,text,choose);group.appendChild(row);
+      const row=make('section',undefined,'mc-airport-tracking-settings');
+      row.appendChild(make('h4','Airport camera tracking'));
+      row.appendChild(make('p','Defaults for airport cameras across all aircraft profiles. Individual airport cameras can override these in Behavior > Airport camera settings. Exterior views share the tracking mode; cockpit cameras are excluded.','mc-note'));
+      const choices=make('div',undefined,'mc-tracking-settings-choices');choices.id='mc-setting-global-aircraft-tracking';
+      choices.setAttribute('role','group');choices.setAttribute('aria-label','Airport camera tracking');
+      [['off','Off','Keep the saved view direction.'],['heading','Heading only','Follow left and right; keep the saved pitch.'],['both','Heading + pitch','Follow your aircraft horizontally and vertically. Default.']].forEach(([value,label,detail])=>{
+        const choose=button(label,()=>{S.working.settings.host.globalAircraftTracking=value;settingChanged();renderCameraTools();},'mc-secondary mc-tracking-choice');
+        choose.dataset.value=value;choose.setAttribute('aria-label',label);choose.title=detail;
+        choose.appendChild(make('small',detail));choices.appendChild(choose);
+      });
+      row.appendChild(choices);
+      const zoom=make('label',undefined,'mc-switch-row'),zoomCopy=make('span',undefined,'mc-switch-copy');
+      add(zoomCopy,make('span','Auto zoom'),make('small','Keep your aircraft framed as its distance changes. Airport cameras only.'));
+      const zoomToggle=make('input',undefined,'mc-switch');zoomToggle.type='checkbox';zoomToggle.id='mc-setting-airport-autozoom';
+      zoomToggle.addEventListener('change',()=>{S.working.settings.host.airportAutoZoomEnabled=zoomToggle.checked;settingChanged();});
+      add(zoom,zoomCopy,zoomToggle);row.appendChild(zoom);
+      const horizon=make('label',undefined,'mc-switch-row'),horizonCopy=make('span',undefined,'mc-switch-copy');
+      add(horizonCopy,make('span','Keep distant views near the horizon'),make('small','Soften steep tracking pitch at long distances across elevation differences. Heading still follows your aircraft. Turn off for unrestricted vertical tracking.'));
+      const horizonToggle=make('input',undefined,'mc-switch');horizonToggle.type='checkbox';horizonToggle.id='mc-setting-airport-horizon-guard';
+      horizonToggle.addEventListener('change',()=>{S.working.settings.host.airportTrackingHorizonGuard=horizonToggle.checked;settingChanged();});
+      add(horizon,horizonCopy,horizonToggle);row.appendChild(horizon);
+      const fields=make('div',undefined,'mc-autozoom-fields');fields.id='mc-autozoom-options';
+      const specs=[
+        ['airportAutoZoomFrameMeters','Framing size',40,5,200,1,'m','Smaller values give a closer view; larger values leave more space around your aircraft.'],
+        ['airportAutoZoomMinFovDeg','Closest zoom (minimum FOV)',10,2,120,1,'deg','Smallest field of view allowed. Lower values allow more magnification.'],
+        ['airportAutoZoomMaxFovDeg','Widest zoom (maximum FOV)',90,2,120,1,'deg','Largest field of view allowed when the aircraft approaches.'],
+        ['airportAutoZoomResponseSeconds','Smoothing time',1,0.1,5,0.1,'s','Higher values make zoom changes more gradual.']
+      ];
+      specs.forEach(([key,label,fallback,min,max,step,unit,help])=>{
+        const field=make('label',undefined,'mc-autozoom-field');field.title=help;
+        field.appendChild(make('span',label));const line=make('span',undefined,'mc-autozoom-input');
+        const input=make('input',undefined,'mc-input');input.type='number';input.id='mc-setting-'+key;input.min=min;input.max=max;input.step=step;input.dataset.fallback=fallback;input.setAttribute('aria-label',label);
+        input.addEventListener('change',()=>{
+          const host=S.working.settings.host,n=Number(input.value);host[key]=Math.max(min,Math.min(max,input.value.trim()!==''&&isFinite(n)?n:fallback));
+          if(key==='airportAutoZoomMinFovDeg')host.airportAutoZoomMaxFovDeg=Math.max(host[key],host.airportAutoZoomMaxFovDeg==null?90:host.airportAutoZoomMaxFovDeg);
+          if(key==='airportAutoZoomMaxFovDeg')host.airportAutoZoomMinFovDeg=Math.min(host[key],host.airportAutoZoomMinFovDeg==null?10:host.airportAutoZoomMinFovDeg);
+          input.value=String(host[key]);settingChanged();
+        });
+        add(line,input,make('span',unit,'mc-note'));add(field,line,make('small',help,'mc-note'));fields.appendChild(field);
+      });
+      row.appendChild(fields);
+      const status=make('p',undefined,'mc-note');status.id='mc-airport-autozoom-status';row.appendChild(status);
+      row.appendChild(make('h4','Default heights by category'));
+      row.appendChild(make('p','Meters above the scenery feature; tower height uses airport elevation. Runway approaches use at least 15 m and overviews at least 25 m. An individual height override can use an exact value.','mc-note'));
+      const heights=make('div',undefined,'mc-autozoom-fields');
+      [['runways','Runways',3],['gates','Gates',3],['apron','Apron / parking',3],['taxi','Taxi signs / intersections',3],['tower','Tower',35]].forEach(([key,label,fallback])=>{
+        const field=make('label',undefined,'mc-autozoom-field'),input=make('input');Object.assign(input,{type:'number',min:0,max:1000,step:1,id:'mc-setting-airport-height-'+key});input.dataset.category=key;input.dataset.fallback=fallback;input.setAttribute('aria-label',label+' height');
+        input.addEventListener('change',()=>{const host=S.working.settings.host,n=Number(input.value);host.airportCategoryHeights=Object.assign({runways:3,gates:3,apron:3,taxi:3,tower:35},host.airportCategoryHeights||{},{[key]:input.value.trim()!==''&&isFinite(n)?M.clamp(n,0,1000):fallback});input.value=host.airportCategoryHeights[key];settingChanged();});
+        const line=make('span',undefined,'mc-autozoom-input');add(line,input,make('span','m','mc-note'));add(field,make('span',label),line);heights.appendChild(field);
+      });row.appendChild(heights);
+      row.appendChild(make('p','New cameras inherit these heights. Older cameras keep their saved altitude until you choose a height option in that camera’s settings. Moving a camera vertically creates its own height override.','mc-note'));
+      row.appendChild(make('p','Applies immediately to all airports. Save changes or press Ctrl+S to keep your choices. Head tracking is controlled separately in Tracking.','mc-note'));
+      group.appendChild(row);
       const anchor=$('mc-mouse-settings')||$('mc-setting-look-speed').closest('.mc-inline-field');
       anchor.before(group);
     }
     const host=S.working.settings.host;
     $('mc-setting-global-head-tracking').checked=host.globalHeadTrackingEnabled===true;
-    $('mc-setting-global-aircraft-tracking').textContent=host.globalAircraftTracking==='off'?'Off':host.globalAircraftTracking==='heading'?'Heading only':'Heading + pitch';
+    const tracking=host.globalAircraftTracking||'both';
+    $$('button[data-value]',$('mc-setting-global-aircraft-tracking')).forEach(choice=>choice.setAttribute('aria-pressed',String(choice.dataset.value===tracking)));
+    const zoomEnabled=host.airportAutoZoomEnabled===true;
+    $('mc-setting-airport-autozoom').checked=zoomEnabled;
+    $('mc-setting-airport-horizon-guard').checked=host.airportTrackingHorizonGuard!==false;
+    $$('#mc-autozoom-options input').forEach(input=>{
+      const key=input.id.replace('mc-setting-','');
+      if(document.activeElement!==input)input.value=String(host[key]==null?input.dataset.fallback:host[key]);
+      input.disabled=!zoomEnabled;
+    });
+    $('mc-airport-autozoom-status').textContent=!zoomEnabled?'Auto zoom is off. Your manual zoom is used.':tracking==='off'?'Auto zoom is waiting: enable aircraft tracking in the Tracking section.':'Auto zoom follows aircraft distance within these limits. Right-drag temporarily pauses it; turn it off to use manual zoom.';
+    $$('#mc-airport-defaults-content input[data-category],#mc-global-tracking-settings input[data-category]').forEach(input=>{if(document.activeElement!==input)input.value=String((host.airportCategoryHeights||{})[input.dataset.category]==null?input.dataset.fallback:host.airportCategoryHeights[input.dataset.category]);});
+  }
+  function renderSettingsLayout() {
+    const page=$('mc-page-settings');
+    if(!$('mc-settings-navigation')) {
+      const source=page.querySelector('.mc-settings-section'),layout=make('div',undefined,'mc-settings-layout'),nav=make('nav',undefined,'mc-settings-navigation'),content=make('div',undefined,'mc-settings-content');
+      nav.id='mc-settings-navigation';nav.setAttribute('aria-label','Settings sections');source.before(layout);add(layout,nav,content);
+      const descriptions={appearance:'Panel appearance and quick access.',movement:'Mouse look, keyboard movement and camera precision.',tracking:'Shared controls for every aircraft and profile.',airport:'Shared airport defaults. Individual cameras can override these values.',updates:'Version, updates and troubleshooting.'};
+      [['appearance','Appearance'],['movement','Movement'],['tracking','Tracking'],['airport','Airport defaults'],['updates','Saving & updates']].forEach(([key,label])=>{
+        const pane=make('section',undefined,'mc-settings-pane');pane.id='mc-settings-section-'+key;pane.setAttribute('aria-labelledby','mc-settings-link-'+key);
+        add(pane,make('h4',label,'mc-settings-heading'),make('p',descriptions[key],'mc-note'));
+        const link=button(label,()=>showSettingsSection(key),'mc-secondary');link.id='mc-settings-link-'+key;link.setAttribute('aria-controls',pane.id);nav.appendChild(link);content.appendChild(pane);
+      });
+      const move=(id,key)=>{const node=$(id);if(node){const row=node.closest('.mc-inline-field,.mc-switch-row,.mc-profile-actions')||node;$('mc-settings-section-'+key).appendChild(row);}};
+      ['shortcuts','contrast','theme','reduced-motion','remember','mini-enabled','mini-hover','name-display'].forEach(id=>move('mc-setting-'+id,'appearance'));
+      const opacity=source.querySelector('.mc-opacity-settings');if(opacity)$('mc-settings-section-appearance').appendChild(opacity);
+      ['precision','mouse-enabled','mouse-sensitivity','mouse-smoothing','mouse-invert','look-speed','move-speed'].forEach(id=>move('mc-setting-'+id,'movement'));
+      move('mc-mouse-defaults','movement');
+      const movement=$('mc-settings-section-movement');movement.appendChild(make('p','Movement follows your current key assignments in Bindings. Hold your faster-movement key to increase speed. Inputs pause while typing.','mc-note mc-settings-keyboard'));
+      move('mc-setting-backups','updates');move('mc-save-feedback-setting','updates');move('mc-diagnostics','updates');move('mc-qual-state','updates');move('mc-setting-unqualified','updates');
+      move('mc-setting-airport-radius','airport');
+      const global=$('mc-global-tracking-settings'),airport=global.querySelector('.mc-airport-tracking-settings'),zoom=$('mc-setting-airport-autozoom').closest('label');
+      const defaults=make('div',undefined,'mc-airport-defaults-content');defaults.id='mc-airport-defaults-content';
+      while(zoom.nextSibling)defaults.appendChild(zoom.nextSibling);defaults.insertBefore(zoom,defaults.firstChild);
+      $('mc-settings-section-airport').appendChild(defaults);$('mc-settings-section-tracking').appendChild(global);
+      const title=global.querySelector('.mc-section-label');if(title)title.remove();
+      airport.querySelector('h4').textContent='Aircraft tracking';
+      source.remove();
+      root.addEventListener('click',event=>{if(event.target.closest&&event.target.closest('#mc-app-version'))setTimeout(()=>showSettingsSection('updates'),0);});
+      showSettingsSection('appearance');
+    }
+    const updates=$('mc-update-settings'),target=$('mc-settings-section-updates');if(updates&&updates.parentNode!==target)target.insertBefore(updates,target.children[2]||null);
+  }
+  function showSettingsSection(key) {
+    const page=$('mc-page-settings');
+    $$('.mc-settings-pane',page).forEach(pane=>{pane.hidden=pane.id!=='mc-settings-section-'+key;});
+    $$('#mc-settings-navigation button',page).forEach(link=>{link.setAttribute('aria-current',link.id==='mc-settings-link-'+key?'page':'false');});
+    page.scrollTop=0;
   }
   function renderSettings() {
     if (!S.working) return;
@@ -3253,6 +3655,7 @@
     renderSaveFeedbackSettings();
     renderMainOpacitySettings();
     renderGlobalTrackingSettings();
+    renderSettingsLayout();
   }
   function settingChanged() { saveSettings(); applySettings(); renderSettings(); }
 
@@ -3585,16 +3988,7 @@
     $('mc-camera-icon').addEventListener('click', () => chooseEntityIcon(current(), false));
     $('mc-camera-color').addEventListener('click', () => chooseEntityColor(current(), false));
     $('mc-category-default').addEventListener('click', () => setCategoryDefault(current()));
-    $('mc-camera-binding').addEventListener('click', () => {
-      const view = current();
-      if (!view || readOnly()) return;
-      if (!view.viewId) {
-        const used = cameras().map(c => c.viewId).concat(bindingsList().map(b => b.viewId));
-        let id = 1; while (used.indexOf(id) >= 0) id++;
-        view.viewId = id; saveCamera(view); renderDetails(); renderTree();
-      }
-      assignDialog({ action: 'selectView', viewId: view.viewId, name: view.name, detail: 'View ID ' + view.viewId });
-    });
+    $('mc-camera-binding').addEventListener('click', () => assignCameraBinding(current()));
     $('mc-view-in-sim').addEventListener('click', () => { const v = current(); if (v) activateCamera(v.id); });
     $('mc-recenter').addEventListener('click', () => command('RecenterLook', {}));
     $('mc-add').addEventListener('click', () => actionDialog('Add to your library', [['New camera', 'camera', addCamera], ['New category', 'folder-plus', addCategory], ['External motion views', 'view-orbit', addExternalMotionViews], ['Create airport cameras', 'map-pin', airportDialog]]));
@@ -3618,7 +4012,7 @@
     $('mc-restore-pose').addEventListener('click', restoreSavedPose);
     $('mc-bake-look').addEventListener('click', bakeLook);
     $('mc-capture-view').addEventListener('click', () => captureView(false));
-    $('mc-save-current-view').addEventListener('click', () => captureView(true));
+    $('mc-save-current-view').addEventListener('click', () => captureView(false));
     $$('[data-transition]').forEach(control => control.addEventListener('click', () => {
       const view = current();
       if (!view || readOnly()) return;
@@ -3686,7 +4080,7 @@
     }));
     $('mc-qual-run').addEventListener('click', runAxisCheck);
     $('mc-diagnostics').addEventListener('click', () => bridge.request('GetDiagnostics', {}).then(ack => codeDialog('Diagnostics', 'Technical details for support. Nothing is sent anywhere.', (ack.result && ack.result.text) || reasonText(ack.reason), null, 'Select text')));
-    $('mc-airport-generator').addEventListener('click', airportDialog);
+    if($('mc-airport-generator'))$('mc-airport-generator').addEventListener('click', airportDialog);
     $('mc-new-profile').addEventListener('click', saveAsProfile);
     $('mc-create-profile').addEventListener('click', newProfile);
     $('mc-import-profile').addEventListener('click', importProfile);
@@ -3708,7 +4102,7 @@
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
       }
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.key === 's' || event.key === 'S') && !dialogOpen() && findBinding('saveViews') && findBinding('saveViews').input.kind==='key' && /^(VK_LCONTROL|VK_CONTROL)\+S$/.test(findBinding('saveViews').input.definition) && !event.shiftKey) { event.preventDefault(); if(!event.repeat && (bridge.demo || isTextEntry(event.target)))saveAdjustedViews(); }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.key === 's' || event.key === 'S') && !dialogOpen() && bindingsFor('saveViews').some(b => b.input.kind==='key' && /^(VK_LCONTROL|VK_CONTROL)\+S$/.test(b.input.definition)) && !event.shiftKey) { event.preventDefault(); if(!event.repeat && (bridge.demo || isTextEntry(event.target)))saveAdjustedViews(); }
     });
 
     // Mini dock reveal: pointer, focus, tap and pin are independent reasons to stay open (design sec. 4.5).

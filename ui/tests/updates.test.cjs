@@ -11,19 +11,21 @@ assert.equal(latest([release('0.1.10'),release('0.1.2')],'0.1.1').version,'0.1.1
 assert.throws(()=>latest({},'0.1.1'));
 assert.equal(latest([release('0.2.0')],'0.1.1-test.20261011.9').version,'0.2.0');
 assert.equal(latest([release('0.2.0')],'0.2.0'),null);
+assert.equal(latest([release('0.3.0')],'0.2.0').version,'0.3.0');
+assert.equal(latest([release('0.3.0')],'0.3.0'),null);
 const {chromium}=require(process.env.FSCS_PLAYWRIGHT||'playwright'),path=require('node:path');
 (async()=>{
  const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
  const page=await browser.newPage({viewport:{width:1100,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
- let status=200,body=JSON.stringify([release('0.2.1')]);
+ let status=200,body=JSON.stringify([release('0.3.1')]);
  await page.route('https://api.github.com/**',route=>route.fulfill({status,contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body}));
  await page.goto('file:///'+path.resolve(process.argv[2]||'ui/index.html').replaceAll('\\','/')+'?surface=main');
  await page.waitForFunction(()=>window.FSCApp.state.snapshot);
  await page.locator('#mc-app-version').click();await page.locator('#mc-update-check').click();
- await page.getByText('Update available: 0.2.1',{exact:true}).waitFor();
+ await page.getByText('Update available: 0.3.1',{exact:true}).waitFor();
  await page.evaluate(()=>{window.OpenBrowser=url=>window.openedUpdate=url;});
  await page.locator('#mc-update-download').click();
- assert.equal(await page.evaluate(()=>openedUpdate),`${base}/releases/download/v0.2.1/FS-Camera-Studio-0.2.1-Setup.exe`);
+ assert.equal(await page.evaluate(()=>openedUpdate),`${base}/releases/download/v0.3.1/FS-Camera-Studio-0.3.1-Setup.exe`);
  status=503;body='unavailable';await page.locator('#mc-update-check').click();await page.waitForFunction(()=>document.querySelector('#mc-update-status').textContent.includes('HTTP 503'));
  assert.equal(await page.locator('#mc-update-download').isVisible(),false);
  status=200;body=JSON.stringify([release('0.1.1-test.20261011.1')]);await page.locator('#mc-update-check').click();await page.getByText('You have the latest available build for this channel.',{exact:true}).waitFor();

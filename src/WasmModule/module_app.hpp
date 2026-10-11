@@ -155,6 +155,13 @@ private:
     std::string captureRequester_;
     std::string testDefinition_;
     double testUntil_ = 0;
+    int controllerCaptureDevice_ = -1, controllerCaptureButton_ = -1, controllerCaptureHat_ = -1;
+    std::string controllerCaptureDirection_;
+    std::uint64_t controllerCaptureGeneration_ = 0;
+    std::string controllerCaptureRequester_, controllerCaptureId_;
+    double controllerCaptureUntil_ = 0, controllerCapturePoll_ = 0;
+    void stopControllerCapture(const std::string& state);
+    void completeControllerCapture(const std::string& suffix, const std::string& label, const std::string& pov = {});
     std::vector<std::pair<int, std::string>> controllers_;
     std::deque<std::string> diagnostics_;
     bool diagDirty_ = false, diagWriting_ = false;

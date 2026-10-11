@@ -305,6 +305,35 @@ ValidationResult validateProfile(json& doc) {
                 cam["aircraftTracking"] = "off";
                 c.warn(p + ".aircraftTracking", "Aircraft tracking is only available for airport cameras; disabled for this view.");
             }
+            // Missing override keys inherit the global airport preferences. Preserve absence.
+            if (cam.contains("airportOverrides")) {
+                auto& overrides = cam["airportOverrides"];
+                if (!overrides.is_object()) c.error(p + ".airportOverrides", "must be an object");
+                else if (js::str(cam,"mode") != "airport") cam.erase("airportOverrides");
+                else {
+                    if (overrides.contains("aircraftTracking")) {
+                        const auto value=js::str(overrides,"aircraftTracking");
+                        if (value!="off" && value!="heading" && value!="both") overrides.erase("aircraftTracking");
+                    }
+                    if (overrides.contains("trackingHorizonGuard") && !overrides["trackingHorizonGuard"].is_boolean()) overrides.erase("trackingHorizonGuard");
+                    if (overrides.contains("autoZoomEnabled") && !overrides["autoZoomEnabled"].is_boolean()) overrides.erase("autoZoomEnabled");
+                    struct Limit { const char* key; double low, high; };
+                    for (const auto& limit : {Limit{"autoZoomFrameMeters",5,200}, Limit{"autoZoomMinFovDeg",2,120}, Limit{"autoZoomMaxFovDeg",2,120}, Limit{"autoZoomResponseSeconds",.1,5}, Limit{"heightMeters",0,1000}}) {
+                        if (!overrides.contains(limit.key)) continue;
+                        if (!overrides[limit.key].is_number() || !std::isfinite(js::num(overrides,limit.key,NAN))) overrides.erase(limit.key);
+                        else overrides[limit.key]=std::clamp(js::num(overrides,limit.key,limit.low),limit.low,limit.high);
+                    }
+                    if (overrides.contains("autoZoomMinFovDeg") && overrides.contains("autoZoomMaxFovDeg"))
+                        overrides["autoZoomMaxFovDeg"]=std::max(overrides["autoZoomMinFovDeg"].get<double>(),overrides["autoZoomMaxFovDeg"].get<double>());
+                }
+            }
+            if (cam.contains("airportHeight")) {
+                const auto& height=js::object(cam,"airportHeight");
+                const auto category=js::str(height,"category");
+                if (js::str(cam,"mode")!="airport" || (category!="runways" && category!="gates" && category!="apron" && category!="taxi" && category!="tower") ||
+                    !std::isfinite(js::num(height,"baseAltitudeMeters",NAN)) || !std::isfinite(js::num(height,"minimumMeters",NAN))) cam.erase("airportHeight");
+                else cam["airportHeight"]["minimumMeters"]=std::clamp(js::num(height,"minimumMeters",0),0.,1000.);
+            }
             if (!fx.is_object()) c.error(p + ".effects", "must be an object");
             else {
                 if (!fx.contains("enabled")) fx["enabled"] = false;
@@ -445,6 +474,22 @@ ProfileSnapshot toSnapshot(const json& doc) {
         e.interaction = js::boolean(cam, "interaction", true);
         e.trackingPolicy = js::str(cam, "trackingPolicy", "nativeIfQualified");
         e.aircraftTracking = e.mode == CameraMode::Airport ? js::str(cam, "aircraftTracking", "off") : "off";
+        if (e.mode == CameraMode::Airport) {
+            const auto& h=js::object(cam,"airportHeight");
+            e.airportHeightCategory=js::str(h,"category");
+            e.airportHeightBaseAltitudeMeters=js::num(h,"baseAltitudeMeters",0);
+            e.airportHeightMinimumMeters=js::num(h,"minimumMeters",0);
+            const auto& o=js::object(cam,"airportOverrides");
+            if (o.contains("heightMeters")) e.airportOverrides.heightMeters=js::num(o,"heightMeters",0);
+            if (o.contains("aircraftTracking")) e.airportOverrides.aircraftTracking=js::str(o,"aircraftTracking");
+            if (o.contains("trackingHorizonGuard")) e.airportOverrides.trackingHorizonGuard=js::boolean(o,"trackingHorizonGuard",true);
+            if (o.contains("autoZoomEnabled")) e.airportOverrides.autoZoomEnabled=js::boolean(o,"autoZoomEnabled",false);
+            if (o.contains("autoZoomFrameMeters")) e.airportOverrides.autoZoomFrameMeters=js::num(o,"autoZoomFrameMeters",40);
+            if (o.contains("autoZoomMinFovDeg")) e.airportOverrides.autoZoomMinFovDeg=js::num(o,"autoZoomMinFovDeg",10);
+            if (o.contains("autoZoomMaxFovDeg")) e.airportOverrides.autoZoomMaxFovDeg=js::num(o,"autoZoomMaxFovDeg",90);
+            if (o.contains("autoZoomResponseSeconds")) e.airportOverrides.autoZoomResponseSeconds=js::num(o,"autoZoomResponseSeconds",1);
+        }
+
         e.retainLook = js::str(cam, "temporaryLookPolicy") == "retain";
         e.originLat=js::num(js::object(cam,"worldOrigin"),"lat",0); e.originLon=js::num(js::object(cam,"worldOrigin"),"lon",0); e.originAltitude=js::num(js::object(cam,"worldOrigin"),"altitude",0);
         e.resetMouseLookOnRelease = js::str(cam, "mouseLookOnRelease", "retain") == "reset";
@@ -620,7 +665,7 @@ json makeC172Profile(const std::string& modelKey, const std::string& displayName
         return id;
     };
     auto view = [&](const std::string& group, const char* name, double f, double r, double d, double pitch,
-                    double heading, double fov, bool favorite = false, bool exterior = false) {
+                    double heading, double fov, bool favorite = true, bool exterior = false) {
         json cam = cameraTemplate;
         const std::string id = newUuid();
         const auto q = core::Quat::fromPbh({pitch, 0, heading});
@@ -658,7 +703,7 @@ json makeC172Profile(const std::string& modelKey, const std::string& displayName
     group = category("Cabin");
     view(group, "Rear seats - forward", -0.95, 0.35, -0.02, -5, 0, 80);
     group = category("Exterior (Preview)");
-    auto outside = [&](const char* name, double f, double r, double d, double fov, bool favorite = false) {
+    auto outside = [&](const char* name, double f, double r, double d, double fov, bool favorite = true) {
         const double heading = std::atan2(-r, -f) * core::kRadToDeg;
         const double pitch = std::atan2(d, std::hypot(f, r)) * core::kRadToDeg;
         view(group, name, f, r, d, pitch, heading, fov, favorite, true);
@@ -697,7 +742,7 @@ json makeA320Profile(const std::string& modelKey, const std::string& displayName
         doc["categories"].push_back({{"id", id}, {"name", name}, {"icon", builtinViewIcon(name)}, {"color", color}, {"cameraIds", json::array()}});
         return id;
     };
-    auto view = [&](const std::string& group, const char* name, double pitch, double heading, double fov, bool favorite = false) {
+    auto view = [&](const std::string& group, const char* name, double pitch, double heading, double fov, bool favorite = true) {
         json cam = cameraTemplate;
         const auto id = newUuid();
         const auto q = core::Quat::fromPbh({pitch, 0, heading});

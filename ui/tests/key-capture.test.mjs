@@ -3,7 +3,7 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 const source = fs.readFileSync(new URL('../app.js', import.meta.url),'utf8');
 const start = source.indexOf('  const MODIFIERS =');
-const end = source.indexOf('  function assignDialog(',start);
+const end = source.indexOf('  function assignCameraBinding(',start);
 const context = {}; vm.createContext(context);
 vm.runInContext(source.slice(start,end)+';this.capture=keyCapture;',context);
 const capture = e => context.capture(e,{});

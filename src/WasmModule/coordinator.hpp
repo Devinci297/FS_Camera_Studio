@@ -106,7 +106,11 @@ private:
     void onStatus(const backend_event::CameraStatus& st, double now);
     void onCameraData(const backend_event::CameraData& d, double now);
     bool eligibleToSubmit() const;
-    void submit();
+    void submit(bool refreshTrackingPosition = true);
+    const std::string& aircraftTrackingFor(const profiles::CameraEntry& cam) const;
+    void updateAirportAutoZoom(double dt);
+    void updateAirportTrackingPosition();
+    core::CameraPose effectiveAirportPose(const profiles::CameraEntry& cam) const;
     void emitCapabilities(bool force = false);
     void emitActiveCamera();
     void emitWalkaround();
@@ -175,6 +179,9 @@ private:
     double mouseHeadingPending_ = 0, mousePitchPending_ = 0;
     double lastTick_ = -1;
     std::optional<SdkPose> lastSubmitted_;
+    // Submission-only zoom: never changes the saved pose or the user's manual FOV.
+    std::optional<double> airportAutoZoomFov_;
+    std::optional<core::Vec3> airportTrackingPosition_; // lat, lon, actual MSL meters; never saved
     std::uint64_t submissions_ = 0;
     bool lastTransitioning_ = false;
     double lastLookEmit_ = 0;

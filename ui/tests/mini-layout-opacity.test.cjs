@@ -26,9 +26,9 @@ const assert=require('node:assert/strict'),path=require('node:path');
      unused:r.bottom-Math.max(...buttons.map(b=>b.getBoundingClientRect().bottom))};
    });
    assert.equal(layout.overflow,false,width+'/'+mode+' categories overflow');assert.equal(layout.clipped,0);
-   assert.ok(layout.smallest>=42,'Category hit targets should fill available height');
-   if(mode!=='labels')assert.equal(layout.icon,'24px');
-   assert.ok(layout.unused<4,'Category rows leave unused height');
+   assert.ok(layout.smallest>=28,'Category rows remain usable in the shallow dock');
+   if(mode!=='labels')assert.equal(layout.icon,'20px');
+   assert.ok(layout.unused<=46,'Only a compact camera-height allowance remains');
   }
   await page.locator('#mc-mini-panel').screenshot({path:'build/review/mini-categories-expanded.png'});
   // Emulate stock ingame-ui painting a gradient and content pseudo-element behind our dock.

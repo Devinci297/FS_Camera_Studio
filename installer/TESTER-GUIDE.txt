@@ -1,4 +1,4 @@
-FS CAMERA STUDIO - VERSION 0.2.0
+FS CAMERA STUDIO - VERSION 0.3.0
 Microsoft Flight Simulator 2024 | Windows 11 x64
 
 INSTALL
@@ -44,7 +44,12 @@ lets you choose fixed direction, aircraft heading, or heading and pitch. Auto
 switch on the mini toolbar chooses the nearest camera while camera control is
 active. Manual movement and right-drag pause it briefly; the global toggle
 remains enabled across cameras. Release camera pauses switching.
-The mini toolbar also has Save; longer camera lists and toolbars scroll.
+Settings > Airport defaults provides horizon protection, auto zoom with framing/FOV
+limits/response, and separate heights for runways, gates, apron, taxi and tower.
+Airport camera settings overrides each value independently. Missing values inherit
+the global default. Distant lower targets can be kept near the horizon; this does
+not remove terrain or building occlusion.
+The mini toolbar also has Save; longer camera lists scroll.
 
 HEAD TRACKING
 Head tracking is global and OFF by default. Use its button to enable the MSFS
@@ -67,7 +72,7 @@ backs up an existing package under:
 LAST-BACKUP.txt in that folder's parent identifies the latest backup. Re-running
 setup repairs the shipped package files. Profiles, airports, settings and
 bindings are stored by MSFS outside the installed package and are not removed.
-Export valuable profiles using Profiles > Export current before testing.
+Export valuable profiles using Profiles > Export profile before testing.
 
 Only install ONE copy. A package managed by Addons Linker or a development
 junction must be disabled/removed as a link before using this installer.
@@ -106,7 +111,7 @@ Review logs before sharing; paths may contain your Windows username.
 
 No profiles, credentials or data from the developer's computer are bundled.
 
-VERSION 0.2
+INCLUDED FEATURES
 - Main and mini background opacity have independent sliders in Settings.
 - Main editor always displays icons and labels. Mini display affects categories.
 - Hold adjustment buttons to repeat; release or loss of focus stops movement.
@@ -115,3 +120,19 @@ VERSION 0.2
   then Refresh, select a file and Import. Pasting profile code is also supported.
 - Successful saves request a native confirmation chime. Settings > Test sound
   checks the simulator UI sound route; spoken WAV is browser-only.
+
+NEW IN VERSION 0.3.0
+- Clear category headers, indented compact camera rows and inline shortcut badges.
+  Only starred cameras appear in mini; use the main library star to change this.
+- Primary and Secondary bindings work independently. Pick a controller from the
+  list, click Listen for button or hat, press/release a button or move the hat and
+  return it to center, then Assign. Listening covers buttons 1-32 and the first hat.
+  Diagonals choose one clockwise cardinal direction. Manual testing remains available.
+- The latest hat-release fix has automated tests but still needs physical testing.
+  On T.16000M, capture a hat, then start listening again and test a normal button.
+  Confirm both work and saved movement bindings stop when the hat returns to center.
+- Profiles > Copy for current aircraft reuses any saved/imported aircraft profile
+  as a separate copy for the loaded model. Source profiles are preserved. Adjust
+  positions for the destination aircraft; this is not automatic geometry conversion.
+- Airport tracking/zoom/heights inherit global defaults unless individually overridden.
+  Test nearby/distant targets on different terrain elevations with horizon protection.

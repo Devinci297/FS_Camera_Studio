@@ -386,6 +386,7 @@
       ['Runway', 2, { x: 0, y: 2, z: -300 }, { type: 'airport', favorite: true }],
       ['Gate', 3, { x: 30, y: 2, z: 20 }, { type: 'airport' }],
     ] }] });
+    [mine,cinematic,airport].forEach(profile=>profile.cameras.forEach(camera=>camera.favorite=true));
     const now = Date.now();
     const repo = { profiles: new Map(), settings: null, bindings: null };
     const addRepo = (profile, revision, history) => repo.profiles.set(profile.profileId, { committed: profile, revision, history: history || [], lastCameraId: null });
@@ -713,9 +714,14 @@
           return event('AircraftChanged', aircraftPayload());
         }
         case 'CreateProfile': {
+          if(payload.forAircraft&&(!m.aircraft||!m.aircraft.modelKey))return ack(env,'Rejected','noAircraft');
+          if(payload.expectedAircraftModelKey&&(!m.aircraft||payload.expectedAircraftModelKey!==m.aircraft.modelKey))return ack(env,'Rejected','The loaded aircraft changed. Try again.');
+          const from=payload.from||(payload.copyOf?(payload.copyOf===m.working.profile.profileId?'working':'profile'):'starter');
+          const sourceId=payload.profileId||payload.copyOf;
           let base;
-          if (payload.copyOf && payload.copyOf === m.working.profile.profileId) base = clone(m.working.profile);
-          else if (payload.copyOf && repo.profiles.has(payload.copyOf)) base = clone(repo.profiles.get(payload.copyOf).committed);
+          if(from!=='working'&&dirty().profile&&!payload.discard)return ack(env,'Rejected','unsavedChanges');
+          if (from==='working') base = clone(m.working.profile);
+          else if (from==='profile') {if(!repo.profiles.has(sourceId))return ack(env,'Rejected','unknownProfile');base=clone(repo.profiles.get(sourceId).committed);}
           else base = makeProfile({ name: 'New', defaultName: 'Pilot view', aircraftMatch: { strategy: 'none', modelKey: null, variantKey: null, displayName: null, confirmed: false }, categories: [{ name: 'Cockpit', cameras: [['Pilot view', 1, { x: 0, y: 0, z: 0 }, { favorite: true, temporaryLookPolicy: 'resetOnRecall' }]] }] });
           remapIds(base);
           base.name = String(payload.name || 'New profile').slice(0, 60);
@@ -815,6 +821,11 @@
         case 'ListControllers':
           ack(env, 'Completed');
           return event('ControllersListed', { controllers: [{ deviceId: 1, name: 'T.16000M' }, { deviceId: 2, name: 'TWCS Throttle' }] }, env.uiInstanceId);
+        case 'StartControllerCapture':
+          m.controllerCapture = {deviceId:payload.deviceId,captureId:payload.captureId,uiInstanceId:env.uiInstanceId};
+          ack(env,'Accepted'); return event('ControllerCaptureStatus',{state:'listening',deviceId:payload.deviceId,captureId:payload.captureId},env.uiInstanceId);
+        case 'StopControllerCapture':
+          m.controllerCapture = null; return ack(env,'Completed');
         case 'TestInput': {
           ack(env, 'Accepted');
           const definition = payload.input && payload.input.definition;
@@ -872,6 +883,23 @@
     openWorking(mine.profileId, false);
 
     const controls = {
+      captureControllerButton(deviceId, button, delayedCaptureId) {
+        const capture=m.controllerCapture; if(!capture || capture.deviceId!==deviceId || capture.hatDirection)return false;
+        if(!delayedCaptureId)m.controllerCapture=null; const name=deviceId===1?'T.16000M':'TWCS Throttle';
+        event('ControllerInputCaptured',{captureId:delayedCaptureId || capture.captureId,input:{kind:'joystick',deviceId,deviceName:name,definition:'joystick:'+deviceId+':button:'+(button-1),label:name+' - Button '+button}},capture.uiInstanceId); return true;
+      },
+      captureControllerHat(deviceId, angle, delayedCaptureId) {
+        const capture=m.controllerCapture; if(!capture || capture.deviceId!==deviceId)return false;
+        if (Number.isFinite(angle) && angle>=0 && angle<36000) {
+          if (!capture.hatDirection) capture.hatDirection=['up','right','down','left'][Math.floor(((angle+4500)%36000)/9000)];
+          return false;
+        }
+        if (!capture.hatDirection) return false;
+        const direction=capture.hatDirection,name=deviceId===1?'T.16000M':'TWCS Throttle';
+        if(!delayedCaptureId)m.controllerCapture=null;
+        event('ControllerInputCaptured',{captureId:delayedCaptureId || capture.captureId,input:{kind:'joystick',deviceId,deviceName:name,definition:'joystick:'+deviceId+':POV:0',pov:direction,label:name+' - Hat 1 '+direction}},capture.uiInstanceId); return true;
+      },
+      controllerCaptureStatus(state) { const capture=m.controllerCapture;if(!capture)return; m.controllerCapture=null;event('ControllerCaptureStatus',{state,deviceId:capture.deviceId,captureId:capture.captureId},capture.uiInstanceId); },
       setCanActivate(on, reason) { m.forcedBlock = on ? null : (reason || 'Camera control is turned off for testing.'); event('CapabilitiesChanged', capabilities()); },
       setQualified(on) { m.qualified = Boolean(on); event('CapabilitiesChanged', capabilities()); },
       loadAircraft(title, modelKey) {

@@ -25,7 +25,7 @@ There is no desktop application, tray app or external process.
   The UI converts authoring ⇄ FRD; only the module converts FRD ⇄ SDK (two different conversions, two test sets).
 * **Projection:** stored as simulator FOV radians (`simulatorFovRadians`); the UI shows degrees 30–110
   (presets 40/62/85), intersected with the qualified range from `CapabilitiesChanged`.
-* **IDs:** lower-case RFC 4122 UUID strings. `viewId` 1–20 is an optional recall slot (0 = none), unique per profile,
+* **IDs:** lower-case RFC 4122 UUID strings. `viewId` 1–2,147,483,647 is an optional recall slot (0 or null = none), unique per profile,
   not a camera-count limit.
 
 ## 2. Documents (module-owned, stored in `\work`)
@@ -65,8 +65,8 @@ There is no desktop application, tray app or external process.
 
 * `aircraftMatch.strategy`: `aircraftPath` | `userConfirmedModelVariant` | `none`.
 * `mode`: `aircraftCockpit` (MVP); `aircraftExterior` (Preview — cockpit audio limitation);
-  `airport` (Preview — world-fixed coordinates, pending live qualification). `orbit`, `flyby`, and
-  `free` are stored and editable but **cannot activate** (reason shown beside the control).
+  `airport` (Preview — world-fixed coordinates, pending live qualification), `orbit` and `flyby`
+  (animated exterior modes, including a fly-by pass while parked). `free` cannot activate.
 * Airport profiles have `scope: "airport"`, `requiredSchemaFeatures: ["airport-world-v1"]`, and
   `airport: {icao, name, origin: {lat, lon, altitude}}`. Cameras retain a `worldOrigin`, `airportIcao`,
   and stable `generatedKey`. Position is local FRD about that geodetic origin; the SDK adapter converts
@@ -95,9 +95,12 @@ There is no desktop application, tray app or external process.
 Actions: `selectView` (+`viewId`), `peekView` (+`viewId`), `nextCamera`, `previousCamera`, `nextCategory`,
 `returnToPilot`, `releaseCamera`, `recenterLook`, `toggleEditor`, `toggleMini`, `lookLeft`, `lookRight`, `lookUp`,
 `lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveFast`, `zoomIn`, `zoomOut`.
-An input definition maps to at most one action. Keys are captured by the panel (keydown while the Assign dialog
+An input definition and, for POVs, direction maps to at most one action. Bindings can carry
+`slot: "primary" | "secondary"`; each action has two independent UI slots. Legacy extra bindings are retained.
+Joystick `pov` is `up`, `right`, `down` or `left`; definitions use zero-based button and POV indices.
+An action can have both a keyboard and controller binding. Keys are captured by the panel (keydown while the Assign dialog
 has focus) and stored as MSFS input definition strings; controller inputs are chosen from `ControllersListed`
-plus a button/hat number and confirmed with a live down/up test. Inputs are mapped in-module through
+and captured from the selected device with `StartControllerCapture`, or entered and tested manually. Inputs are mapped in-module through
 `SimConnect_MapInputEventToClientEvent_EX1`, so they work with the editor closed (flight loaded only).
 
 Movement defaults are stored and editable: W/S forward/back, A/D left/right, Q/E up/down, Shift faster movement.
@@ -127,6 +130,21 @@ camera takeover suppress these pulses.
 `host.moveSpeedMetersPerSec`; `moveFast` multiplies that by four while held. Mouse-look sensitivity is independent.
 `ui.miniPinned` is a global preference: changing it through `UpdateDraft` saves it immediately on its own and never
 marks settings as unsaved.
+
+### 2.4 Global tracking and airport defaults
+
+`host.globalHeadTrackingEnabled` defaults false; `host.globalAircraftTracking` defaults `both`
+(`off`/`heading`/`both`). Cockpit views are excluded from aircraft tracking. Global automatic airport
+switching remains independent of each camera. Airport defaults include `airportTrackingHorizonGuard` (true),
+`airportAutoZoomEnabled` (false), `airportAutoZoomFrameMeters` (40), `airportAutoZoomMinFovDeg` (10),
+`airportAutoZoomMaxFovDeg` (90), `airportAutoZoomResponseSeconds` (1), and `airportCategoryHeights`
+(`runways`, `gates`, `apron`, `taxi`: 3; `tower`: 35 meters).
+
+Airport cameras may store `airportHeight: {category, baseAltitudeMeters, minimumMeters}` and sparse
+`airportOverrides` with `heightMeters`, `aircraftTracking`, `trackingHorizonGuard`, `autoZoomEnabled`,
+`autoZoomFrameMeters`, `autoZoomMinFovDeg`, `autoZoomMaxFovDeg`, `autoZoomResponseSeconds`.
+Missing properties inherit global defaults. Overrides are removed from non-airport cameras. See
+[airport settings](airport-camera-settings.md) for terrain readback, horizon behavior and height migration.
 
 ## 3. Transport
 
@@ -182,7 +200,7 @@ Rules:
 | `RevertChanges` | — | Restores committed profile/settings/bindings; unsaved new cameras vanish; releases first if the active view becomes invalid |
 | `CommitChanges` | `backup` (bool) | Ack `Pending` with `result.revisions` tuple; later `CommitCompleted`. Idempotent by requestId |
 | `OpenProfile` | `profileId`, `discard` (bool) | Rejected `unsavedChanges` when the draft is dirty and `discard` is false |
-| `CreateProfile` | `name`, `forAircraft` (bool), `copyOf` (profileId\|null) | New committed profile; becomes the working profile |
+| `CreateProfile` | `name`, `forAircraft`, `from` (`starter`\|`working`\|`profile`), `profileId`, `expectedAircraftModelKey`, `discard`; legacy `copyOf` | New committed profile with new IDs; copying for the loaded aircraft preserves the source and rejects aircraft changes or unacknowledged dirty edits |
 | `DeleteProfile` | `profileId` | Not allowed for the profile in use |
 | `BindProfileToAircraft` | `profileId` | Sets `userConfirmedModelVariant` for the loaded aircraft (committed) |
 | `ListBackups` / `LoadBackup` | — / `revision` | Loads an older revision as the working draft (must be saved) |
@@ -193,6 +211,8 @@ Rules:
 | `SeedFromDefinition` | `name` | Acquire, apply native definition, read back → `ViewCaptured` |
 | `BakeTemporaryLook` | — | Composes look into the active camera's draft (`DraftChanged`) and clears the look |
 | `ListControllers` | — | `ControllersListed` |
+| `StartControllerCapture` / `StopControllerCapture` | `deviceId`, `captureId` / — | Selected controller buttons 1–32 and first POV; capture completes on release/center, times out after 20 s; ordinary actions suppressed while listening |
+| `ListImportFiles` / `ImportProfileFile` | — / `filename` | Enumerates the module imports folder / imports a selected file as a copy |
 | `TestInput` | `input` | Temporarily maps the input; reports `InputTest` down/up events for 15 s |
 | `TestBinding` | `binding` | Dispatches the action once; reply distinguishes dispatch from visible recall |
 | `RelaySurface` | `target` (`main`\|`mini`), `op` (`expand`\|`compact`\|`show`) | Broadcast `SurfaceRequest`; e.g. mini "Edit" → main expands on Cameras |
@@ -238,6 +258,8 @@ being edited.
 | `ViewCaptured` | `ok`, `positionMetersFRD`, `orientationCameraToAnchorXYZW`, `fovRad`, `frame`, `qualified`, `source`, `message` |
 | `DefinitionsListed` | `names` |
 | `ControllersListed` | `controllers` [{`deviceId`,`name`}] |
+| `ControllerCaptureStatus` | `state` (`listening`, `stopped`, `timeout`, `disconnected`, `error`), `deviceId`, `captureId`; directed to requester |
+| `ControllerInputCaptured` | `input`, `captureId`; directed to requester, followed by stopped status |
 | `InputTest` | `definition`, `phase` (`down`\|`up`) |
 | `BindingTriggered` | `action`, `viewId`, `result` |
 | `SurfaceRequest` | `target`, `op` |

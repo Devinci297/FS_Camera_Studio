@@ -260,7 +260,8 @@ void Coordinator::setProfile(std::optional<profiles::ProfileSnapshot> snapshot, 
         } else {
             backend_.setFlag(CameraFlag::Interaction, cam->interaction);
             const auto base = engine_.basePose();
-            const double delta = base ? (base->positionFRD - cam->pose.positionFRD).length() +
+            const auto effectivePose = effectiveAirportPose(*cam);
+            const double delta = base ? (base->positionFRD - effectivePose.positionFRD).length() +
                                             core::angleBetween(base->orientation, cam->pose.orientation) +
                                             std::abs(base->fovRad - cam->pose.fovRad)
                                       : 1.0;
@@ -274,7 +275,7 @@ void Coordinator::setProfile(std::optional<profiles::ProfileSnapshot> snapshot, 
                     updated.fovRad = cam->pose.fovRad;
                     engine_.animateBase(updated);
                 }
-            } else if (delta > 1e-9) engine_.place(cam->pose);  // live preview of the edited draft
+            } else if (delta > 1e-9) engine_.place(effectivePose);  // live preview of the edited draft
         }
     }
     emitActiveCamera();
@@ -300,7 +301,15 @@ void Coordinator::refreshQualification() {
 }
 
 void Coordinator::setSettings(const profiles::HostSettings& s, double now) {
+    const auto* camera = activeEntry();
+    const auto oldPose = camera ? effectiveAirportPose(*camera) : core::CameraPose{};
     settings_ = s;
+    if (camera && camera->mode == profiles::CameraMode::Airport && engine_.hasPose()) {
+        if (auto base=engine_.basePose()) {
+            const double delta=effectiveAirportPose(*camera).positionFRD.z-oldPose.positionFRD.z;
+            if (std::abs(delta)>1e-9) { base->positionFRD.z += delta; engine_.place(*base); }
+        }
+    }
     if (state_ == Ownership::Active && eligibleToSubmit())
         headTracking_.update("global",settings_.globalHeadTrackingEnabled ? "on" : "off",now);
     engine_.setSpeeds({settings_.lookSpeedDegPerSec, settings_.moveSpeedMetersPerSec * settings_.movementPrecisionScale, 0.5, 6.0});
@@ -540,12 +549,15 @@ void Coordinator::beginAcquire(double now) {
 }
 
 void Coordinator::startTransition(const CameraEntry& cam, bool cut) {
+    lastSubmitted_.reset();
+    airportTrackingPosition_.reset();
+    airportAutoZoomFov_.reset();
     cancelMouseDrag();
     motionTime_ = 0;
     if (cam.mode == profiles::CameraMode::Flyby) {
         flybyLat_ = targetLat_; flybyLon_ = targetLon_; flybyAltitude_ = targetAltitude_; flybyHeading_ = targetHeading_;
     }
-    const auto target = cam.mode == profiles::CameraMode::Orbit || cam.mode == profiles::CameraMode::Flyby ? motionPose(cam) : cam.pose;
+    const auto target = cam.mode == profiles::CameraMode::Orbit || cam.mode == profiles::CameraMode::Flyby ? motionPose(cam) : effectiveAirportPose(cam);
     if (!lookOwner_.empty()) rememberedLooks_[lookOwner_] = engine_.look();
     const auto remembered = rememberedLooks_.find(cam.id);
     const auto look = cam.retainLook && remembered != rememberedLooks_.end() ? remembered->second : core::TemporaryLook{};
@@ -687,6 +699,7 @@ void Coordinator::fault(const std::string& code, const std::string& message, dou
 
 void Coordinator::invalidateSession(const std::string& reason, double now) {
     ++epoch_;
+    airportAutoZoomFov_.reset(); targetAt_ = -100;
     if (state_ == Ownership::Active || state_ == Ownership::SimulatorSuspended || state_ == Ownership::Acquiring)
         release(reason, now);
     peek_.reset();
@@ -699,7 +712,7 @@ void Coordinator::invalidateSession(const std::string& reason, double now) {
 // Sim session lost (simulator quit or module shutting down): nothing to release; start over in Observing.
 void Coordinator::resetSession(const std::string& reason, double now) {
     stopWalkaround(); motionPaused_ = false;
-    rememberedLooks_.clear(); lookOwner_.clear(); targetAt_=-100;
+    rememberedLooks_.clear(); lookOwner_.clear(); targetAt_=-100; airportAutoZoomFov_.reset();
     (void)now;
     simConnected_ = false;
     sdk_ = SdkAvailability::NotAcquired;
@@ -1010,21 +1023,89 @@ bool Coordinator::eligibleToSubmit() const {
            !activeCameraId_.empty() && seedName_.empty();
 }
 
-void Coordinator::submit() {
+core::CameraPose Coordinator::effectiveAirportPose(const CameraEntry& cam) const {
+    auto pose=cam.pose;
+    if (cam.mode != profiles::CameraMode::Airport || cam.airportHeightCategory.empty()) return pose;
+    const auto height=settings_.airportCategoryHeights.find(cam.airportHeightCategory);
+    if (height == settings_.airportCategoryHeights.end()) return pose;
+    const double meters=cam.airportOverrides.heightMeters.value_or(std::max(height->second,cam.airportHeightMinimumMeters));
+    pose.positionFRD.z=cam.originAltitude-cam.airportHeightBaseAltitudeMeters-meters;
+    return pose;
+}
+
+const std::string& Coordinator::aircraftTrackingFor(const CameraEntry& cam) const {
+    if (cam.mode == profiles::CameraMode::Airport && cam.airportOverrides.aircraftTracking)
+        return *cam.airportOverrides.aircraftTracking;
+    return settings_.globalAircraftTracking;
+}
+
+void Coordinator::updateAirportTrackingPosition() {
+    airportTrackingPosition_.reset();
+    const auto* cam=activeEntry();
+    if (!cam || cam->mode!=profiles::CameraMode::Airport || !eligibleToSubmit() ||
+        aircraftTrackingFor(*cam)=="off" || mouseHeld_ || !lastSubmitted_ ||
+        lastSubmitted_->referential!=Referential::World) return;
+    const auto intended=profiles::airport::world({cam->originLat,cam->originLon,cam->originAltitude},engine_.sample().pose.positionFRD);
+    // Camera changes reset lastSubmitted_. For small continuous moves, carry
+    // the observed terrain floor forward until the next SDK sample instead of
+    // snapping back to the uncorrected scenery height while a key is held.
+    const profiles::airport::Geo previous{lastSubmitted_->x,lastSubmitted_->y,lastSubmitted_->z};
+    const auto movement=profiles::airport::local(previous,intended);
+    if (movement.length()>25) return; // discontinuous edit: wait for new readback
+    const auto actual=backend_.worldCameraPosition();
+    if (!actual || !profiles::airport::Geo{actual->x,actual->y,actual->z}.valid()) return;
+    const auto delta=profiles::airport::local(previous,{actual->x,actual->y,actual->z});
+    if (std::hypot(delta.x,delta.y)>.5) return; // SDK still transitioning to another position
+    airportTrackingPosition_=core::Vec3{intended.lat,intended.lon,
+        actual->z>previous.altitude ? std::max(actual->z,intended.altitude) : intended.altitude};
+}
+
+void Coordinator::updateAirportAutoZoom(double dt) {
+    const auto* cam = activeEntry();
+    if (!cam || cam->mode != profiles::CameraMode::Airport || aircraftTrackingFor(*cam) == "off" || mouseHeld_ || targetAt_ < 0) {
+        airportAutoZoomFov_.reset();
+        return;
+    }
+    const auto& o=cam->airportOverrides;
+    if (!o.autoZoomEnabled.value_or(settings_.airportAutoZoomEnabled)) { airportAutoZoomFov_.reset(); return; }
+    const auto pose=engine_.sample().pose;
+    auto w=profiles::airport::world({cam->originLat,cam->originLon,cam->originAltitude},pose.positionFRD);
+    if (airportTrackingPosition_) w={airportTrackingPosition_->x,airportTrackingPosition_->y,airportTrackingPosition_->z};
+    const auto d=profiles::airport::local(w,{targetLat_,targetLon_,targetAltitude_});
+    const double distance=d.length();
+    if (!d.finite() || !std::isfinite(distance) || distance <= .5 || std::abs(targetLat_)>90 || std::abs(targetLon_)>180) {
+        airportAutoZoomFov_.reset();
+        return;
+    }
+    const double minimum=core::clamp(o.autoZoomMinFovDeg.value_or(settings_.airportAutoZoomMinFovDeg),2.,120.)*core::kDegToRad;
+    const double maximum=core::clamp(o.autoZoomMaxFovDeg.value_or(settings_.airportAutoZoomMaxFovDeg),minimum*core::kRadToDeg,120.)*core::kDegToRad;
+    const double frame=core::clamp(o.autoZoomFrameMeters.value_or(settings_.airportAutoZoomFrameMeters),5.,200.);
+    const double response=core::clamp(o.autoZoomResponseSeconds.value_or(settings_.airportAutoZoomResponseSeconds),.1,5.);
+    // Exponential easing is independent of frame rate. Freeze through a sim pause;
+    // telemetry gaps keep the last known target, matching aircraft tracking.
+    const double target=core::clamp(2*std::atan2(frame,2*distance),minimum,maximum);
+    double current=core::clamp(airportAutoZoomFov_.value_or(pose.fovRad),minimum,maximum);
+    if (!motionPaused_ && dt > 0 && dt <= .1) current += (target-current)*(-std::expm1(-dt/response));
+    airportAutoZoomFov_=core::clamp(current,minimum,maximum);
+}
+
+void Coordinator::submit(bool refreshTrackingPosition) {
     const CameraEntry* cam = activeEntry();
     if (!cam || !eligibleToSubmit()) return;
+    if (refreshTrackingPosition) updateAirportTrackingPosition();
     const auto s = engine_.sample();
+    const auto& aircraftTracking = aircraftTrackingFor(*cam);
     auto submittedPose = effects_.apply(s.pose);
     // Aircraft-relative exterior views aim at the aircraft origin. Interior cameras
     // never inherit aircraft tracking even though the preference is global.
     if ((cam->mode == profiles::CameraMode::AircraftExterior || cam->mode == profiles::CameraMode::Orbit) &&
-        settings_.globalAircraftTracking != "off" && !mouseHeld_) {
+        aircraftTracking != "off" && !mouseHeld_) {
         const auto target = submittedPose.positionFRD * -1;
         const double horizontal = std::hypot(target.x,target.y);
         if (target.length() > .5) {
             auto angles = submittedPose.orientation.toPbh();
             if (horizontal > .5) angles.headingDeg = std::atan2(target.y,target.x)*core::kRadToDeg;
-            if (settings_.globalAircraftTracking == "both") angles.pitchDeg = core::clamp(std::atan2(-target.z,horizontal)*core::kRadToDeg,-89.,89.);
+            if (aircraftTracking == "both") angles.pitchDeg = core::clamp(std::atan2(-target.z,horizontal)*core::kRadToDeg,-89.,89.);
             submittedPose.orientation = core::Quat::fromPbh(angles);
         }
     }
@@ -1036,20 +1117,35 @@ void Coordinator::submit() {
         const bool flyby = cam->mode==profiles::CameraMode::Flyby;
         auto w=profiles::airport::world(flyby ? profiles::airport::Geo{flybyLat_,flybyLon_,flybyAltitude_} : profiles::airport::Geo{cam->originLat,cam->originLon,cam->originAltitude},s.pose.positionFRD);
         sdk.x=w.lat;sdk.y=w.lon;sdk.z=w.altitude;
+        // Keep the requested translation intact; only look-at/zoom use the
+        // simulator's terrain-adjusted position. No profile height is rewritten.
+        if (!flyby && airportTrackingPosition_) w={airportTrackingPosition_->x,airportTrackingPosition_->y,airportTrackingPosition_->z};
         // World PBH uses local geographic north, not the aircraft's measured translational basis.
         auto p=s.pose.orientation.toPbh();
         // Keep the last known target through pauses/telemetry gaps instead of snapping
         // back to the saved direction. Flight changes invalidate targetAt_.
-        if(settings_.globalAircraftTracking!="off" && targetAt_>=0 && !mouseHeld_) {
+        if(aircraftTracking!="off" && targetAt_>=0 && !mouseHeld_) {
             auto d=profiles::airport::local({w.lat,w.lon,w.altitude},{targetLat_,targetLon_,targetAltitude_});
             const double horizontal=std::hypot(d.x,d.y);
             if(d.finite() && horizontal>.5) {
                 p.headingDeg=std::atan2(d.y,d.x)*core::kRadToDeg;
-                if(settings_.globalAircraftTracking=="both")p.pitchDeg=core::clamp(std::atan2(-d.z,horizontal)*core::kRadToDeg,-89.0,89.0);
+                if(aircraftTracking=="both") {
+                    p.pitchDeg=core::clamp(std::atan2(-d.z,horizontal)*core::kRadToDeg,-89.0,89.0);
+                    if (!flyby && cam->airportOverrides.trackingHorizonGuard.value_or(settings_.airportTrackingHorizonGuard) && d.z>20) {
+                        // Across distant terrain the aircraft can be below the visible
+                        // horizon. Gradually level the view instead of zooming into dirt.
+                        // Preserve exact nearby tracking and all upward tracking.
+                        const double distanceBlend=core::clamp((horizontal-500.)/1000.,0.,1.);
+                        const double heightBlend=core::clamp((d.z-20.)/20.,0.,1.);
+                        const auto smooth=[](double x){return x*x*(3-2*x);};
+                        p.pitchDeg*=1-smooth(distanceBlend)*smooth(heightBlend);
+                    }
+                }
             }
         }
         sdk.pitchDeg=-p.pitchDeg;sdk.bankDeg=p.bankDeg;sdk.headingDeg=p.headingDeg;
     }
+    if (cam->mode==profiles::CameraMode::Airport && airportAutoZoomFov_) sdk.fovRad=*airportAutoZoomFov_;
     if (lastSubmitted_ && nearlyEqual(*lastSubmitted_, sdk)) return;
     if (backend_.submitPose(sdk)) {
         lastSubmitted_ = sdk;
@@ -1204,7 +1300,7 @@ void Coordinator::tick(double now) {
             mouseHeadingPending_ -= heading; mousePitchPending_ -= pitch;
         }
         std::optional<core::Quat> movement;
-        if (effectCamera && settings_.globalAircraftTracking != "off" && lastSubmitted_) {
+        if (effectCamera && aircraftTrackingFor(*effectCamera) != "off" && lastSubmitted_) {
             if (lastSubmitted_->referential == Referential::World)
                 movement=core::Quat::fromPbh({-lastSubmitted_->pitchDeg,lastSubmitted_->bankDeg,lastSubmitted_->headingDeg});
             else if (lastSubmitted_->referential == Referential::SimObject)
@@ -1241,7 +1337,9 @@ void Coordinator::tick(double now) {
             fault("invalidPose", "Camera stopped: the computed view was outside the allowed range.", now);
             return;
         }
-        submit();
+        updateAirportTrackingPosition();
+        updateAirportAutoZoom(dt);
+        submit(false);
         if (engine_.transitioning() != lastTransitioning_) emitActiveCamera();
         emitLook(now);
     }

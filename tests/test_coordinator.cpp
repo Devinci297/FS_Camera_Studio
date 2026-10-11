@@ -911,6 +911,7 @@ TEST_CASE("airports: fixed and tracked views accept vertical keys and live altit
         Rig r; std::vector<std::string> notes;
         const auto airport = fscs::profiles::airport::generate(airportFixture(), json::object(), notes);
         auto cam = airport["cameras"][0];
+        cam.erase("airportHeight"); // Legacy explicitly positioned camera; generated-height behavior is tested below.
         cam["positionMetersFRD"] = {0, 0, -3};
         cam["orientationCameraToAnchorXYZW"] = {0, 0, 0, 1};
         cam["aircraftTracking"] = tracking;
@@ -1097,4 +1098,139 @@ TEST_CASE("motion views: repeated flyby reverses continuously and pauses for man
     input={};input.moveUp=1;r.c.setManualInput(input);r.advance(.02,40);
     CHECK_NEAR((r.c.engine().basePose()->positionFRD-reverse).length(),0,1e-9);
     r.c.setManualInput({});r.advance(.02,249);CHECK_NEAR(r.c.engine().basePose()->positionFRD.x,50,1e-7);
+}
+
+namespace {
+std::string addAutoZoomAirport(Rig& r) {
+    std::vector<std::string> notes;
+    auto airport=fscs::profiles::airport::generate(airportFixture(),json::object(),notes);
+    auto camera=airport["cameras"][0];
+    camera["positionMetersFRD"]={0,0,0}; camera.erase("airportHeight");
+    camera["orientationCameraToAnchorXYZW"]={0,0,0,1};camera["transition"]["kind"]="cut";
+    auto category=airport["categories"][0];category["cameraIds"]=json::array({camera["id"]});category["defaultCameraId"]=camera["id"];
+    r.profile["categories"].push_back(category);r.profile["cameras"].push_back(camera);
+    return camera["id"].get<std::string>();
+}
+void autoZoomTarget(Rig& r,double distance) {
+    const auto target=fscs::profiles::airport::world({40,-90,100},{distance,0,0});
+    r.c.setAircraftPosition(target.lat,target.lon,target.altitude,r.t);
+}
+}
+TEST_CASE("airports: autozoom follows distance smoothly without modifying saved or manual FOV") {
+    Rig r;const auto id=addAutoZoomAirport(r);r.connect();
+    fscs::profiles::HostSettings settings;settings.airportAutoZoomEnabled=true;settings.airportAutoZoomResponseSeconds=.1;
+    r.c.setSettings(settings,r.t);autoZoomTarget(r,100);r.activate(id);r.grant();
+    const auto manual=r.c.engine().sample().pose.fovRad;
+    r.advance(.02);const double first=r.backend.submitted.back().fovRad;
+    const double target=2*std::atan2(40.,200.);
+    CHECK(first<manual);CHECK(first>target);r.advance(.02,100);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,target,1e-5);
+    CHECK_NEAR(r.c.engine().sample().pose.fovRad,manual,1e-12);
+    CHECK_NEAR(r.c.profile()->camera(id)->pose.fovRad,manual,1e-12);
+    autoZoomTarget(r,10000);r.advance(.02,100);CHECK_NEAR(r.backend.submitted.back().fovRad,10*fscs::core::kDegToRad,1e-6);
+    autoZoomTarget(r,1);r.advance(.02,100);CHECK_NEAR(r.backend.submitted.back().fovRad,90*fscs::core::kDegToRad,1e-6);
+    settings.airportAutoZoomEnabled=false;r.c.setSettings(settings,r.t);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,manual,1e-12);
+}
+TEST_CASE("airports: autozoom respects pause mouse override tracking and camera activation") {
+    Rig r;const auto id=addAutoZoomAirport(r);r.connect();fscs::profiles::HostSettings settings;settings.airportAutoZoomEnabled=true;
+    r.c.setSettings(settings,r.t);autoZoomTarget(r,100);r.activate(id);r.grant();r.advance(.02,50);
+    const auto held=r.backend.submitted.back().fovRad;r.deliver(be::Paused{true});autoZoomTarget(r,1000);r.advance(.02,50);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,held,1e-12);r.deliver(be::Paused{false});r.advance(.02);CHECK(r.backend.submitted.back().fovRad<held);
+    r.deliver(be::NativeMouseMapping{true});r.deliver(be::NativeMouseButton{true});r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,r.c.engine().sample().pose.fovRad,1e-12);
+    r.deliver(be::NativeMouseButton{false});r.advance(.02);CHECK(r.backend.submitted.back().fovRad<r.c.engine().sample().pose.fovRad);
+    settings.globalAircraftTracking="off";r.c.setSettings(settings,r.t);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,r.c.engine().sample().pose.fovRad,1e-12);
+    settings.globalAircraftTracking="both";r.c.setSettings(settings,r.t);r.activate(r.pilot);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,r.c.engine().sample().pose.fovRad,1e-12);
+    r.activate(id);r.c.setAircraftPosition(NAN,-90,100,r.t);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,r.c.engine().sample().pose.fovRad,1e-12);
+}
+TEST_CASE("airports: tracking and zoom use terrain-adjusted camera altitude without saving it") {
+    Rig r;const auto id=addAutoZoomAirport(r);r.connect();
+    fscs::profiles::HostSettings settings;settings.airportTrackingHorizonGuard=false;
+    settings.airportAutoZoomEnabled=true;settings.airportAutoZoomResponseSeconds=.1;
+    r.c.setSettings(settings,r.t);autoZoomTarget(r,100);r.activate(id);r.grant();
+    // Requested MSL 100, but terrain/building protection puts the camera at 180.
+    r.backend.actualWorldPosition=fscs::core::Vec3{40,-90,180};r.advance(.02,100);
+    CHECK_NEAR(r.backend.submitted.back().pitchDeg,std::atan2(80.,100.)*fscs::core::kRadToDeg,1e-6);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,2*std::atan2(40.,2*std::hypot(100.,80.)),1e-5);
+    CHECK_NEAR(r.backend.submitted.back().z,100,1e-9);
+    CHECK_NEAR(r.c.engine().sample().pose.positionFRD.z,0,1e-9);
+    // Readback from another location or a failed SDK read must not contaminate aiming.
+    r.backend.actualWorldPosition=fscs::core::Vec3{41,-90,180};r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().pitchDeg,0,1e-9);
+    r.backend.actualWorldPosition=fscs::core::Vec3{40,-90,NAN};r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().pitchDeg,0,1e-9);
+    r.backend.actualWorldPosition.reset();r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().pitchDeg,0,1e-9);
+}
+TEST_CASE("airports: distant lower targets keep heading and level pitch with an optional override") {
+    Rig r;const auto id=addAutoZoomAirport(r);r.connect();
+    autoZoomTarget(r,2000);r.activate(id);r.grant();
+    r.backend.actualWorldPosition=fscs::core::Vec3{40,-90,180};r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().pitchDeg,0,1e-9);
+    CHECK_NEAR(r.backend.submitted.back().headingDeg,0,1e-9);
+    autoZoomTarget(r,250);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().pitchDeg,std::atan2(80.,250.)*fscs::core::kRadToDeg,1e-6);
+    autoZoomTarget(r,1000);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().pitchDeg,.5*std::atan2(80.,1000.)*fscs::core::kRadToDeg,1e-6);
+    autoZoomTarget(r,2000);
+    r.profile["cameras"].back()["airportOverrides"]["trackingHorizonGuard"]=false;
+    r.setProfile();r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().pitchDeg,std::atan2(80.,2000.)*fscs::core::kRadToDeg,1e-6);
+    // Upward aim to an aircraft above the camera is never flattened.
+    r.profile["cameras"].back()["airportOverrides"]["trackingHorizonGuard"]=true;r.setProfile();
+    const auto target=fscs::profiles::airport::world({40,-90,100},{2000,0,-160});
+    r.c.setAircraftPosition(target.lat,target.lon,target.altitude,r.t);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().pitchDeg,-std::atan2(80.,2000.)*fscs::core::kRadToDeg,1e-6);
+}
+TEST_CASE("airports: terrain tracking stays continuous while moving and resets across camera changes") {
+    Rig r;const auto id=addAutoZoomAirport(r);r.connect();autoZoomTarget(r,100);r.activate(id);r.grant();r.advance(.02);
+    auto input=routerWithDefaults();
+    input.onInput(indexOf(input,"Q"),true,0);r.c.setManualInput(input.manualInput());
+    for (int i=0;i<25;++i) {
+        const auto previous=r.backend.submitted.back();
+        r.backend.actualWorldPosition=fscs::core::Vec3{previous.x,previous.y,180};
+        r.advance(.02);
+        CHECK_NEAR(r.backend.submitted.back().pitchDeg,std::atan2(80.,100.)*fscs::core::kRadToDeg,1e-6);
+        CHECK(r.backend.submitted.back().z>previous.z);
+    }
+    input.onInput(indexOf(input,"Q"),false,0);
+    input.onInput(indexOf(input,"W"),true,0);r.c.setManualInput(input.manualInput());
+    for (int i=0;i<25;++i) {
+        const auto previous=r.backend.submitted.back();
+        r.backend.actualWorldPosition=fscs::core::Vec3{previous.x,previous.y,180};
+        r.advance(.02);CHECK(r.backend.submitted.back().pitchDeg>38);
+    }
+    r.c.setManualInput({});r.activate(r.pilot);r.advance(.02);
+    CHECK(r.backend.submitted.back().referential!=fscs::host::Referential::World);
+    r.backend.actualWorldPosition=fscs::core::Vec3{41,-90,500};
+    r.activate(id);r.advance(.02);
+    CHECK(std::abs(r.backend.submitted.back().pitchDeg)<1);
+}
+TEST_CASE("airports: per-camera tracking and autozoom overrides inherit independently") {
+    Rig r;const auto id=addAutoZoomAirport(r);auto& camera=r.profile["cameras"].back();
+    camera["airportOverrides"]={{"aircraftTracking","both"},{"autoZoomEnabled",true},{"autoZoomFrameMeters",20},{"autoZoomMinFovDeg",20},{"autoZoomMaxFovDeg",30},{"autoZoomResponseSeconds",.1}};
+    r.connect();fscs::profiles::HostSettings settings;settings.globalAircraftTracking="off";r.c.setSettings(settings,r.t);
+    r.c.setAircraftPosition(40,-89.999,120,r.t);r.activate(id);r.grant();r.advance(.02,100);
+    CHECK_NEAR(r.backend.submitted.back().headingDeg,90,.1);CHECK(r.backend.submitted.back().pitchDeg<0);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,20*fscs::core::kDegToRad,1e-6);
+    camera["airportOverrides"]["autoZoomEnabled"]=false;r.setProfile();r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().fovRad,r.c.engine().sample().pose.fovRad,1e-12);
+    camera["airportOverrides"]["aircraftTracking"]="off";settings.globalAircraftTracking="both";settings.airportAutoZoomEnabled=true;r.c.setSettings(settings,r.t);r.setProfile();r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().headingDeg,0,1e-9);CHECK_NEAR(r.backend.submitted.back().pitchDeg,0,1e-9);
+    camera.erase("airportOverrides");r.setProfile();r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().headingDeg,90,.1);CHECK(r.backend.submitted.back().fovRad<r.c.engine().sample().pose.fovRad);
+}
+TEST_CASE("airports: global category heights preserve position offsets and allow exact camera override") {
+    Rig r;const auto id=addAutoZoomAirport(r);auto& camera=r.profile["cameras"].back();
+    camera["airportHeight"]={{"category","runways"},{"baseAltitudeMeters",100},{"minimumMeters",15}};
+    r.connect();r.activate(id);r.grant();r.advance(.02);CHECK_NEAR(r.backend.submitted.back().z,115,1e-9);
+    fscs::profiles::HostSettings settings;settings.airportCategoryHeights["runways"]=40;r.c.setSettings(settings,r.t);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().z,140,1e-9);
+    camera["airportOverrides"]["heightMeters"]=5;r.setProfile();r.advance(.02);CHECK_NEAR(r.backend.submitted.back().z,105,1e-9);
+    settings.airportCategoryHeights["runways"]=80;r.c.setSettings(settings,r.t);r.advance(.02);CHECK_NEAR(r.backend.submitted.back().z,105,1e-9);
+    camera["airportOverrides"].erase("heightMeters");r.setProfile();r.advance(.02);CHECK_NEAR(r.backend.submitted.back().z,180,1e-9);
 }

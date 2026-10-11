@@ -39,7 +39,7 @@ const assert=require('node:assert/strict');const path=require('node:path');
  assert.ok(await page.getByText('No taxi-sign positions supplied; using offset taxiway intersections.',{exact:true}).isVisible());
  await page.getByRole('button',{name:'Nearest: KAAA',exact:true}).click();assert.equal(await page.locator('#mc-airport-codes').inputValue(),'KAAA');
  await page.getByRole('button',{name:'Save selected views',exact:true}).click();
- await page.getByRole('button',{name:'Saved — update selected views',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Saved - update selected views',exact:true}).waitFor();
  const save=await page.evaluate(()=>airportCalls.find(c=>c.action==='SaveAirportPreview'));assert.equal(save.payload.icao,'KAAA');assert.equal(save.payload.cameraIds.length,1);assert.equal(save.payload.replace,false);
  await page.screenshot({path:'build/review/airport-generator.png'});
  await page.locator('#mc-airport-codes').fill('KAAA KBBB');await page.locator('#mc-airport-preview').click();

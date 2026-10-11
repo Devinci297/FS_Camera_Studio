@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cmath>
 
 namespace fscs::host {
 
@@ -110,6 +111,15 @@ void ModuleApp::loadFromRepository(std::vector<std::string> notes, double now) {
 
 void ModuleApp::update(double now) {
     now_ = now;
+    if (controllerCaptureDevice_ >= 0) {
+        const auto owner = instances_.find(controllerCaptureRequester_);
+        if (now > controllerCaptureUntil_ || (owner != instances_.end() && now - owner->second.lastRenew > kLeaseSeconds))
+            stopControllerCapture("timeout");
+        else if (now >= controllerCapturePoll_) {
+            services_.enumerateControllers();
+            controllerCapturePoll_ = now + 2;
+        }
+    }
     reassembler_.expire(now);
     if(repo_.loaded() && simRunning_ && now-lastAirportRefresh_>2){lastAirportRefresh_=now;refreshAirports(now);}
     for(auto it=airportJobs_.begin();it!=airportJobs_.end();) {if(now>it->second.deadline){emitNow("AirportPreview",{{"icao",it->second.icao},{"error","No scenery data received within 20 seconds."}},it->second.to);it=airportJobs_.erase(it);}else ++it;}
@@ -144,7 +154,7 @@ void ModuleApp::update(double now) {
             c.action="CommitChanges"; handle(c,now);
         }
     }
-    services_.setNativeMouseEnabled(simRunning_ && !paused_ && coord_.ownership() == Ownership::Active && profiles::parseHostSettings(working_.settings).mouseLookEnabled);
+    services_.setNativeMouseEnabled(controllerCaptureDevice_ < 0 && simRunning_ && !paused_ && coord_.ownership() == Ownership::Active && profiles::parseHostSettings(working_.settings).mouseLookEnabled);
     flushState(now, false);
     writeDiagnostics(now);
 }
@@ -157,6 +167,7 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
         return;
     }
     if (const auto* in = std::get_if<backend_event::InputEvent>(&ev)) {
+        if (controllerCaptureDevice_ >= 0) return;
         if (in->test) {
             if (!testDefinition_.empty()) emitNow("InputTest", {{"definition", testDefinition_}, {"phase", in->down ? "down" : "up"}, {"value", in->value}});
             return;
@@ -181,9 +192,41 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
     }
     if (const auto* c = std::get_if<backend_event::ControllersList>(&ev)) {
         controllers_ = c->controllers;
+        if (controllerCaptureDevice_ >= 0 && std::none_of(controllers_.begin(), controllers_.end(),
+            [&](const auto& controller) { return controller.first == controllerCaptureDevice_; })) stopControllerCapture("disconnected");
         json list = json::array();
         for (const auto& [id, name] : controllers_) list.push_back({{"deviceId", id}, {"name", name}});
         emitNow("ControllersListed", {{"controllers", list}});
+        return;
+    }
+    if (const auto* mapping = std::get_if<backend_event::ControllerCaptureMappingStatus>(&ev)) {
+        if (controllerCaptureDevice_ < 0 || mapping->deviceId != controllerCaptureDevice_ ||
+            mapping->generation != controllerCaptureGeneration_) return;
+        diag("controller capture mapping: " + mapping->stage + " " + mapping->definition +
+             " code=" + std::to_string(mapping->code) + (mapping->ready ? " available" : " failed"));
+        if (!mapping->ready) stopControllerCapture("error");
+        return;
+    }
+    if (const auto* button = std::get_if<backend_event::ControllerButton>(&ev)) {
+        if (button->deviceId != controllerCaptureDevice_ || controllerCaptureDevice_ < 0 ||
+            button->captureGeneration != controllerCaptureGeneration_ || button->button < 0 || button->button >= 32 || controllerCaptureHat_ >= 0) return;
+        if (button->down && controllerCaptureButton_ < 0) controllerCaptureButton_ = button->button;
+        if (!button->down && button->button == controllerCaptureButton_)
+            completeControllerCapture(":button:" + std::to_string(button->button), "Button " + std::to_string(button->button + 1));
+        return;
+    }
+    if (const auto* hat = std::get_if<backend_event::ControllerHat>(&ev)) {
+        if (hat->deviceId != controllerCaptureDevice_ || controllerCaptureDevice_ < 0 ||
+            hat->captureGeneration != controllerCaptureGeneration_ || hat->hat != 0 || controllerCaptureButton_ >= 0) return;
+        if (hat->angle <= 35999 && controllerCaptureHat_ < 0) {
+            controllerCaptureHat_ = hat->hat;
+            // Bind a single cardinal direction. Exact diagonals choose the clockwise
+            // cardinal (NE -> right, SE -> down, SW -> left, NW -> up), never two actions.
+            static const char* directions[] = {"up", "right", "down", "left"};
+            controllerCaptureDirection_ = directions[((hat->angle + 4500) % 36000) / 9000];
+        }
+        if (hat->angle > 35999 && hat->hat == controllerCaptureHat_)
+            completeControllerCapture(":POV:" + std::to_string(hat->hat), "Hat " + std::to_string(hat->hat + 1) + " " + controllerCaptureDirection_, controllerCaptureDirection_);
         return;
     }
     if (const auto* p = std::get_if<backend_event::Paused>(&ev)) {
@@ -192,10 +235,40 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
         // JS does not process events while paused; resume every surface from one fresh snapshot.
         if (resumed) broadcastSnapshot();
     }
-    if (const auto* r = std::get_if<backend_event::SimRunning>(&ev)) simRunning_ = r->running;
-    if (std::holds_alternative<backend_event::FlightLoaded>(ev) || std::holds_alternative<backend_event::Disconnected>(ev))
+    if (const auto* r = std::get_if<backend_event::SimRunning>(&ev)) {
+        simRunning_ = r->running;
+        if (!simRunning_) stopControllerCapture("stopped");
+    }
+    if (std::holds_alternative<backend_event::FlightLoaded>(ev) || std::holds_alternative<backend_event::Disconnected>(ev)) {
+        stopControllerCapture("disconnected");
         for (const auto& a : router_.releaseAll()) coord_.onAction(a, now);
+    }
     coord_.onBackendEvent(ev, now);
+}
+
+void ModuleApp::completeControllerCapture(const std::string& suffix, const std::string& label, const std::string& pov) {
+    const auto selected = std::find_if(controllers_.begin(), controllers_.end(), [&](const auto& item) { return item.first == controllerCaptureDevice_; });
+    std::string name = selected == controllers_.end() ? "Controller" : selected->second;
+    if (name.size() > 100) name.resize(100);
+    while (!name.empty() && !js::validUtf8(name)) name.pop_back();
+    json input{{"kind", "joystick"}, {"deviceId", controllerCaptureDevice_}, {"deviceName", name},
+        {"definition", "joystick:" + std::to_string(controllerCaptureDevice_) + suffix}, {"label", name + " - " + label}};
+    if (!pov.empty()) input["pov"] = pov;
+    emitNow("ControllerInputCaptured", {{"input", input}, {"captureId", controllerCaptureId_}}, controllerCaptureRequester_);
+    stopControllerCapture("stopped");
+}
+
+void ModuleApp::stopControllerCapture(const std::string& state) {
+    if (controllerCaptureDevice_ < 0) return;
+    const auto device = controllerCaptureDevice_;
+    const auto requester = controllerCaptureRequester_;
+    const auto captureId = controllerCaptureId_;
+    services_.captureControllerInputs(-1);
+    diag("controller capture " + state + " device=" + std::to_string(device));
+    controllerCaptureDevice_ = controllerCaptureButton_ = controllerCaptureHat_ = -1;
+    controllerCaptureDirection_.clear();
+    controllerCaptureRequester_.clear(); controllerCaptureId_.clear();
+    emitNow("ControllerCaptureStatus", {{"state", state}, {"deviceId", device}, {"captureId", captureId}}, requester);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -436,12 +509,36 @@ void ModuleApp::handle(const Command& c, double now) {
         return reply(c, AckStatus::Accepted);
     }
     if (a == "TestInput") {
+        stopControllerCapture("stopped");
         auto spec = profiles::InputSpec::fromJson(js::get(p, "input"));
         if (!spec) return reply(c, AckStatus::Rejected, "That input is not one the simulator accepts.");
         if (!services_.mapTestInput(spec->definition)) return reply(c, AckStatus::Rejected, "Inputs can be tested once a flight is loaded.");
         testDefinition_ = spec->definition;
         testUntil_ = now + kInputTestSeconds;
         return reply(c, AckStatus::Accepted, {}, {{"seconds", kInputTestSeconds}});
+    }
+    if (a == "StartControllerCapture") {
+        const int device = static_cast<int>(js::integer(p, "deviceId", -1));
+        if (device < 0 || std::none_of(controllers_.begin(), controllers_.end(), [&](const auto& item) { return item.first == device; }))
+            return reply(c, AckStatus::Rejected, "Select a connected controller first. Refresh the controller list if needed.");
+        stopControllerCapture("stopped");
+        services_.mapTestInput(""); testDefinition_.clear();
+        if (!services_.captureControllerInputs(device, ++controllerCaptureGeneration_)) return reply(c, AckStatus::Rejected, "Controller listening is unavailable. Load a flight and try again.");
+        for (const auto& e : router_.releaseAll()) coord_.onAction(e, now);
+        gestures_.clear(); coord_.cancelMouseDrag(); services_.setNativeMouseEnabled(false);
+        controllerCaptureDevice_ = device; controllerCaptureButton_ = controllerCaptureHat_ = -1;
+        controllerCaptureDirection_.clear();
+        controllerCaptureRequester_ = c.uiInstanceId;
+        controllerCaptureId_ = js::str(p, "captureId").substr(0, 120);
+        controllerCaptureUntil_ = now + 20; controllerCapturePoll_ = now + 2;
+        diag("controller capture listening device=" + std::to_string(device));
+        emitNow("ControllerCaptureStatus", {{"state", "listening"}, {"deviceId", device}, {"captureId", controllerCaptureId_}}, c.uiInstanceId);
+        return reply(c, AckStatus::Accepted, {}, {{"seconds", 20}, {"buttonCount", 32}, {"hatCount", 1}});
+    }
+    if (a == "StopControllerCapture") {
+        if (controllerCaptureRequester_.empty() || controllerCaptureRequester_ == c.uiInstanceId) stopControllerCapture("stopped");
+        services_.mapTestInput(""); testDefinition_.clear();
+        return reply(c, AckStatus::Completed);
     }
     if (a == "RelaySurface") {
         emitNow("SurfaceRequest", {{"target", js::str(p, "target", "main")}, {"op", js::str(p, "op", "expand")},
@@ -547,24 +644,40 @@ void ModuleApp::handle(const Command& c, double now) {
     if (a == "CreateProfile") {
         const std::string name = js::str(p, "name");
         if (name.empty() || name.size() > 60) return reply(c, AckStatus::Rejected, "Enter a name of 1-60 characters.");
-        const std::string from = js::str(p, "from", "starter");
+        if (pendingCommit_) return reply(c, AckStatus::Rejected, "A save is in progress.");
+        const bool bindToAircraft = js::boolean(p, "forAircraft", false);
+        if (bindToAircraft && aircraftModelKey_.empty())
+            return reply(c, AckStatus::Rejected, "Load an aircraft in the simulator first.");
+        const std::string expectedAircraft = js::str(p, "expectedAircraftModelKey");
+        if (bindToAircraft && !expectedAircraft.empty() && expectedAircraft != aircraftModelKey_)
+            return reply(c, AckStatus::Rejected, "The aircraft changed. Choose the profile for the current aircraft again.");
+        // Older panels send copyOf for Save as New. Include the open draft in
+        // that case, rather than silently creating a starter profile.
+        const std::string copyOf = js::str(p, "copyOf");
+        const std::string from = js::str(p, "from", copyOf.empty() ? "starter" :
+            (copyOf == js::str(working_.profile, "profileId") ? "working" : "profile"));
         json doc;
-        if (from == "working" && working_.profile.is_object()) {
+        if (from == "working") {
+            if (!working_.profile.is_object()) return reply(c, AckStatus::Rejected, "Open a profile first.");
             doc = working_.profile;
-            profiles::reassignIds(doc);
         } else if (from == "profile") {
-            doc = committedProfile(js::str(p, "profileId"));
+            doc = committedProfile(js::str(p, "profileId", copyOf));
             if (!doc.is_object()) return reply(c, AckStatus::Rejected, "That profile does not exist.");
-            if(js::str(doc,"scope")=="airport")return reply(c,AckStatus::Rejected,"Airport cameras are shared globally and cannot be copied into an aircraft profile.");
-            profiles::reassignIds(doc);
-        } else {
+        } else if (from == "starter") {
             const bool forAircraft = js::boolean(p, "forAircraft", true) && !aircraftModelKey_.empty();
             doc = forAircraft && profiles::isA320(aircraftModelKey_, aircraftTitle_)
                       ? profiles::makeA320Profile(aircraftModelKey_, aircraftTitle_)
                       : profiles::makeStarterProfile(name, forAircraft ? aircraftModelKey_ : "", forAircraft ? aircraftTitle_ : "");
+        } else return reply(c, AckStatus::Rejected, "Choose a valid profile source.");
+        if (from != "starter") {
+            if (js::str(doc,"scope")=="airport") return reply(c,AckStatus::Rejected,"Airport cameras are shared globally and cannot be copied into an aircraft profile.");
+            const auto validation = profiles::validateProfile(doc);
+            if (!validation.ok() || validation.readOnly)
+                return reply(c, AckStatus::Rejected, validation.readOnly ? "This profile needs a newer version of Camera Studio before it can be copied." : validation.summary());
+            profiles::reassignIds(doc);
         }
         doc["name"] = name;
-        if (js::boolean(p, "forAircraft", false) && !aircraftModelKey_.empty())
+        if (bindToAircraft)
             doc["aircraftMatch"] = {{"strategy", "aircraftPath"}, {"modelKey", aircraftModelKey_}, {"variantKey", nullptr},
                                     {"displayName", aircraftTitle_.empty() ? json(aircraftModelKey_) : json(aircraftTitle_)}, {"confirmed", false}};
         if (from != "working" && aircraftDirty() && !js::boolean(p, "discard", false))
@@ -572,6 +685,8 @@ void ModuleApp::handle(const Command& c, double now) {
         CommitRequest req;
         req.upsertProfiles.push_back(doc);
         req.navigation = navigation();
+        (*req.navigation)["lastProfileId"] = js::get(doc, "profileId");
+        if (bindToAircraft) (*req.navigation)["lastByModel"][aircraftModelKey_] = js::get(doc, "profileId");
         req.requestId = c.uiInstanceId + ":" + c.requestId;
         PendingCommit pc{c.requestId, "create", working_.draftRevision, nullptr, js::str(doc, "profileId")};
         reply(c, AckStatus::Pending, {}, {{"profileId", js::str(doc, "profileId")}});
@@ -738,6 +853,18 @@ void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
             if (js::str(cam, "id") == id) {
                 json updated = cam;
                 updated["positionMetersFRD"] = js::get(payload, "positionMetersFRD");
+                // Saving an inherited height without a vertical adjustment must not
+                // freeze it as a per-camera override just because globals changed.
+                const auto& height=js::object(cam,"airportHeight");
+                const auto& oldPosition=js::array(cam,"positionMetersFRD");
+                auto& newPosition=updated["positionMetersFRD"];
+                if(js::str(cam,"mode")=="airport"&&!height.empty()&&oldPosition.size()==3&&newPosition.is_array()&&newPosition.size()==3) {
+                    const auto category=js::str(height,"category");
+                    const double inherited=js::num(js::object(js::object(working_.settings,"host"),"airportCategoryHeights"),category.c_str(),category=="tower"?35:3);
+                    const double effective=js::num(js::object(cam,"airportOverrides"),"heightMeters",std::max(inherited,js::num(height,"minimumMeters",0)));
+                    const double z=js::num(js::object(cam,"worldOrigin"),"altitude",0)-js::num(height,"baseAltitudeMeters",0)-effective;
+                    if(newPosition[2].is_number()&&std::abs(newPosition[2].get<double>()-z)<1e-6)newPosition[2]=oldPosition[2];
+                }
                 updated["orientationCameraToAnchorXYZW"] = js::get(payload, "orientationCameraToAnchorXYZW");
                 updated["projection"]["value"] = js::num(payload, "fovRad", 1.0);
                 json applied;
@@ -899,6 +1026,16 @@ bool ModuleApp::applyOps(const json& ops, json& applied, std::string& error) {
             bool replaced = false;
             for (auto& existing : profile["cameras"])
                 if (js::str(existing, "id") == id) {
+                    // Position controls and baked keyboard movement are explicit
+                    // camera refinements. Preserve them when global heights change.
+                    const auto& height=js::object(cam,"airportHeight");
+                    const auto& before=js::array(existing,"positionMetersFRD");
+                    const auto& after=js::array(cam,"positionMetersFRD");
+                    if(js::str(cam,"mode")=="airport"&&!height.empty()&&height==js::object(existing,"airportHeight")&&
+                       js::get(js::object(cam,"airportOverrides"),"heightMeters")==js::get(js::object(existing,"airportOverrides"),"heightMeters")&&
+                       before.size()==3&&after.size()==3&&before[2].is_number()&&after[2].is_number()&&before[2]!=after[2]) {
+                        cam["airportOverrides"]["heightMeters"]=js::num(js::object(cam,"worldOrigin"),"altitude",0)-js::num(height,"baseAltitudeMeters",0)-after[2].get<double>();
+                    }
                     existing = cam;
                     replaced = true;
                 }

@@ -3,16 +3,16 @@ const assert=require('node:assert/strict'),path=require('node:path');
 (async()=>{
  const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
  try {
-  const errors=[],page=await browser.newPage({viewport:{width:1100,height:1000}});page.on('pageerror',e=>errors.push(e.message));
+  const errors=[],page=await browser.newPage({viewport:{width:1450,height:1000}});page.on('pageerror',e=>errors.push(e.message));
   const url='file:///'+path.resolve(process.argv[2]||'ui/index.html').replaceAll('\\','/');
   if(!process.env.FSCS_MINI_ONLY) {
   await page.goto(url+'?surface=main');await page.waitForFunction(()=>window.FSCApp&&FSCApp.state.snapshot);
   await page.locator('#mc-editor-mouse-look-head').click();
-  await page.waitForFunction(()=>FSCApp.state.working.profile.cameras[0].trackingPolicy==='on');
-  await page.locator('#mc-editor-mouse-look').click();await page.getByRole('button',{name:'Return to saved view on release',exact:true}).click();
-  await page.waitForFunction(()=>FSCApp.state.working.profile.cameras[0].mouseLookOnRelease==='reset');
-  await page.locator('#mc-editor-mouse-look').click();await page.getByRole('button',{name:'Remember this camera’s temporary look',exact:true}).click();
-  await page.waitForFunction(()=>FSCApp.state.working.profile.cameras[0].temporaryLookPolicy==='retain');
+  await page.waitForFunction(()=>FSCApp.state.working.settings.host.globalHeadTrackingEnabled===true);
+  await page.locator('#mc-editor-mouse-look').click();await page.getByRole('button',{name:'Return to saved view',exact:true}).click();
+  await page.waitForFunction(()=>FSCApp.state.working.profile.cameras[0].mouseLookOnRelease==='reset');await page.getByRole('button',{name:'Done',exact:true}).click();
+  await page.locator('#mc-editor-mouse-look').click();await page.getByRole('button',{name:'Remember temporary look',exact:true}).click();
+  await page.waitForFunction(()=>FSCApp.state.working.profile.cameras[0].temporaryLookPolicy==='retain');await page.getByRole('button',{name:'Done',exact:true}).click();
   await page.keyboard.press('Control+s');
   await page.waitForFunction(()=>!FSCApp.state.pendingCommit&&!FSCApp.state.inflight&&!FSCApp.state.queue.length&&!FSCApp.state.working.dirty.profile);
   await page.evaluate(()=>new Promise(resolve=>{
@@ -53,7 +53,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.equal(await page.locator('#mc-dialog-shade').evaluate(e=>getComputedStyle(e).pointerEvents),'none');
   await page.screenshot({path:'build/review/airport-tracking-menu.png'});
   await page.getByRole('button',{name:'Track heading and pitch',exact:true}).click();
-  assert.ok(await page.evaluate(()=>FSCApp.state.working.profile.cameras.some(c=>c.aircraftTracking==='both')));
+  assert.equal(await page.evaluate(()=>FSCApp.state.working.settings.host.globalAircraftTracking),'both','Tracking choice changes the global setting');
   const size=await page.locator('#mc-dock-favorites').evaluate(e=>({client:e.clientHeight,scroll:e.scrollHeight,count:e.querySelectorAll('button').length}));
   assert.equal(size.count,100);assert.ok(size.scroll>size.client);assert.ok(size.client<=90);
   assert.ok((await page.locator('#mc-mini-panel').boundingBox()).height<=122);

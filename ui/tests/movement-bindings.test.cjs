@@ -15,26 +15,26 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await page.locator('#mc-nav-bindings').click();
   await page.locator('#mc-binding-search').fill('move');
   const row=action=>page.locator('[data-binding='+action+']');
-  for(const [action,key] of [['moveForward','W'],['moveBack','S'],['moveLeft','A'],['moveRight','D'],['moveUp','E'],['moveDown','Q'],['moveFast','Shift']]) {
-   assert.equal(await row(action).locator('.mc-binding-input').innerText(),key);
+  for(const [action,key] of [['moveForward','W'],['moveBack','S'],['moveLeft','A'],['moveRight','D'],['moveUp','Q'],['moveDown','E'],['moveFast','Shift']]) {
+   assert.equal(await row(action).locator('[data-slot=primary] .mc-binding-input').innerText(),key);
   }
-  await row('moveForward').getByRole('button',{name:'Assign an input to Move forward',exact:true}).click();
+  await row('moveForward').getByRole('button',{name:'Assign primary input to Move forward',exact:true}).click();
   await page.locator('#mc-assign-capture').press('i');
   await page.locator('#mc-dialog-actions').getByRole('button',{name:'Assign',exact:true}).click();
   await page.waitForFunction(()=>FSCApp.state.working.bindings.bindings.some(b=>b.action==='moveForward'&&b.input.definition==='I'));
-  await row('moveFast').getByRole('button',{name:'Assign an input to Faster movement (hold)',exact:true}).click();
+  await row('moveFast').getByRole('button',{name:'Assign primary input to Faster movement (hold)',exact:true}).click();
   await page.locator('#mc-assign-capture').press('Shift');
   await page.locator('#mc-dialog-actions').getByRole('button',{name:'Assign',exact:true}).click();
   await page.waitForFunction(()=>FSCApp.state.working.bindings.bindings.some(b=>b.action==='moveFast'&&b.input.definition==='VK_LSHIFT'));
-  await row('moveDown').getByRole('button',{name:'Clear Move down',exact:true}).click();
+  await row('moveDown').getByRole('button',{name:'Clear primary input for Move down',exact:true}).click();
   await page.locator('#mc-binding-search').fill('zoom');
-  await row('zoomIn').getByRole('button',{name:'Assign an input to Zoom in',exact:true}).click();
+  await row('zoomIn').getByRole('button',{name:'Assign primary input to Zoom in',exact:true}).click();
   await page.locator('#mc-assign-capture').dispatchEvent('wheel',{deltaY:100});
   // Existing down assignment is moved atomically to the reversed zoom-in action.
   await page.locator('#mc-dialog-actions').getByRole('button',{name:'Replace existing assignment',exact:true}).click();
   await page.waitForFunction(()=>FSCApp.state.working.bindings.bindings.some(b=>b.action==='zoomIn'&&b.input.definition==='sim:ZOOM_OUT'));
   assert.equal(await page.evaluate(()=>FSCApp.state.working.bindings.bindings.some(b=>b.action==='zoomOut')),false);
-  await row('zoomOut').getByRole('button',{name:'Assign an input to Zoom out',exact:true}).click();
+  await row('zoomOut').getByRole('button',{name:'Assign primary input to Zoom out',exact:true}).click();
   await page.locator('#mc-assign-capture').press('o');
   await page.locator('#mc-dialog-actions').getByRole('button',{name:'Assign',exact:true}).click();
   await page.locator('#mc-binding-kind').selectOption('simZoom');
@@ -47,7 +47,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.equal(state.bindings.bindings.find(b=>b.action==='moveForward').input.definition,'I');
   assert.equal(state.bindings.bindings.some(b=>b.action==='moveDown'),false);
   assert.equal(state.bindings.bindings.find(b=>b.action==='zoomOut').input.definition,'O');
-  assert.equal(state.bindings.movementDefaultsVersion,1);
+  assert.equal(state.bindings.movementDefaultsVersion,2);
   assert.deepEqual(errors,[]);
   console.log('Movement/boost defaults, precision persistence, key/wheel reassignment, conflict replacement, clearing and saved snapshot passed: '+(process.argv[2]||'source'));
  } finally {await browser.close();}

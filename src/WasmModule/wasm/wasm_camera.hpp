@@ -25,6 +25,7 @@ public:
     bool submitPose(const SdkPose& pose) override;
     bool setFlag(CameraFlag flag, bool enabled) override;
     bool requestCameraData(Referential ref) override;
+    std::optional<core::Vec3> worldCameraPosition() override;
     bool enumerateDefinitions() override;
     bool setUsingDefinition(const std::string& name) override;
     std::optional<bool> headTracking() override;

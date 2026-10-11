@@ -1,5 +1,8 @@
 #include "test.hpp"
 #include <set>
+#include <iomanip>
+#include <sstream>
+#include "airport_fixture.hpp"
 
 #include "fake_backend.hpp"
 #include "fscs/profiles/bindings.hpp"
@@ -9,6 +12,56 @@
 
 using namespace fscs::profiles;
 using fscs::host::FakeStorage;
+
+TEST_CASE("profiles: legacy mini favorites initialize once across aircraft and airport libraries") {
+    StoreState old; old.txn = 1;
+    std::vector<std::string> notes;
+    auto aircraft = makeC172Profile("c172", "C172");
+    auto airport = fscs::profiles::airport::generate(airportFixture(), json::object(), notes);
+    for (auto doc : {aircraft, airport}) {
+        for (auto& camera : doc["cameras"]) camera["favorite"] = false;
+        const auto id = doc["profileId"].get<std::string>();
+        old.profiles[id] = {doc, {doc}};
+    }
+    auto payload = json::parse(Repository::serialize(old, {}))["payload"];
+    payload.erase("miniFavoritesInitialized");
+    const auto body = fscs::js::dump(payload);
+    std::ostringstream crc;
+    crc << std::hex << std::setfill('0') << std::setw(8) << fscs::js::crc32(body);
+    FakeStorage storage;
+    storage.files["a"] = "{\"format\":\"fs-camera-studio-store\",\"version\":1,\"crc\":\"" + crc.str() + "\",\"payload\":" + body + "}";
+    Repository loaded(storage, "a", "b"); loaded.load([](auto) {});
+    CHECK_EQ(loaded.committed().profiles.size(), std::size_t{2});
+    CommitRequest change;
+    for (const auto& [id, record] : loaded.committed().profiles) {
+        for (const auto& camera : record.current["cameras"]) CHECK_EQ(camera["favorite"], json(true));
+        CHECK_EQ(record.backups[0]["cameras"][0]["favorite"], json(false));
+        auto doc = record.current;
+        doc["cameras"][0]["favorite"] = false;
+        change.upsertProfiles.push_back(doc);
+    }
+    loaded.commit(change, [](const auto& result) { CHECK(result.status == CommitStatus::Committed); });
+    Repository reloaded(storage, "a", "b"); reloaded.load([](auto) {});
+    for (const auto& [id, record] : reloaded.committed().profiles) {
+        CHECK_EQ(record.current["cameras"][0]["favorite"], json(false));
+        CHECK_EQ(record.current["cameras"][1]["favorite"], json(true));
+    }
+    const auto savedEnvelope = json::parse(Repository::serialize(reloaded.committed(), {}));
+    CHECK_EQ(savedEnvelope["payload"]["miniFavoritesInitialized"], json(true));
+}
+
+TEST_CASE("profiles: builtin views start starred and explicit imported favorites are preserved") {
+    for (const auto& doc : {makeStarterProfile("Starter", "test", "Test"), makeC172Profile("c172", "C172"), makeA320Profile("a320", "A320")})
+        for (const auto& camera : doc["cameras"]) CHECK_EQ(camera["favorite"], json(true));
+    auto doc = makeC172Profile("c172", "C172");
+    doc["cameras"][0]["favorite"] = false;
+    std::string error;
+    auto imported = importProfileCode(exportProfileCode(doc, false), &error);
+    CHECK(imported.has_value());
+    if (!imported) return;
+    CHECK_EQ(imported->profile["cameras"][0]["favorite"], json(false));
+    CHECK_EQ(imported->profile["cameras"][1]["favorite"], json(true));
+}
 
 namespace {
 
@@ -598,4 +651,71 @@ TEST_CASE("profiles: flyby pass options validate and survive import normalizatio
     for (const auto& pair : {std::pair<const char*,json>{"sideMeters",5001},{"repeat","yes"},{"durationSeconds",0}}) {
         auto invalid=doc;invalid["cameras"][0]["motion"][pair.first]=pair.second;CHECK(!validateProfile(invalid).ok());
     }
+}
+
+TEST_CASE("settings: airport zoom and category heights normalize and roundtrip") {
+    auto settings=defaultSettingsDocument();auto& h=settings["host"];
+    CHECK_EQ(h["airportAutoZoomEnabled"],json(false));CHECK_EQ(h["airportAutoZoomFrameMeters"],json(40));
+    h["airportAutoZoomEnabled"]=true;h["airportAutoZoomFrameMeters"]=999;h["airportAutoZoomMinFovDeg"]=130;
+    h["airportAutoZoomMaxFovDeg"]=1;h["airportAutoZoomResponseSeconds"]=-1;h["airportCategoryHeights"]["tower"]=2000;
+    const auto normalized=normalizeSettings(settings);const auto parsed=parseHostSettings(json::parse(normalized.dump()));
+    CHECK(parsed.airportAutoZoomEnabled);CHECK_NEAR(parsed.airportAutoZoomFrameMeters,200,1e-9);
+    CHECK_NEAR(parsed.airportAutoZoomMinFovDeg,120,1e-9);CHECK_NEAR(parsed.airportAutoZoomMaxFovDeg,120,1e-9);
+    CHECK_NEAR(parsed.airportAutoZoomResponseSeconds,.1,1e-9);CHECK_NEAR(parsed.airportCategoryHeights.at("tower"),1000,1e-9);
+    CHECK_NEAR(parsed.airportCategoryHeights.at("runways"),3,1e-9);
+}
+TEST_CASE("profiles: sparse airport overrides normalize without replacing inheritance") {
+    auto doc=makeStarterProfile("Airport","test","Test");auto& camera=doc["cameras"][0];camera["mode"]="airport";
+    camera["worldOrigin"]={{"lat",40},{"lon",-90},{"altitude",100}};
+    camera["airportOverrides"]={{"aircraftTracking","off"},{"autoZoomEnabled",false},{"autoZoomMinFovDeg",40},{"autoZoomMaxFovDeg",10},{"heightMeters",5000}};
+    CHECK(validateProfile(doc).ok());const auto imported=json::parse(doc.dump());const auto snapshot=toSnapshot(imported);
+    const auto& o=snapshot.cameras[0].airportOverrides;CHECK(o.aircraftTracking && *o.aircraftTracking=="off");CHECK(o.autoZoomEnabled && !*o.autoZoomEnabled);
+    CHECK(!o.autoZoomFrameMeters);CHECK_NEAR(*o.autoZoomMinFovDeg,40,1e-9);CHECK_NEAR(*o.autoZoomMaxFovDeg,40,1e-9);CHECK_NEAR(*o.heightMeters,1000,1e-9);
+    camera["airportOverrides"]={{"aircraftTracking","bad"},{"autoZoomEnabled","yes"},{"autoZoomResponseSeconds","invalid"}};
+    CHECK(validateProfile(doc).ok());CHECK(camera["airportOverrides"].empty());
+}
+
+TEST_CASE("repository: global airport preferences and camera overrides survive saved reload") {
+    Store store;auto settings=defaultSettingsDocument();settings["host"]["airportAutoZoomEnabled"]=true;
+    settings["host"]["airportAutoZoomFrameMeters"]=55;settings["host"]["airportCategoryHeights"]["gates"]=12;
+    auto profile=makeStarterProfile("Airport","test","Test");auto& camera=profile["cameras"][0];camera["mode"]="airport";
+    camera["worldOrigin"]={{"lat",40},{"lon",-90},{"altitude",100}};
+    camera["airportOverrides"]={{"autoZoomEnabled",false},{"aircraftTracking","heading"},{"heightMeters",8}};
+    camera["airportHeight"]={{"category","gates"},{"baseAltitudeMeters",100},{"minimumMeters",0}};
+    CommitRequest request;request.settings=settings;request.upsertProfiles.push_back(profile);
+    CHECK(store.commit(request).status==CommitStatus::Committed);
+    Repository reloaded(store.storage,"a","b");reloaded.load([](std::vector<std::string>){});
+    const auto parsed=parseHostSettings(reloaded.committed().settings);CHECK(parsed.airportAutoZoomEnabled);
+    CHECK_NEAR(parsed.airportAutoZoomFrameMeters,55,1e-9);CHECK_NEAR(parsed.airportCategoryHeights.at("gates"),12,1e-9);
+    const auto snapshot=toSnapshot(reloaded.committed().profiles.at(profile["profileId"].get<std::string>()).current);
+    const auto& saved=snapshot.cameras[0];CHECK_EQ(saved.airportHeightCategory,std::string("gates"));
+    CHECK(saved.airportOverrides.autoZoomEnabled && !*saved.airportOverrides.autoZoomEnabled);
+    CHECK_EQ(*saved.airportOverrides.aircraftTracking,std::string("heading"));CHECK_NEAR(*saved.airportOverrides.heightMeters,8,1e-9);
+}
+
+TEST_CASE("profiles: airport horizon protection defaults and explicit overrides survive reload") {
+    auto settings=defaultSettingsDocument();
+    CHECK(parseHostSettings(json::object()).airportTrackingHorizonGuard);
+    CHECK_EQ(settings["host"]["airportTrackingHorizonGuard"],json(true));
+    settings["host"]["airportTrackingHorizonGuard"]=false;
+    CHECK(!parseHostSettings(normalizeSettings(settings)).airportTrackingHorizonGuard);
+    auto invalid=settings;invalid["host"]["airportTrackingHorizonGuard"]="false";
+    CHECK(parseHostSettings(normalizeSettings(invalid)).airportTrackingHorizonGuard);
+    auto profile=makeStarterProfile("Horizon","test","Test");auto& camera=profile["cameras"][0];
+    camera["mode"]="airport";camera["worldOrigin"]={{"lat",40},{"lon",-90},{"altitude",100}};
+    CHECK(validateProfile(profile).ok());CHECK(!toSnapshot(profile).cameras[0].airportOverrides.trackingHorizonGuard);
+    camera["airportOverrides"]={{"trackingHorizonGuard",false}};
+    Store store;CommitRequest request;request.settings=settings;request.upsertProfiles.push_back(profile);
+    CHECK(store.commit(request).status==CommitStatus::Committed);
+    Repository reloaded(store.storage,"a","b");reloaded.load([](std::vector<std::string>){});
+    CHECK(!parseHostSettings(reloaded.committed().settings).airportTrackingHorizonGuard);
+    const auto snapshot=toSnapshot(reloaded.committed().profiles.at(profile["profileId"].get<std::string>()).current);
+    CHECK(snapshot.cameras[0].airportOverrides.trackingHorizonGuard.has_value());
+    CHECK(!*snapshot.cameras[0].airportOverrides.trackingHorizonGuard);
+    camera["airportOverrides"]["trackingHorizonGuard"]=true;
+    CHECK(validateProfile(profile).ok());CHECK(*toSnapshot(profile).cameras[0].airportOverrides.trackingHorizonGuard);
+    camera["airportOverrides"]["trackingHorizonGuard"]="off";
+    CHECK(validateProfile(profile).ok());CHECK(!toSnapshot(profile).cameras[0].airportOverrides.trackingHorizonGuard);
+    camera["airportOverrides"]["trackingHorizonGuard"]=true;camera["mode"]="aircraftCockpit";
+    CHECK(validateProfile(profile).ok());CHECK(!camera.contains("airportOverrides"));
 }

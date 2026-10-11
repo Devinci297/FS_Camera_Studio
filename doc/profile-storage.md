@@ -3,7 +3,7 @@
 MSFS gives the WASM module a persistent virtual `\work` directory. On this Steam MSFS 2024 installation it is:
 
 ```text
-C:\Users\Devinci\AppData\Roaming\Microsoft Flight Simulator 2024\WASM\MSFS2024\fs-camera-studio\work
+%APPDATA%\Microsoft Flight Simulator 2024\WASM\MSFS2024\fs-camera-studio\work
 ```
 
 Every successful store save writes one readable JSON file per aircraft package:
@@ -27,7 +27,7 @@ The module creates and selects this template once per C172 aircraft package, rep
 selection. Existing profiles remain available as alternatives. Later edits and profile choices are preserved;
 the template is not reapplied on every startup. Automatic selection leaves camera ownership in Observing.
 
-These are starting poses, not measured in-sim presets. Complete the axis check, test each view, and tune positions
+These are starting poses, not measured in-sim presets. Test each view and tune positions
 for the aircraft variant. Exterior views remain marked Preview, with the camera API's cockpit-sound limitation.
 
 To regenerate the importable copy after changing the template, build the native tests and run:
@@ -35,3 +35,19 @@ To regenerate the importable copy after changing the template, build the native 
 ```powershell
 build\tests\bin\Debug\fscs_export_c172.exe profiles\Cessna_172_G1000.json
 ```
+
+## Import, export and reuse in 0.3.0
+
+In the simulator, **Profiles > Import profile** displays the profile imports folder. Copy that path into Windows
+Explorer, add Camera Studio JSON files, then return to the panel and choose **Refresh**, a file, and **Import**.
+The simulator toolbar cannot open a native Windows file picker. Browser previews retain file selection; pasted
+profile code is available in both. Import always makes a copy with new IDs.
+
+**Export profile** lists saved profiles. Export saved uses the last committed version; exporting with edits for
+the active profile includes its working draft. Importing does not automatically make a profile compatible with
+a different aircraft: use **Copy for current aircraft** to create an independently matched copy. See
+[the cross-aircraft guide](copy-profile-for-aircraft.md).
+
+Saved airport libraries are shared globally and remain outside aircraft profile exports. Their selection and
+persistence do not depend on the aircraft profile being open. Back up the complete work folder while MSFS is
+closed if you need to preserve the full store, including airport libraries and global preferences.

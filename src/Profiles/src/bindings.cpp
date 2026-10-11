@@ -265,7 +265,7 @@ json defaultSettingsDocument() {
     return {{"schemaVersion", kSettingsSchemaVersion},
             {"ui", {{"shortcuts", true}, {"contrast", false}, {"backups", true}, {"remember", true}, {"precision", "normal"},
                     {"theme", "dark"}, {"reducedMotion", false}, {"miniEnabled", true}, {"miniHover", true}, {"miniPinned", false}, {"miniOpacity", 0.65}, {"mainOpacity", 1.0}, {"nameDisplay", "both"}}},
-            {"host", {{"allowUnqualifiedAdapter", false}, {"lookSpeedDegPerSec", 60.0}, {"moveSpeedMetersPerSec", 0.5}, {"airportRadiusNm", 25.0}, {"mouseSensitivity", 1.0}, {"mouseSmoothingMs", 55.0}, {"mouseLookEnabled", true}, {"mouseInvertY", false}, {"globalHeadTrackingEnabled", false}, {"globalAircraftTracking", "both"}}}};
+            {"host", {{"allowUnqualifiedAdapter", false}, {"lookSpeedDegPerSec", 60.0}, {"moveSpeedMetersPerSec", 0.5}, {"airportRadiusNm", 25.0}, {"mouseSensitivity", 1.0}, {"mouseSmoothingMs", 55.0}, {"mouseLookEnabled", true}, {"mouseInvertY", false}, {"globalHeadTrackingEnabled", false}, {"globalAircraftTracking", "both"}, {"airportTrackingHorizonGuard", true}, {"airportAutoZoomEnabled", false}, {"airportAutoZoomFrameMeters", 40.0}, {"airportAutoZoomMinFovDeg", 10.0}, {"airportAutoZoomMaxFovDeg", 90.0}, {"airportAutoZoomResponseSeconds", 1.0}, {"airportCategoryHeights", {{"runways",3.0},{"gates",3.0},{"apron",3.0},{"taxi",3.0},{"tower",35.0}}}}}};
 }
 
 json normalizeSettings(const json& doc) {
@@ -285,7 +285,11 @@ json normalizeSettings(const json& doc) {
     out["host"] = {{"allowUnqualifiedAdapter", h.allowUnqualifiedAdapter}, {"lookSpeedDegPerSec", h.lookSpeedDegPerSec},
                    {"moveSpeedMetersPerSec", h.moveSpeedMetersPerSec}, {"airportRadiusNm", h.airportRadiusNm}, {"mouseSensitivity", h.mouseSensitivity},
                    {"mouseSmoothingMs", h.mouseSmoothingMs}, {"mouseLookEnabled", h.mouseLookEnabled}, {"mouseInvertY", h.mouseInvertY},
-                   {"globalHeadTrackingEnabled", h.globalHeadTrackingEnabled}, {"globalAircraftTracking", h.globalAircraftTracking}};
+                   {"globalHeadTrackingEnabled", h.globalHeadTrackingEnabled}, {"globalAircraftTracking", h.globalAircraftTracking},
+                   {"airportTrackingHorizonGuard", h.airportTrackingHorizonGuard},
+                   {"airportAutoZoomEnabled", h.airportAutoZoomEnabled}, {"airportAutoZoomFrameMeters", h.airportAutoZoomFrameMeters},
+                   {"airportAutoZoomMinFovDeg", h.airportAutoZoomMinFovDeg}, {"airportAutoZoomMaxFovDeg", h.airportAutoZoomMaxFovDeg},
+                   {"airportAutoZoomResponseSeconds", h.airportAutoZoomResponseSeconds}, {"airportCategoryHeights",h.airportCategoryHeights}};
     return out;
 }
 
@@ -300,6 +304,14 @@ HostSettings parseHostSettings(const json& doc) {
     s.globalHeadTrackingEnabled = js::boolean(host, "globalHeadTrackingEnabled", false);
     const auto aircraftTracking = js::str(host,"globalAircraftTracking","both");
     s.globalAircraftTracking = aircraftTracking=="off" || aircraftTracking=="heading" ? aircraftTracking : "both";
+    s.airportTrackingHorizonGuard = js::boolean(host, "airportTrackingHorizonGuard", true);
+    s.airportAutoZoomEnabled = js::boolean(host, "airportAutoZoomEnabled", false);
+    s.airportAutoZoomFrameMeters = std::clamp(js::num(host,"airportAutoZoomFrameMeters",40),5.0,200.0);
+    s.airportAutoZoomMinFovDeg = std::clamp(js::num(host,"airportAutoZoomMinFovDeg",10),2.0,120.0);
+    s.airportAutoZoomMaxFovDeg = std::clamp(js::num(host,"airportAutoZoomMaxFovDeg",90),s.airportAutoZoomMinFovDeg,120.0);
+    s.airportAutoZoomResponseSeconds = std::clamp(js::num(host,"airportAutoZoomResponseSeconds",1),0.1,5.0);
+    const auto& heights=js::object(host,"airportCategoryHeights");
+    for (auto& entry : s.airportCategoryHeights) entry.second=std::clamp(js::num(heights,entry.first.c_str(),entry.second),0.,1000.);
     s.mouseInvertY = js::boolean(host, "mouseInvertY", false);
     s.lookSpeedDegPerSec = std::clamp(js::num(host, "lookSpeedDegPerSec", 60.0), 5.0, 360.0);
     s.moveSpeedMetersPerSec = std::clamp(js::num(host, "moveSpeedMetersPerSec", 0.5), 0.05, 20.0);

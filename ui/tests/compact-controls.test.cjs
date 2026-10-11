@@ -13,12 +13,12 @@ const assert=require('node:assert/strict'),path=require('node:path'),fs=require(
     window.calls=[];FSCApp.bridge.request=async(a,p)=>{calls.push({a,p});return {status:'Completed'};};FSCApp.bridge.send=()=>{};FSCDemo.setOwnership('Observing');document.getElementById('mc-mini-pin').click();
    });
    const opener=page.locator('#'+(surface==='mini'?'mc-mouse-look-':'mc-editor-mouse-look-')+'walkaround');
-   await opener.click();await page.waitForTimeout(100);
+   await opener.click();await page.waitForFunction(()=>{const d=document.querySelector('.mc-dialog').getBoundingClientRect(),m=document.getElementById('mc-mini-panel').getBoundingClientRect();return document.getElementById('mc-sim').dataset.surface!=='mini'||d.bottom<=m.top;});
    const shade=page.locator('#mc-dialog-shade'),dialog=shade.locator('.mc-dialog');
    assert.match(await shade.getAttribute('class'),/mc-context-shade/);assert.match(await shade.getAttribute('class'),/mc-walkaround-shade/);
    assert.equal(await shade.evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');assert.equal(await shade.evaluate(e=>getComputedStyle(e).pointerEvents),'none');
    const rect=await dialog.boundingBox();assert.ok(rect.width<=380&&rect.height<460,'Walkaround stays compact');assert.ok(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=1500&&rect.y+rect.height<=900);
-   if(surface==='mini'){const dock=await page.locator('#mc-mini-panel').boundingBox();assert.ok(rect.y+rect.height<=dock.y,'Popover sits above dock');fs.mkdirSync('build/review',{recursive:true});await page.screenshot({path:'build/review/walkaround-compact-packaged.png'});}
+   if(surface==='mini'){await page.screenshot({path:'build/release/0.3.0/walkaround-geometry.png'});const dock=await page.locator('#mc-mini-panel').boundingBox();assert.ok(rect.y+rect.height<=dock.y,'Popover sits above dock '+JSON.stringify({rect,dock}));fs.mkdirSync('build/review',{recursive:true});await page.screenshot({path:'build/review/walkaround-compact-packaged.png'});}
    assert.equal(await page.locator('#mc-dialog-actions .mc-primary').innerText(),'Start walkaround');
    await page.getByRole('button',{name:'Repeat: On',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Repeat: Off',exact:true}).getAttribute('aria-pressed'),'false');
    await page.getByRole('spinbutton',{name:'Seconds at each camera'}).fill('7');await page.getByRole('button',{name:'Start walkaround',exact:true}).click();

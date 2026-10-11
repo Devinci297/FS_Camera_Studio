@@ -84,6 +84,7 @@ std::string Repository::serialize(const StoreState& s, const std::vector<std::st
     json profiles = json::array();
     for (const auto& [id, rec] : s.profiles) profiles.push_back({{"current", rec.current}, {"backups", rec.backups}});
     json payload{{"txn", s.txn},
+                 {"miniFavoritesInitialized", true},
                  {"profiles", profiles},
                  {"settings", s.settings},
                  {"bindings", s.bindings},
@@ -161,6 +162,12 @@ std::optional<StoreState> Repository::deserialize(const std::string& bytes, std:
             continue;
         }
         ProfileRecord r;
+        // Older mini panels displayed every camera irrespective of its star. Keep
+        // those existing libraries visible once when switching to starred-only.
+        // Store-level marking preserves explicit choices in subsequent imports,
+        // restored backups and saves, without rewriting historic backups.
+        if (!js::boolean(payload, "miniFavoritesInitialized", false))
+            for (auto& camera : current["cameras"]) camera["favorite"] = true;
         r.current = std::move(current);
         for (const auto& b : js::array(rec, "backups")) {
             json copy = b;

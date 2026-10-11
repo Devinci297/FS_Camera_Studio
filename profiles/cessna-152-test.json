@@ -122,7 +122,7 @@
         "effects": {
           "enabled": false
         },
-        "favorite": false,
+        "favorite": true,
         "id": "cc7e664b-638e-53d8-bd50-c367881bf9a3",
         "interaction": true,
         "levelHorizon": false,
@@ -166,7 +166,7 @@
         "effects": {
           "enabled": false
         },
-        "favorite": false,
+        "favorite": true,
         "id": "ff608a19-97f2-5987-86df-710ef4dad367",
         "interaction": true,
         "levelHorizon": false,
@@ -210,7 +210,7 @@
         "effects": {
           "enabled": false
         },
-        "favorite": false,
+        "favorite": true,
         "id": "42056cb1-fbbf-5c14-9f6c-08b4514eac70",
         "interaction": true,
         "levelHorizon": false,
@@ -298,7 +298,7 @@
         "effects": {
           "enabled": false
         },
-        "favorite": false,
+        "favorite": true,
         "id": "d83eaa8d-a049-5590-ba16-59ef47d9e99a",
         "interaction": true,
         "levelHorizon": false,
@@ -342,7 +342,7 @@
         "effects": {
           "enabled": false
         },
-        "favorite": false,
+        "favorite": true,
         "id": "97ba820c-6d5c-54df-8033-6e46a3271424",
         "interaction": true,
         "levelHorizon": false,
@@ -428,7 +428,7 @@
         "effects": {
           "enabled": false
         },
-        "favorite": false,
+        "favorite": true,
         "id": "de7a9676-aa1e-5ee1-b6f5-c56d0611f4a0",
         "interaction": false,
         "levelHorizon": false,
@@ -470,7 +470,7 @@
         "effects": {
           "enabled": false
         },
-        "favorite": false,
+        "favorite": true,
         "id": "d5f30eae-eb25-50b1-9dd4-a7dadb0858e0",
         "interaction": false,
         "levelHorizon": false,
@@ -512,7 +512,7 @@
         "effects": {
           "enabled": false
         },
-        "favorite": false,
+        "favorite": true,
         "id": "13e44980-686c-575c-b403-877f4568de28",
         "interaction": false,
         "levelHorizon": false,

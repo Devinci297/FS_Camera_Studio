@@ -3,7 +3,7 @@ const {chromium}=require(process.env.FSCS_PLAYWRIGHT || 'playwright');
 const assert=require('node:assert/strict'),path=require('node:path');
 (async()=>{const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});try{
 const page=await browser.newPage({viewport:{width:800,height:950}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
-await page.goto('file:///'+path.resolve('ui/index.html').replaceAll('\\','/')+'?surface=main');await page.waitForFunction(()=>FSCApp.state.snapshot);
+await page.goto('file:///'+path.resolve(process.argv[2]||'ui/index.html').replaceAll('\\','/')+'?surface=main');await page.waitForFunction(()=>FSCApp.state.snapshot);
 await page.locator('#mc-nav-settings').click();
 for(const value of ['icons','labels','both']){
  await page.locator('#mc-setting-name-display [data-value='+value+']').click();
@@ -26,7 +26,8 @@ await page.locator('#mc-nav-cameras').click();
 const sidebar=await page.locator('.mc-browser').boundingBox(),add=await page.locator('.mc-browser-bottom').boundingBox();
 assert.ok(sidebar.y+sidebar.height-(add.y+add.height)<20,'Add camera stays at sidebar bottom');
 const name=page.locator('.mc-camera-select .mc-entity-label').first();
-assert.ok((await name.boundingBox()).width>=90,'camera label has usable width on a narrow editor');
+await page.locator('.mc-browser').screenshot({path:'build/release/0.3.0/narrow-library-geometry.png'});
+assert.ok(await name.evaluate(e=>{const r=e.getBoundingClientRect(),button=e.closest('.mc-camera-select'),key=button.querySelector('.mc-key');return r.width>=48&&(!key||r.right<=key.getBoundingClientRect().left+1)&&getComputedStyle(e).textOverflow==='ellipsis';}),'Compact camera label reserves readable width, truncates safely and never overlaps its inline shortcut');
 await page.locator('#mc-toggle-categories').click();await page.locator('#mc-toggle-categories').click();
 assert.equal(await page.locator('.mc-category-head[aria-expanded=true]').count(),0);
 const profile=await page.evaluate(()=>JSON.parse(JSON.stringify(FSCApp.state.working.profile)));

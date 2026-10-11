@@ -2,20 +2,16 @@
 
 Saved at the user's request on 2026-10-10. These are planned follow-ups, separate from the current MSFS test build.
 
-Release update (October 11): `0.1.1-test.20261011.1` includes the airport-controls module and generator UI,
-movement/zoom/save bindings, tracking controls, installer, illustrated manual and version/update UI. The chronological
-installation notes below describe earlier diagnostics; they are not the current release inventory. See
-`releases/0.1.1-test.20261011.1.md` and `test-evidence/2026-10-11-release.md` for current scope and remaining live checks.
+## Current status
 
-Latest installation status: the airport trial crashed during flight loading at 01:36 local time on October 11
-and was rolled back to the preceding callback-registration diagnostic. Airport generation remains in source
-and the preserved candidate, **not the installed build**. See `test-evidence/2026-10-11-airport-cameras.md`.
+Version 0.3.0 supersedes the early October 11 diagnostic installations. The release includes airport generation
+and shared airport storage, global defaults and individual overrides, bindings and controller listening,
+compact category/camera hierarchy, live-preview controls, axis reset, and starred mini-panel cameras.
+See [0.3.0 release notes](releases/0.3.0.md) and [current qualification](qualification.md).
 
-At 05:12, the airport-era WASM module was installed with the unchanged, confirmed-loading UI for an isolation
-test. The backend is present, but the installed UI intentionally has no airport-generation controls. Loading
-acceptance is pending; see `build/review/airport-module-only-20261011/installed.json`.
-
-October 11 work status: mouse settings, WASD/QE/Shift movement, editable Behavior controls, compact context menus, and airport generation/nearby loading are included in the airport test candidate. Native tests cover generation, separate persistence, combined-profile editing, regeneration and airport selection; browser checks cover preview/selective save and menus. MSFS world-frame qualification, startup stability and mouse-look acceptance remain pending. Generated airport cameras start without a View ID; the binding namespace remains shared with aircraft views. See `test-evidence/2026-10-11-airport-cameras.md` for the package receipt and live test procedure.
+The list below records the original design requests. It is a requirements reference, not an assertion that
+each item remains unimplemented. Scenery accuracy, live controller behavior and simulator hosting still need
+acceptance checks; historical installation evidence remains in `test-evidence/`.
 
 ## Editing feedback
 

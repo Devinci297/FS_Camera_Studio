@@ -1,0 +1,13 @@
+# Primary and secondary bindings — 0.3.0
+
+Each camera action and command has independent Primary and Secondary inputs. Either slot accepts a keyboard shortcut, controller button, or supported manual input. A common setup is a keyboard shortcut in Primary and a controller button in Secondary.
+
+Use the two slot buttons in the assignment dialog or the two input cards on the Bindings page. Clearing or replacing one slot preserves the other. When an input conflicts with another action, Replace moves only that input; the other action's remaining binding is kept. Save all changes persists the assignments.
+
+For controllers, choose the device and click **Listen for button or hat**, then press and release a button or move the hat in a direction and return it to center. Click **Assign** to confirm. Listening covers buttons 1–32 and the first POV hat. Diagonals choose one clockwise direction (for example, up-right becomes right). **Manual button or hat switch** remains available for additional supported inputs after testing. Keyboard, mouse, and touch-pointer devices are excluded from the controller list. Listening stops on cancellation, controller disconnect, flight changes, or a 20-second timeout. Capture generations prevent delayed events from a previous listening request from filling a new assignment.
+
+Existing bindings without a slot remain usable. The first two legacy inputs for an action become Primary and Secondary when edited. Additional legacy bindings are retained. Camera shortcut badges show actual assigned inputs rather than view IDs; view IDs remain available in Behavior.
+
+Browser regression coverage: `ui/tests/dual-bindings.test.cjs`, `binding-dialog-layout.test.cjs`, `movement-bindings.test.cjs`, and `key-capture.test.mjs`. Hardware input and simulator control masking still need live verification. In particular, the latest T.16000M hat-release fix has automated coverage but has not yet been confirmed on the physical controller. After assigning a hat, start another listening session and test a normal button to check that capture has fully reset.
+
+Hat capture, manual testing, and saved hat bindings explicitly subscribe to both movement and release. The release event is normalized to center, so returning the hat clears capture and held camera movement even when the simulator supplies a zero release payload. This follows the [SimConnect input-event contract](https://docs.flightsimulator.com/html/Programming_Tools/SimConnect/API_Reference/InputEvents/SimConnect_MapInputEventToClientEvent_EX1.htm). Native registration tests cover the missing-release regression. Rejected listener registrations now report an error and add bounded details to Diagnostics.

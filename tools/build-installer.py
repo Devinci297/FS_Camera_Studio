@@ -42,6 +42,11 @@ def build(args):
         if name not in {'layout.json', 'manifest.json'} and not name.startswith(('html_ui/', 'InGamePanels/', 'modules/')):
             raise ValueError('Unexpected distributable file: ' + name)
     manifest = json.loads((package / 'manifest.json').read_text(encoding='utf-8-sig'))
+    if manifest['package_version'] != args.version.split('-')[0]:
+        raise ValueError('Installer and package versions must match.')
+    panel_version = (package / 'html_ui/InGamePanels/FSCameraStudio/version.js').read_text(encoding='utf-8-sig')
+    if f"'{args.version}'" not in panel_version:
+        raise ValueError('Installer and app-bar versions must match.')
     stage = ROOT / ('build/installer-harness-stage' if args.test_harness else 'build/installer') / args.version
     output = ROOT / ('build/installer-harness' if args.test_harness else 'dist') / args.version
     stage.mkdir(parents=True, exist_ok=True)
@@ -95,7 +100,8 @@ def build(args):
     exe = output / f'FS-Camera-Studio-{args.version}-Setup.exe'
     for name in ['TESTER-GUIDE.txt', 'THIRD-PARTY-NOTICES.txt', 'BUILD-INFO.json', 'FS-Camera-Studio-Manual.pdf']:
         shutil.copy2(stage / name, output / name)
-    files = [exe.name, 'TESTER-GUIDE.txt', 'THIRD-PARTY-NOTICES.txt', 'BUILD-INFO.json', 'FS-Camera-Studio-Manual.pdf']
+    shutil.copy2(ROOT / 'profiles/cessna-152-test.json', output / 'cessna-152-test.json')
+    files = [exe.name, 'TESTER-GUIDE.txt', 'THIRD-PARTY-NOTICES.txt', 'BUILD-INFO.json', 'FS-Camera-Studio-Manual.pdf', 'cessna-152-test.json']
     checksums = ''.join(hashlib.sha256((output / name).read_bytes()).hexdigest()+'  '+name+'\n' for name in files)
     (output / 'SHA256SUMS.txt').write_text(checksums, encoding='ascii')
     archive = output / f'FS-Camera-Studio-{args.version}-Testers.zip'
@@ -110,9 +116,9 @@ def build(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='0.1.1-test.20261011.1')
-    parser.add_argument('--package', default='build/release/0.1.1-test.20261011.1/fs-camera-studio')
-    parser.add_argument('--receipt', default='build/release/0.1.1-test.20261011.1/staged.json')
+    parser.add_argument('--version', default='0.3.0')
+    parser.add_argument('--package', default='build/release/0.3.0/fs-camera-studio')
+    parser.add_argument('--receipt', default='build/release/0.3.0/staged.json')
     parser.add_argument('--compiler', default='build/installer-tools/inno/ISCC.exe')
     parser.add_argument('--test-harness', action='store_true', help='Internal lifecycle test build, always under build/, never dist/. Uses a named test process guard.')
     build(parser.parse_args())

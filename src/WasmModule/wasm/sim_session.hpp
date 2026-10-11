@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 
 namespace fscs::host {
 
@@ -23,6 +24,7 @@ public:
     bool sendToPanels(const std::string& text) override;
     bool mapInputs(const std::vector<std::string>& definitions) override;
     bool mapTestInput(const std::string& definition) override;
+    bool captureControllerInputs(int deviceId, std::uint64_t generation = 0) override;
     bool enumerateControllers() override;
     void setNativeMouseEnabled(bool enabled) override;
 
@@ -49,6 +51,7 @@ private:
     std::vector<std::string> mapped_;
     std::vector<bool> isPov_;
     std::size_t clientEventsDefined_ = 0;
+    std::set<unsigned long> povReleaseEventsDefined_;
     std::vector<unsigned long> inputMappingPackets_;
     std::vector<unsigned long> mouseMappingPackets_;
     bool mouseRegistered_ = false;
@@ -58,6 +61,12 @@ private:
     bool testMapped_ = false;
     bool testIsPov_ = false;
     bool zoomRegistered_ = false;
+    int captureDevice_ = -1;
+    unsigned long captureEventBase_ = 10000, nextCaptureEventBase_ = 10000;
+    std::uint64_t captureGeneration_ = 0;
+    struct CapturePacket { int input = -1; std::string stage; };
+    std::map<unsigned long, CapturePacket> capturePackets_;
+    std::vector<bool> captureInputsValid_;
 };
 
 }  // namespace fscs::host

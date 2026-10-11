@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <optional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,13 @@ struct HostSettings {
     bool mouseLookEnabled = true;
     bool globalHeadTrackingEnabled = false;
     std::string globalAircraftTracking = "both";
+    bool airportTrackingHorizonGuard = true;
+    bool airportAutoZoomEnabled = false;
+    double airportAutoZoomFrameMeters = 40;
+    double airportAutoZoomMinFovDeg = 10;
+    double airportAutoZoomMaxFovDeg = 90;
+    double airportAutoZoomResponseSeconds = 1;
+    std::map<std::string,double> airportCategoryHeights{{"runways",3},{"gates",3},{"apron",3},{"taxi",3},{"tower",35}};
     bool mouseInvertY = false;
     double moveSpeedMetersPerSec = 0.5;
     double movementPrecisionScale = 1.0;

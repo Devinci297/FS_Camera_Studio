@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
 (async()=>{
  const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
  try {
-  const page=await browser.newPage({viewport:{width:1000,height:800}}),errors=[];
+  const page=await browser.newPage({viewport:{width:1450,height:800}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>{
    let api;
@@ -35,9 +35,11 @@ const assert=require('node:assert/strict'),path=require('node:path');
     testHostEvent('OwnershipChanged',s.ownership);
    });
    const prefix=surface==='main'?'mc-editor-mouse-look':'mc-mouse-look';
-   assert.ok(await page.locator('#'+prefix+'-aircraft').isHidden(),'Cockpit aircraft tracking control hidden');
+   assert.ok(await page.locator('#'+prefix+'-aircraft').isVisible(),'Global aircraft tracking control remains available from cockpit');
    await page.locator('#'+prefix+'-aircraft').evaluate(el=>el.click());
-   assert.ok(await page.locator('#mc-dialog-shade').isHidden(),'Hidden cockpit aircraft tracking cannot open');
+   assert.ok(await page.locator('#mc-dialog-shade').isVisible(),'Global tracking options open from cockpit');
+   await page.locator('#mc-dialog-close').click();
+   if(surface==='main')assert.match(await page.locator('#'+prefix+'-effective').innerText(),/Cockpit.*aircraft tracking excluded/);
    assert.ok(await page.locator('#'+prefix+'-head').isVisible(),'Cockpit head tracking remains available');
    if(surface==='mini')await page.locator('#mc-mini-pin').focus();
    const active=async(group,index)=>page.evaluate(({group,index})=>testHostEvent('ActiveCameraChanged',{cameraId:airportGroups[group].cameraIds[index],profileId:FSCApp.state.working.profile.profileId}),{group,index});

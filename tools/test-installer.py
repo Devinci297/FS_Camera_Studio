@@ -16,8 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument('--version', default='0.1.1-test.20261011.2')
-parser.add_argument('--live-receipt', default='build/review/airport-tracking-fix/installed.json')
+parser.add_argument('--version', default='0.3.0')
+parser.add_argument('--live-receipt', default='build/review/hat-release/installed.json')
 parser.add_argument('--test-harness', action='store_true')
 args = parser.parse_args()
 VERSION = args.version

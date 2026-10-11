@@ -1,48 +1,71 @@
-# In-sim qualification (Phase 0 gates)
+# In-simulator qualification — 0.3.0
 
-Design 2.0 §13.1 makes camera correctness and in-sim hosting co-equal release gates. Initial in-sim tests exposed
-startup and hosting failures; the latest corrections still need a live retest. Record each result
-(pass / fail / notes, simulator build, aircraft) in `doc/test-evidence/` as you go.
-
-Baseline to record: simulator build (shown in Settings → Simulator), SDK 1.7.3, package version (`VERSION`),
-aircraft and livery, Steam or Microsoft Store edition.
+Automated native and browser tests do not prove live simulator behavior. Record pass/fail, steps, MSFS build,
+aircraft, controller, scenery, package version and screenshots in `doc/test-evidence/`. The latest T.16000M
+hat-release fix has automated coverage and still needs physical-controller confirmation.
 
 ## Setup
 
-1. `tools\build.ps1` — builds the WASM module and stages the MSFS project.
-2. `tools\package.ps1 -Compile` — compiles the toolbar panels with `fspackagetool` (uses the simulator's build mode).
-3. Close MSFS, then `tools\install.ps1` — links the package into your Community folder.
-4. Start a Free Flight, parked, in a small cockpit aircraft.
+Install the release setup with MSFS closed, start a parked Free Flight, and open both toolbar panels. Confirm
+**0.3.0** in the app bar. Developer reproduction and package receipts are described in the
+[README](../README.md) and [release evidence](test-evidence/2026-10-11-v0.3.0.md).
+Camera directions are configured automatically; there is no user axis-calibration step.
 
-## Hosting gates
+## Hosting and navigation
 
-| Gate | Check | Pass when |
-| --- | --- | --- |
-| H01-a | Toolbar shows **Camera Studio** and **Camera Studio Mini** buttons | Both open their panels |
-| H01-b | Main panel looks like `Docs/MSFS_Camera_UI.html` (editor) | Layout, colours and fonts match; nothing hidden by the sim frame |
-| H01-c | Open Mini from the toolbar; hover anywhere in the invisible bottom strip to reveal the dock; stay in the strip or dock; leave both | No visible handle, text, frame or resize grips while hidden; stays visible inside the area, hides after ~0.18 s outside; Pin keeps it |
-| H01-f | Drag any blank editor background; click buttons, fields and camera rows | Background moves the native window; controls retain their normal actions |
-| H01-d | Click switches/knobs right next to (not under) the mini panel and around the closed editor | Cockpit clicks outside the panels always work |
-| H01-e | Close and reopen each panel from the toolbar; switch aircraft | State comes back (same profile, selection, unsaved edits) |
-| H02 | Bindings: assign Ctrl+Alt+1, a joystick button and a hat direction; test each with the editor **closed**; unplug/replug the controller | Down/up work, peek returns, Release always works, hot-plug recovers |
-| H03 | Save, restart the flight, restart MSFS; export a profile code and import it back | Everything persists; import makes a copy |
-| H04 | Pause, active pause, menus, aircraft change, flight reload | No stale camera movement, no unexpected acquisition |
+| Check | Expected result |
+| --- | --- |
+| Open, close and reopen main and mini panels | Both load; selection and pending edits remain consistent |
+| Expand categories and airport group; search and clear search | Category headers and indented cameras are distinct; labels and counts remain readable |
+| Compact dock on narrow and wide screens | Bottom placement, visible categories, scrollable crowded camera list, accessible global actions |
+| Toggle a camera star; change mini category display | Only starred cameras appear in mini; main always shows icons and names |
+| Open assignment, tracking, walkaround and confirmation dialogs | Content scrolls above visible action buttons; no unwanted full-screen opaque panel |
+| Test opacity, reopen and resize | Main and mini alpha settings are independent; scene is visible without native blur |
+| Click cockpit controls around visible and hidden panels | No invisible hit regions block simulator controls |
 
-If a toolbar panel doesn't appear or shows no content, inspect `ui/msfs-panel.js` and the native template imports.
-The initial `hide` workaround leaves the simulator's `panelInvisible` visibility lifecycle intact.
+## Input and camera behavior
 
-## Camera gates
+| Check | Expected result |
+| --- | --- |
+| Keyboard Primary and controller Secondary for the same camera | Either recalls it; replacing or clearing one preserves the other |
+| Select T.16000M, Listen, press/release a normal button, Assign | Correct selected-device button recorded; no camera action during capture |
+| Listen, move each cardinal hat direction and return to center | One hat direction captured and listening ends; Assign remains visible |
+| Immediately listen for a button after capturing a hat | Button capture still works; no stuck capture or held movement |
+| Cancel listening, change devices, unplug/replug, wait for timeout | Capture stops safely; late events do not fill a later dialog |
+| Bind a hat direction to movement, then center it | Movement stops; no continued drift |
+| W/S, A/D, Q/E and Shift with a pitched view | View-relative forward/side movement; Q up, E down; Shift 4x faster |
+| Hold/release editor adjustment buttons, then lose focus | Repeats while held and stops promptly on release/focus loss |
+| Right-drag, release, change camera and return | Per-camera temporary-look release/recall settings honored |
+| Wheel zoom, pause, active pause, menus and Release camera | No latched translation or zoom; simulator can recover camera control |
+| Capture current view, review, save and recall | Reviewed pose matches the scene and remains after restart |
+| Orbit and animated fly-by while parked; timed walkaround | Correct mode controls, animation, pause/stop and sequence looping |
 
-| Gate | Check | Pass when |
-| --- | --- | --- |
-| G01 | Settings → Simulator → **Run axis check** | Each step moves as described (the check fixes reversed signs and records the result) |
-| G02 | Look around with the native camera, then Capture current view in the editor | Captured values match the view; note if head tracking is included |
-| G03 | Part of the axis check: recall a view after moving | Same view every time |
-| G04 | FOV slider from 30° to 110°, in windowed and ultrawide | Range and look are sensible; note limits |
-| G05 | With a Camera Studio view active, click switches, turn knobs, use screens | Cockpit stays operable |
-| G06 | Release, disable add-on cameras in MSFS settings, let another camera add-on take over | Native camera always recoverable without restarting |
-| G07 | Smooth/Cinematic transitions at 30, 60 and 120 FPS | Smooth, correct duration, no stutter |
-| G08 | Exterior (Preview) views | Visibility and the known cockpit-sound limitation recorded |
+## Airport cameras
 
-Until G01 passes, live control stays off unless **Settings → Simulator → Allow live control before axis
-qualification** is switched on (for testing only).
+Generate and save cameras for two airports. Confirm scenery names and ICAO, tower fallback labeling, separate
+shared storage, nearby-radius loading and explicit airport selection. Switch aircraft: the same nearby airport
+views should remain available. Regenerate with replacement after acknowledging the warning; other airports
+and aircraft profiles must survive.
+
+Test global heading + pitch tracking with head tracking off, then each per-camera override. At airports with
+uneven terrain, compare near/distant targets and higher/lower elevations. Horizon protection should level distant
+lower targets while retaining heading; disabling it restores strict pitch. Check reported world height after
+terrain-floor correction. Terrain/building occlusion cannot be eliminated by tracking.
+
+Test category heights, explicit height overrides, auto-zoom framing/FOV limits/response, manual zoom restoration
+when auto zoom is disabled, and save/reload inheritance. Auto switch should select and highlight the nearest
+eligible airport camera while control is active and retain its global setting across camera changes.
+
+## Profiles, saves and updates
+
+Import JSON through the imports folder and pasted code; export a selected saved profile and the active draft.
+Copy a profile to a different loaded aircraft, including a non-Cessna model; verify distinct IDs/association,
+source preservation and expected need to adjust cockpit positions. Save and restart MSFS to check persistence.
+
+Measure Ctrl+S responsiveness on a large library, verify one completion notification, and listen for the native
+confirmation chime (including panels hidden). A successful sound request is not proof of audible output.
+Test update checks and installer upgrades separately; installation must refuse a running simulator and preserve
+profiles, shared airport libraries, settings and bindings.
+
+Exterior views can retain cockpit audio. Starter poses and scenery-generated cameras require adjustment for
+the selected aircraft and scenery. Report unresolved limitations alongside passing checks.

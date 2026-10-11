@@ -10,7 +10,7 @@ TEST_CASE("airports: geometry generates valid deterministic world cameras and ju
  bool junction=false;
  for(auto& cat:p["categories"])if(cat["name"]=="Taxiway intersections")junction=true;
  CHECK(junction);
- for(auto& cam:p["cameras"]){CHECK_EQ(cam["mode"],json("airport"));CHECK_EQ(cam["aircraftTracking"],json("both"));CHECK_EQ(cam["viewId"],json(0));CHECK_EQ(cam["worldOrigin"]["altitude"],json(100));}
+ for(auto& cam:p["cameras"]){CHECK_EQ(cam["favorite"],json(true));CHECK_EQ(cam["mode"],json("airport"));CHECK_EQ(cam["aircraftTracking"],json("both"));CHECK_EQ(cam["viewId"],json(0));CHECK_EQ(cam["worldOrigin"]["altitude"],json(100));}
  auto signs=airportFixture();signs["signs"]={{{"key","A"},{"label","A / B"},{"lat",40},{"lon",-90},{"altitude",100},{"heading",0}}};
  auto s=ap::generate(signs,json::object(),notes);bool actual=false;junction=false;
  for(auto& cat:s["categories"]){actual=actual||cat["name"]=="Taxi signs";junction=junction||cat["name"]=="Taxiway intersections";}
@@ -59,7 +59,7 @@ TEST_CASE("airports: tower preserves scenery position or provides a labeled stab
  const auto expected=ap::local(ap::geo(f),ap::geo(f["tower"]));
  CHECK_NEAR(actual["cameras"][0]["positionMetersFRD"][0].get<double>(),expected.x,1e-6);
  CHECK_NEAR(actual["cameras"][0]["positionMetersFRD"][1].get<double>(),expected.y,1e-6);
- CHECK_NEAR(actual["cameras"][0]["positionMetersFRD"][2].get<double>(),expected.z-3,1e-6);
+ CHECK_NEAR(actual["cameras"][0]["positionMetersFRD"][2].get<double>(),-35,1e-6);
  CHECK(notes.empty());
  const auto id=actual["cameras"][0]["id"];
  for(const auto& tower:std::vector<json>{nullptr,{{"lat",0},{"lon",0},{"altitude",0}},{{"lat",95},{"lon",-90},{"altitude",100}},{{"lat",41},{"lon",-90},{"altitude",100}}}){
@@ -110,4 +110,26 @@ TEST_CASE("airports: explicit replacement removes old generated views but preser
  bool kept=false,bound=false;for(const auto& cam:replacement["cameras"]){kept=kept||(cam["id"]==manual["id"]&&cam["viewId"]==99);bound=bound||(fscs::js::str(cam,"generatedKey")=="tower"&&cam["viewId"]==88);}
  CHECK(kept);CHECK(bound);
  replacement["aircraftMatch"]={{"strategy","aircraftPath"},{"modelKey","old-aircraft"}};CHECK(validateProfile(replacement).ok());CHECK_EQ(replacement["aircraftMatch"]["strategy"],json("none"));CHECK(replacement["aircraftMatch"]["modelKey"].is_null());
+}
+
+TEST_CASE("airports: category heights preserve scenery references and explicit generation refinements") {
+ auto facility=airportFixture();facility["runways"][0]["altitude"]=110;
+ facility["parking"].push_back({{"name","Parking 1"},{"key","1"},{"gate",false},{"north",200},{"east",100},{"heading",0}});
+ std::vector<std::string> notes;
+ const json heights={{"runways",8},{"gates",12},{"apron",6},{"taxi",9},{"tower",50}};
+ auto generated=ap::generate(facility,{{"categoryHeights",heights}},notes);
+ CHECK(validateProfile(generated).ok());
+ for(const auto& cam:generated["cameras"]) {
+  const auto meta=cam["airportHeight"];const auto category=meta["category"].get<std::string>();
+  CHECK(!cam.contains("airportOverrides")||!cam["airportOverrides"].contains("heightMeters"));
+  const double baseline=category=="runways"?110:100;
+  CHECK_NEAR(meta["baseAltitudeMeters"].get<double>(),baseline,1e-6);
+  const double expected=std::max(heights[category].get<double>(),meta["minimumMeters"].get<double>());
+  CHECK_NEAR(cam["positionMetersFRD"][2].get<double>(),100-baseline-expected,1e-6);
+ }
+ auto explicitHeight=ap::generate(facility,{{"height",70},{"categoryHeights",heights}},notes);
+ for(const auto& cam:explicitHeight["cameras"])CHECK_NEAR(cam["airportOverrides"]["heightMeters"].get<double>(),70,1e-6);
+ auto inherited=ap::generate(facility,{{"height",70},{"useGlobalHeights",true},{"categoryHeights",heights}},notes);
+ CHECK_EQ(inherited["cameras"][0]["positionMetersFRD"],generated["cameras"][0]["positionMetersFRD"]);
+ CHECK(!inherited["cameras"][0].contains("airportOverrides")||!inherited["cameras"][0]["airportOverrides"].contains("heightMeters"));
 }

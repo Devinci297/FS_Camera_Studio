@@ -848,6 +848,24 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim .mc-external-motion label{display:flex;align-items:center;justify-content:space-between;margin:8px 0;gap:12px}
 #mc-sim .mc-external-motion input{max-width:110px}
 
+/* Global airport tracking is configured directly in Settings. */
+#mc-sim .mc-airport-tracking-settings{padding:16px 0;border-bottom:1px solid var(--mc-line)}
+#mc-sim .mc-airport-tracking-settings h4{margin:0 0 8px;font-size:13px}
+#mc-sim .mc-tracking-settings-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0}
+#mc-sim .mc-tracking-settings-choices .mc-tracking-choice{margin:0;min-width:0;white-space:normal;align-self:stretch}
+#mc-sim .mc-autozoom-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:14px 0}
+#mc-sim .mc-autozoom-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+#mc-sim .mc-autozoom-input{display:flex;align-items:center;gap:8px}
+#mc-sim .mc-autozoom-input input{width:100%;min-width:0}
+#mc-sim .mc-autozoom-input>span{min-width:24px}
+#mc-sim .mc-autozoom-field small{margin:0;line-height:1.5}
+#mc-sim .mc-camera-override-field{padding:10px 0;border-top:1px solid var(--mc-line)}
+#mc-sim .mc-camera-override-field>label:first-child{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px}
+#mc-sim .mc-camera-override-field .mc-autozoom-input{font-size:12px}
+#mc-sim .mc-camera-override-field .mc-autozoom-input>span:first-child{flex:1;min-width:0}
+#mc-sim .mc-camera-override-field input[type=number]{width:80px;flex:0 0 80px}
+@media(max-width:620px){#mc-sim .mc-autozoom-fields{grid-template-columns:1fr}}
+@media(max-width:620px){#mc-sim .mc-tracking-settings-choices{grid-template-columns:1fr}}
 /* Independent panel background controls remain adjacent without fading labels or inputs. */
 #mc-sim .mc-opacity-settings{display:flex;gap:18px}
 #mc-sim .mc-opacity-settings>.mc-inline-field{display:flex;flex:1;min-width:0;flex-direction:column;align-items:stretch;gap:8px}
@@ -874,3 +892,264 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim .mc-confirm-shade .mc-dialog{width:340px}
 #mc-sim .mc-confirm-shade .mc-dialog-body{padding:10px 14px}
 #mc-sim:not([data-surface="mini"]) .mc-context-shade.mc-confirm-shade{pointer-events:auto!important}
+
+/* UI review: pose controls and saving hierarchy. */
+#mc-sim .mc-movement-hints{display:flex;flex-wrap:wrap;align-items:center;margin:0 0 8px;color:var(--mc-muted);font-size:12px}
+#mc-sim .mc-movement-hints>span{display:inline-flex;align-items:center;margin:3px 14px 3px 0}
+#mc-sim .mc-movement-hints kbd{font:600 11px 'Segoe UI',sans-serif;border:1px solid var(--mc-line);border-radius:4px;padding:2px 5px;margin-right:5px;color:var(--mc-text);background:var(--mc-input)}
+#mc-sim .mc-movement-hints .mc-hold-hint{margin-left:auto;font-size:11px}
+#mc-sim .mc-axis-grid>.mc-axis{padding:10px}
+#mc-sim .mc-direction-control{height:112px;display:flex;flex-wrap:wrap;align-content:flex-start;justify-content:space-between;padding:0}
+#mc-sim .mc-direction-control>.mc-axis-illustration,#mc-sim [data-axis] .mc-direction-control>.mc-axis-illustration{position:static;width:100%;height:72px;flex:0 0 100%;margin:0;max-height:72px}
+#mc-sim .mc-direction-control button.mc-direction-minus,#mc-sim .mc-direction-control button.mc-direction-plus{position:static;transform:none;min-height:36px;font-size:12px;min-width:0;padding:6px 8px;flex:0 1 48%;margin:0;justify-content:center}
+#mc-sim .mc-direction-control button svg{width:14px;height:14px;flex-shrink:0;margin-right:3px}
+#mc-sim .mc-axis .mc-stepper{height:38px;margin-top:7px}
+#mc-sim .mc-axis-reset{width:30px!important;min-width:30px!important;height:30px;min-height:30px!important}
+#mc-sim .mc-pose-toolbar button{font-size:12px;min-height:34px;padding:6px 10px;margin:0 4px 4px 0}
+#mc-sim .mc-save-shortcut{font-size:11px;opacity:.85;margin-left:8px;border-left:1px solid currentColor;padding-left:8px}
+@media(max-width:850px) and (min-width:621px){#mc-sim .mc-direction-control button.mc-direction-minus,#mc-sim .mc-direction-control button.mc-direction-plus{font-size:11px;padding:4px 2px}#mc-sim .mc-direction-control button svg{width:11px;margin-right:1px}}
+@media(max-width:620px){#mc-sim .mc-movement-hints .mc-hold-hint{margin-left:0;width:100%}#mc-sim .mc-save-shortcut{display:none}}
+/* UI review mini-controls: readable targets and explicit global versus view scope. */
+#mc-sim .mc-tool-group{display:flex;align-items:center;flex-wrap:wrap;gap:5px;min-width:0}
+#mc-sim .mc-tool-group-label{color:var(--mc-muted);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;flex:none;margin-right:3px}
+#mc-sim .mc-panel>.mc-global-controls{padding:8px 18px;border-bottom:1px solid var(--mc-line);gap:7px}
+#mc-sim .mc-panel>.mc-global-controls button{min-height:32px;font-size:12px;padding:6px 10px}
+#mc-sim .mc-effective-tracking{display:block;font-size:11px;line-height:16px;color:var(--mc-muted)}
+#mc-sim .mc-effective-tracking[hidden]{display:none}
+#mc-sim .mc-camera-binding>.mc-effective-tracking{flex-basis:100%;text-align:right}
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock{display:grid;grid-template-rows:auto minmax(0,1fr);align-items:stretch;gap:8px;padding:7px 8px;box-sizing:border-box}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-tools{grid-column:1/-1;grid-row:1;display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;overflow:visible;max-width:none;width:100%;height:auto;min-height:34px;gap:8px;margin:0;border-bottom:1px solid var(--mc-line);padding-bottom:6px}
+#mc-sim[data-surface="mini"] .mc-dock-tools .mc-tool-group{gap:4px;flex:none}
+#mc-sim[data-surface="mini"] .mc-dock-tools .mc-view-controls{margin-left:auto;padding-left:8px;border-left:1px solid var(--mc-line)}
+#mc-sim[data-surface="mini"] .mc-dock-tools .mc-panel-controls{padding-left:8px;border-left:1px solid var(--mc-line)}
+#mc-sim[data-surface="mini"] .mc-dock-tools button{min-height:32px;height:32px;padding:5px 7px;font-size:11px;white-space:nowrap}
+#mc-sim[data-surface="mini"] .mc-dock-tools button svg{width:16px;height:16px;flex:none}
+#mc-sim[data-surface="mini"] .mc-dock-current{gap:2px}
+#mc-sim[data-surface="mini"] .mc-dock-current>button{width:28px;min-height:32px;height:32px;padding:4px}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-categories{grid-column:1;grid-row:2;max-height:none;overflow:visible;box-sizing:border-box}
+#mc-sim[data-surface="mini"] .mc-dock-body{grid-column:2;grid-row:2;display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:5px;height:100%;min-height:0;overflow:hidden}
+#mc-sim[data-surface="mini"] .mc-dock-body>.mc-effective-tracking{flex:none}
+#mc-sim[data-surface="mini"] .mc-dock-favorites{flex:1 1 auto;width:100%;height:100%;max-height:none;min-height:0;align-content:flex-start;align-items:flex-start;gap:5px;overflow:auto;padding:1px 12px 2px 1px;margin:0;border:0}
+#mc-sim[data-surface="mini"][data-name-display] .mc-dock-favorites button{min-width:106px;min-height:34px;height:34px;padding:5px 8px;font-size:12px;line-height:18px;gap:6px;flex:none;max-width:100%}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-entity-name>svg{width:18px;height:18px;flex:none}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-entity-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-key{height:18px;font-size:11px}
+#mc-sim[data-surface="mini"] .mc-category-group-label{font-size:9px;line-height:16px}
+#mc-sim[data-surface="mini"] .mc-category-grid button{font-size:11px;line-height:14px;padding:3px 5px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-label{line-height:14px;max-height:28px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name>svg{width:24px;height:24px;flex:none}
+#mc-sim[data-surface="mini"] .mc-dock.mc-dock-stacked{grid-template-rows:auto auto minmax(108px,1fr)}
+#mc-sim[data-surface="mini"] .mc-dock.mc-dock-stacked>.mc-dock-categories{grid-row:2;border-right:0}
+#mc-sim[data-surface="mini"] .mc-dock.mc-dock-stacked>.mc-dock-body{grid-column:1;grid-row:3;border-top:1px solid var(--mc-line);padding-top:5px}
+#mc-sim[data-surface="mini"] .mc-dock.mc-dock-stacked .mc-view-controls{margin-left:0;border-left:0;padding-left:0}
+@media(max-width:620px){#mc-sim[data-surface="mini"] .mc-dock-tools button span{display:inline}#mc-sim .mc-panel>.mc-global-controls{padding:8px 12px}#mc-sim .mc-camera-binding>.mc-effective-tracking{text-align:left}}
+
+
+/* UI review: profiles and context menus */
+#mc-sim .mc-context-appearance { margin:5px 0; border-top:1px solid var(--mc-line); }
+#mc-sim .mc-context-appearance summary { display:flex; align-items:center; gap:8px; padding:9px 7px; cursor:pointer; font-size:12px; }
+#mc-sim .mc-context-appearance summary:after { content:'+'; margin-left:auto; }
+#mc-sim .mc-context-appearance[open] summary:after { content:'−'; }
+#mc-sim .mc-context-appearance summary svg { width:15px; height:15px; }
+#mc-sim .mc-context-appearance summary:focus-visible { outline:2px solid var(--mc-accent); outline-offset:-2px; border-radius:4px; }
+#mc-sim .mc-context-appearance-body { padding:0 3px 5px; }
+#mc-sim .mc-context-appearance-body .mc-color-palette { margin:5px 0 0; border:0; }
+#mc-sim .mc-action-list .mc-context-delete { border-top:1px solid var(--mc-line); margin-top:5px; padding-top:10px; color:var(--mc-danger,#ffaaa5); }
+#mc-sim .mc-profile-section-title { font-size:15px; margin:25px 0 12px; }
+#mc-sim #mc-profiles-list .mc-profile-entry { gap:12px; padding:14px; }
+#mc-sim #mc-profiles-list .mc-profile-text { flex:1; min-width:180px; }
+#mc-sim #mc-profiles-list .mc-profile-text strong { display:flex; flex-wrap:wrap; align-items:center; gap:7px; }
+#mc-sim #mc-profiles-list .mc-profile-text small { line-height:1.6; margin-top:5px; }
+#mc-sim #mc-profiles-list .mc-row-actions { flex-shrink:0; max-width:42%; }
+#mc-sim #mc-airports-summary { margin-top:24px; padding:18px; border:1px solid var(--mc-line); border-radius:9px; background:var(--mc-raised); }
+#mc-sim .mc-library-heading { display:flex; align-items:center; flex-wrap:wrap; gap:9px; }
+#mc-sim .mc-library-heading svg { width:21px; height:21px; color:var(--mc-accent); }
+#mc-sim .mc-library-heading h4 { margin:0; font-size:16px; }
+#mc-sim .mc-library-status { font-size:13px; }
+#mc-sim #mc-airports-summary>small { display:block; margin-top:10px; }
+@media(max-width:750px){#mc-sim #mc-profiles-list .mc-profile-entry{flex-wrap:wrap}#mc-sim #mc-profiles-list .mc-row-actions{max-width:none;flex-basis:100%;justify-content:flex-start;padding-left:45px}}
+/* UI review: navigable settings and compact camera inheritance controls. */
+#mc-sim .mc-settings-layout{display:flex;align-items:flex-start;gap:24px;width:100%;max-width:1120px}
+#mc-sim .mc-settings-navigation{display:flex;flex-direction:column;flex:0 0 156px;gap:6px;position:sticky;top:0;padding:2px 0}
+#mc-sim .mc-settings-navigation button{min-height:38px;text-align:left;justify-content:flex-start;padding:9px 12px;white-space:normal}
+#mc-sim .mc-settings-navigation button[aria-current="page"]{border-color:var(--mc-accent);color:var(--mc-accent);background:rgba(99,219,195,.15)}
+#mc-sim .mc-settings-content{flex:1;min-width:0}
+#mc-sim .mc-settings-pane{min-width:0}
+#mc-sim .mc-settings-heading{font-size:17px;margin:2px 0 6px}
+#mc-sim .mc-settings-pane>.mc-note{margin:0 0 16px}
+#mc-sim .mc-settings-pane .mc-inline-field,#mc-sim .mc-settings-pane .mc-switch-row{gap:20px;min-height:58px;padding:12px 0}
+#mc-sim .mc-settings-pane .mc-switch-copy,#mc-sim .mc-settings-pane .mc-inline-field>span:first-child{flex:1;min-width:0}
+#mc-sim .mc-settings-pane .mc-unit{flex-shrink:0}
+#mc-sim .mc-settings-keyboard{padding:12px;border:1px solid var(--mc-line);border-radius:8px;line-height:1.7;margin-top:14px!important}
+#mc-sim .mc-settings-pane .mc-update-settings{border-top:0;margin-top:0;padding-top:0}
+#mc-sim .mc-settings-pane .mc-autozoom-fields{gap:14px 22px}
+#mc-sim .mc-settings-pane .mc-autozoom-field{padding:12px;border:1px solid var(--mc-line);border-radius:8px}
+#mc-sim .mc-settings-pane .mc-airport-tracking-settings{border-bottom:0}
+#mc-sim .mc-airport-override-shade .mc-dialog{width:480px;max-width:calc(100vw - 24px)}
+#mc-sim .mc-airport-override-shade .mc-dialog-body{padding:12px 16px}
+#mc-sim .mc-airport-override-shade .mc-tracking-camera{margin:0 0 6px}
+#mc-sim .mc-override-section{padding:10px 0;border-top:1px solid var(--mc-line)}
+#mc-sim .mc-override-section h4{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mc-muted);margin:0 0 8px}
+#mc-sim .mc-override-select{display:flex;align-items:center;gap:12px;font-size:12px}
+#mc-sim .mc-override-select>span{flex:1;min-width:0}
+#mc-sim .mc-override-select select{max-width:245px;min-width:0;flex:1.4;padding:7px;min-height:34px}
+#mc-sim .mc-override-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px;margin-top:12px}
+#mc-sim .mc-override-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+#mc-sim .mc-override-label{font-size:11px}
+#mc-sim .mc-override-value{display:flex;align-items:center;gap:6px;min-width:0}
+#mc-sim .mc-override-value input[type=number]{width:62px;min-width:0;min-height:32px;padding:5px;flex:1}
+#mc-sim .mc-override-value input:disabled{opacity:1;color:var(--mc-muted)}
+#mc-sim .mc-override-value>.mc-note{margin:0;min-width:17px;font-size:11px}
+#mc-sim .mc-override-inherit{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--mc-muted);cursor:pointer;white-space:nowrap}
+#mc-sim .mc-override-inherit input{width:15px;height:15px;flex:none;accent-color:var(--mc-accent);margin:0}
+#mc-sim .mc-override-reset{font-size:11px;margin-top:6px}
+@media(max-width:900px){#mc-sim .mc-settings-layout{flex-direction:column;gap:18px}#mc-sim .mc-settings-navigation{position:static;flex:none;flex-direction:row;flex-wrap:wrap;width:100%;gap:5px}#mc-sim .mc-settings-navigation button{flex:1 0 auto;min-height:34px;padding:7px 10px}#mc-sim .mc-settings-content{width:100%}}
+@media(max-width:560px){#mc-sim .mc-settings-pane .mc-inline-field{flex-wrap:wrap;gap:8px}#mc-sim .mc-settings-pane .mc-inline-field>span:first-child{flex-basis:100%}#mc-sim .mc-settings-pane .mc-tracking-settings-choices{grid-template-columns:1fr}#mc-sim .mc-settings-pane .mc-autozoom-fields{grid-template-columns:1fr}}
+@media(max-width:400px){#mc-sim .mc-override-grid{grid-template-columns:1fr}#mc-sim .mc-override-select{align-items:flex-start;flex-direction:column}#mc-sim .mc-override-select select{width:100%;max-width:none}}
+
+/* Keep camera actions together; effective tracking is secondary inline status. */
+#mc-sim .mc-camera-binding{justify-content:flex-start;align-items:center;gap:6px}
+#mc-sim .mc-camera-binding button{margin:0;min-height:30px;font-size:11px;padding:5px 8px}
+#mc-sim .mc-camera-binding>.mc-effective-tracking{order:2;flex-basis:auto;margin-left:auto;text-align:right}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-tools{flex-shrink:0;align-content:flex-start}
+@media(max-width:620px){#mc-sim .mc-camera-binding>.mc-effective-tracking{margin-left:0;text-align:left}}
+
+
+#mc-sim .mc-settings-pane .mc-opacity-settings>.mc-inline-field{flex-wrap:nowrap;flex-direction:column;gap:8px}
+#mc-sim .mc-settings-pane .mc-opacity-settings>.mc-inline-field>span:first-child{flex:none}
+/* Keep diagrams secondary to the larger controls on roomy editors. */
+@media(min-width:1000px){
+#mc-sim .mc-direction-control{height:82px;flex-wrap:nowrap;align-items:center;align-content:normal}
+#mc-sim [data-axis] .mc-direction-control>.mc-axis-illustration{order:2;width:34%;flex:0 0 34%;height:80px;max-height:80px}
+#mc-sim .mc-direction-control button.mc-direction-minus{order:1;flex:0 1 31%}
+#mc-sim .mc-direction-control button.mc-direction-plus{order:3;flex:0 1 31%}
+}
+
+/* Shallow mini dock: one toolbar, categories and cameras always side by side. */
+#mc-sim[data-surface="mini"] .mc-mini-region{position:fixed;left:0;right:0;bottom:0}
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock{left:0;right:0;bottom:0;width:100%;max-width:none;padding:4px 6px;gap:4px 8px;grid-template-rows:28px minmax(0,1fr);border-radius:5px 5px 0 0}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-tools{flex-wrap:nowrap;height:28px;min-height:28px;max-height:28px;padding:0;border-bottom:0;gap:5px;overflow:visible}
+#mc-sim[data-surface="mini"] .mc-dock-tools .mc-tool-group{flex-wrap:nowrap;gap:3px}
+#mc-sim[data-surface="mini"] .mc-dock-tools .mc-view-controls{padding-left:6px;margin-left:auto}
+#mc-sim[data-surface="mini"] .mc-dock-tools .mc-panel-controls{padding-left:6px}
+#mc-sim[data-surface="mini"] .mc-dock-tools button{min-height:28px;height:28px;padding:4px 6px;font-size:11px}
+#mc-sim[data-surface="mini"] .mc-dock-tools button svg{width:15px;height:15px}
+#mc-sim[data-surface="mini"] .mc-dock-current>button{width:25px;min-height:28px;height:28px;padding:3px}
+#mc-sim[data-surface="mini"] .mc-tool-group-label{font-size:9px;letter-spacing:.04em;margin-right:1px}
+#mc-sim[data-surface="mini"] #mc-mouse-look-more{display:none;flex:none}
+#mc-sim[data-surface="mini"] .mc-mini-condensed .mc-mini-secondary,
+#mc-sim[data-surface="mini"] .mc-mini-condensed .mc-panel-controls{display:none!important}
+#mc-sim[data-surface="mini"] .mc-mini-condensed #mc-mouse-look-more{display:flex}
+#mc-sim[data-surface="mini"] .mc-mini-condensed .mc-view-controls{border-left:1px solid var(--mc-line);margin-left:auto}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-categories{position:relative;display:block!important;grid-column:1;grid-row:2;gap:2px;grid-auto-rows:28px;align-content:start;border-right:1px solid var(--mc-line);padding-right:4px;box-sizing:border-box;overflow:visible}
+#mc-sim[data-surface="mini"] .mc-dock-categories .mc-category-flat{display:grid!important;grid-auto-rows:28px;grid-template-rows:none;gap:2px;margin:0;padding:0;width:100%;align-content:start}
+#mc-sim[data-surface="mini"] .mc-dock-categories .mc-category-grid[hidden]{display:none!important}
+#mc-sim[data-surface="mini"] .mc-category-group-label{display:none}
+#mc-sim[data-surface="mini"] .mc-dock-category-legend{position:absolute;left:4px;top:0;color:var(--mc-muted);font-size:9px;line-height:12px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+#mc-sim[data-surface="mini"] .mc-dock-category-legend[hidden]{display:none}
+#mc-sim[data-surface="mini"] .mc-category-grid button{height:28px;min-height:28px;padding:2px 3px;font-size:10px;line-height:11px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name{gap:4px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name>svg{width:20px;height:20px;flex:none}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-label{line-height:11px;max-height:22px;overflow-wrap:anywhere}
+#mc-sim[data-surface="mini"] .mc-dock-body{grid-column:2;grid-row:2;gap:2px}
+#mc-sim[data-surface="mini"] .mc-dock-body>.mc-effective-tracking{font-size:10px;line-height:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#mc-sim[data-surface="mini"] .mc-dock-favorites{gap:3px;padding:0 10px 1px 0}
+#mc-sim[data-surface="mini"][data-name-display] .mc-dock-favorites button{min-width:90px;min-height:28px;height:28px;padding:3px 6px;font-size:12px;line-height:18px;gap:4px}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-entity-name>svg{width:16px;height:16px}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-key{height:16px;font-size:10px}
+@media(max-width:480px){#mc-sim[data-surface="mini"] .mc-tool-group-label{display:none}#mc-sim[data-surface="mini"] .mc-mini-condensed .mc-dock-current{display:none}}
+
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-label{overflow-wrap:normal;word-break:normal;text-overflow:ellipsis}
+
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name>svg.mc-icon{width:20px!important;height:20px!important;flex:0 0 20px}
+
+/* Binding actions remain visible when controller discovery or conflicts grow the dialog. */
+#mc-sim .mc-binding-shade{padding:0;background:transparent;pointer-events:none!important}
+#mc-sim .mc-binding-shade .mc-dialog{position:fixed;box-sizing:border-box;width:440px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);padding:0;margin:0;display:flex;flex-direction:column;pointer-events:auto}
+#mc-sim .mc-binding-shade .mc-dialog-head{padding:12px 16px;margin:0;flex:none}
+#mc-sim .mc-binding-shade .mc-dialog-body{box-sizing:border-box;padding:0 16px;min-height:0;flex:0 1 auto;overflow-y:auto}
+#mc-sim .mc-binding-shade .mc-dialog-error{box-sizing:border-box;margin:0;padding:8px 16px;max-height:90px;overflow-y:auto;flex:none;line-height:1.4}
+#mc-sim .mc-binding-shade .mc-dialog-error:empty{display:none}
+#mc-sim .mc-binding-shade .mc-dialog-actions{box-sizing:border-box;flex:none;margin:0;padding:10px 16px;border-top:1px solid var(--mc-line);background:var(--mc-panel);justify-content:flex-end}
+#mc-sim .mc-binding-shade .mc-dialog-actions button{min-height:36px;margin:2px;white-space:normal}
+#mc-sim .mc-binding-shade .mc-binding-input{width:100%;box-sizing:border-box}
+
+#mc-sim .mc-binding-shade .mc-dialog{position:fixed!important}
+#mc-sim .mc-key{white-space:nowrap}
+
+/* Independent keyboard/controller slots; compact fields stay inside the scrolling body. */
+#mc-sim .mc-binding-section .mc-binding-dual{display:flex;flex-wrap:wrap;align-items:flex-start;padding:12px 0;gap:10px}
+#mc-sim .mc-binding-dual>.mc-binding-name{flex:1 0 100%;min-width:0}
+#mc-sim .mc-binding-slot{flex:1 1 180px;min-width:0;padding:9px;border:1px solid var(--mc-line);border-radius:7px}
+#mc-sim .mc-binding-slot>small{display:block;color:var(--mc-muted);margin-bottom:6px}
+#mc-sim .mc-binding-slot>.mc-binding-input{width:100%;min-width:0;justify-content:flex-start;text-align:left;white-space:normal;overflow-wrap:anywhere}
+#mc-sim .mc-binding-slot .mc-binding-actions{display:flex;justify-content:flex-end;gap:4px;margin-top:5px}
+#mc-sim .mc-assign-slots{display:flex;gap:8px;margin:8px 0 12px}
+#mc-sim .mc-assign-slots>button{flex:1;min-width:0;display:block;text-align:left;white-space:normal;padding:9px}
+#mc-sim .mc-assign-slots small{display:block;font-size:11px;color:var(--mc-muted);margin-top:5px;overflow-wrap:anywhere}
+#mc-sim .mc-assign-slots>button[aria-pressed="true"]{border-color:var(--mc-accent);background:var(--mc-accent-soft)}
+#mc-sim #mc-assign-controller>.mc-field{display:block;margin:8px 0}
+#mc-sim #mc-assign-controller>.mc-field select{display:block;width:100%;margin-top:5px}
+#mc-sim #mc-assign-listen{width:100%;margin:5px 0}
+#mc-sim .mc-controller-manual{border-top:1px solid var(--mc-line);margin:10px 0;padding-top:8px}
+#mc-sim .mc-controller-manual summary{cursor:pointer;color:var(--mc-muted);font-size:12px}
+#mc-sim .mc-binding-shade .mc-dialog-body>.mc-section-label{margin:12px 0 4px}
+#mc-sim .mc-binding-shade .mc-dialog-body>p{font-size:12px;margin:9px 0}
+
+/* Controller choices stay inside the simulator panel; no native select popup. */
+#mc-sim #mc-assign-device{display:flex;width:100%;margin-top:5px;justify-content:space-between;text-align:left;white-space:normal;overflow-wrap:anywhere;padding:10px 12px}
+#mc-sim #mc-assign-device::after{content:'+';flex:none;margin-left:10px}
+#mc-sim #mc-assign-device[aria-expanded="true"]::after{content:'-'}
+#mc-sim .mc-controller-choices{max-height:170px;overflow-y:auto;border:1px solid var(--mc-line);border-radius:6px;margin-top:5px;padding:4px;background:var(--mc-bg)}
+#mc-sim .mc-controller-choices>button{display:block;width:100%;text-align:left;white-space:normal;overflow-wrap:anywhere;margin:2px 0;padding:9px 10px}
+#mc-sim .mc-controller-choices>button[aria-pressed="true"]{border-color:var(--mc-accent);background:var(--mc-accent-soft)}
+
+/* Main camera library: one compact row per item. Fixed edge reservations avoid
+   nested shrinking flex behavior in the simulator's Coherent renderer. */
+#mc-sim .mc-browser { padding:12px 8px 10px; }
+#mc-sim .mc-browser-title { padding:0 3px 8px; }
+#mc-sim .mc-category-toggle { padding:5px 4px; margin:4px 0; min-height:28px; text-align:right; }
+#mc-sim .mc-browser>.mc-tree { display:block; padding-right:5px; }
+#mc-sim .mc-tree-scope { padding:7px 4px 5px; font-size:10px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--mc-faint); }
+#mc-sim .mc-airport-tree { margin-top:7px; padding-top:5px; border-top:1px solid var(--mc-line); }
+#mc-sim .mc-airport-tree>.mc-tree-scope-toggle { height:28px; min-height:28px; padding:4px 4px 4px 17px; font-size:11px; color:var(--mc-muted); }
+#mc-sim .mc-airport-tree>.mc-tree-scope-toggle>svg { top:7px; left:2px; }
+#mc-sim .mc-category { margin:0 0 3px; }
+#mc-sim .mc-category-line { display:block; height:32px; padding:0 22px 0 13px; }
+#mc-sim .mc-category-line>.mc-reorder-grip { top:0; left:0; width:13px; min-width:13px; height:32px; min-height:32px; padding:0; opacity:.55; }
+#mc-sim .mc-category-line>.mc-category-menu { top:0; right:0; width:22px; height:32px; min-height:32px; padding:4px; }
+#mc-sim .mc-category-line>.mc-category-head { display:block; width:100%; height:32px; min-height:32px; padding:0 23px 0 15px; line-height:32px; }
+#mc-sim .mc-category-head>svg { left:0; top:10px; width:12px; height:12px; }
+#mc-sim .mc-category-line .mc-category-head>.mc-count { top:0; right:0; height:32px; line-height:32px; width:22px; text-align:right; margin:0; font-size:10px; }
+#mc-sim[data-name-display] .mc-category-head>.mc-entity-name { display:block; position:relative; padding-left:21px; height:32px; line-height:32px; width:100%; }
+#mc-sim .mc-category-head .mc-entity-name>svg { top:8px; left:0; width:16px; height:16px; }
+#mc-sim[data-name-display] #mc-camera-tree .mc-category-head .mc-entity-label { display:block; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; font-size:11px; }
+#mc-sim .mc-camera-rows { display:block; padding:1px 0 3px 0; }
+#mc-sim .mc-camera-row { display:block; height:32px; min-height:32px; margin:1px 0; padding:0 24px 0 14px; border-radius:5px; }
+#mc-sim .mc-camera-row>.mc-reorder-grip { left:0; top:0; width:14px; min-width:14px; height:32px; min-height:32px; padding:0; opacity:.4; }
+#mc-sim .mc-camera-row>.mc-row-star { top:0; right:0; width:24px; height:32px; min-height:32px; padding:5px; margin:0; }
+#mc-sim .mc-camera-row>.mc-camera-select { display:block; position:relative; width:100%; height:32px; min-height:32px; padding:0 2px; line-height:32px; }
+#mc-sim .mc-camera-row>.mc-camera-select.mc-has-shortcut { padding-right:40px; }
+#mc-sim[data-name-display] .mc-camera-select>.mc-entity-name { display:block; position:relative; height:32px; line-height:32px; padding-left:22px; margin:0; width:100%; }
+#mc-sim .mc-camera-select .mc-entity-name>.mc-icon { top:8px; left:1px; width:16px; height:16px; }
+#mc-sim[data-name-display] #mc-camera-tree .mc-camera-select .mc-entity-label { display:block; width:100%; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; overflow-wrap:normal; }
+#mc-sim .mc-camera-select>.mc-key { display:block; position:absolute; right:1px; top:7px; max-width:38px; min-width:17px; height:18px; line-height:16px; margin:0; padding:0 3px; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; box-sizing:border-box; }
+#mc-sim .mc-camera-select>.mc-live { display:block; position:absolute; left:13px; top:22px; width:5px; height:5px; min-width:0; margin:0; padding:0; border:0; border-radius:50%; background:var(--mc-accent); overflow:hidden; font-size:0; line-height:0; }
+#mc-sim .mc-camera-row[data-current="true"]:before { top:5px; bottom:5px; width:2px; }
+#mc-sim .mc-camera-row:hover>.mc-reorder-grip,#mc-sim .mc-category-line:hover>.mc-reorder-grip { opacity:1; }
+#mc-sim .mc-browser-bottom { margin-top:6px; padding-top:6px; }
+
+#mc-sim .mc-browser-title { position:relative; display:block; height:28px; min-height:28px; padding:0 92px 6px 3px; box-sizing:content-box; }
+#mc-sim .mc-browser-title h3 { font-size:11px; line-height:26px; white-space:nowrap; }
+#mc-sim .mc-browser-title>.mc-category-toggle { position:absolute; top:0; right:27px; width:62px; height:26px; min-height:26px; padding:0 2px; margin:0; font-size:10px; text-align:center; }
+#mc-sim .mc-browser-title>#mc-add { position:absolute; top:0; right:0; }
+
+/* Category bands and an inset child guide make the hierarchy visible at a glance. */
+#mc-sim .mc-category-line { border-radius:4px; background:rgba(139,170,190,.055); }
+#mc-sim .mc-category-line>.mc-category-head { font-weight:600; color:var(--mc-text); }
+#mc-sim .mc-camera-rows { margin:2px 0 5px 9px; padding:0 0 0 3px; border-left:1px solid var(--mc-line); }
+#mc-sim .mc-camera-select .mc-entity-label { font-weight:400; }
+#mc-sim .mc-camera-row[data-current="true"] .mc-entity-label { font-weight:600; }
+
+/* Keep enough room for a labeled camera alongside a full keyboard shortcut. */
+@media (min-width:621px) { #mc-sim .mc-camera-layout>.mc-browser { min-width:220px; } }

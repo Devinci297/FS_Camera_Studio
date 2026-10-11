@@ -76,7 +76,7 @@
               <div class="mc-axis-grid" id="mc-position-fields"></div>
               <div class="mc-section-heading mc-pose-section"><h4>Orientation</h4><span>Rotate your view</span></div>
               <div class="mc-axis-grid" id="mc-angle-fields"></div>
-              <div class="mc-pose-toolbar"><button type="button" class="mc-secondary mc-save-current-view" id="mc-save-current-view"><i data-icon="camera"></i>Save current view to this camera</button><button type="button" id="mc-restore-pose"><i data-icon="rotate-ccw"></i>Restore saved pose</button><button type="button" id="mc-center-look"><i data-icon="crosshair"></i>Reset rotation</button><small>Type a value · Drag a slider to adjust</small></div>
+              <div class="mc-pose-toolbar"><button type="button" class="mc-secondary mc-save-current-view" id="mc-save-current-view"><i data-icon="camera"></i>Capture current view</button><button type="button" id="mc-restore-pose"><i data-icon="rotate-ccw"></i>Restore saved pose</button><button type="button" id="mc-center-look"><i data-icon="crosshair"></i>Reset rotation</button><small>Type a value · Drag a slider to adjust</small></div>
               <div class="mc-divider"></div>
               <div class="mc-lens-controls"><div class="mc-lens-top"><h4 id="mc-fov-heading">Field of view - sim FOV</h4><label class="mc-value-input"><input type="number" id="mc-fov-number" min="30" max="110" step="1" value="62" aria-label="Field of view in degrees (sim FOV)"><span>deg</span></label></div>
               <input type="range" id="mc-fov-range" min="30" max="110" step="1" value="62" aria-label="Field of view">
@@ -120,10 +120,12 @@
         <button type="button" id="mc-toggle-bindings" class="mc-category-toggle" aria-controls="mc-bindings-list" aria-expanded="false">Expand all</button><div id="mc-binding-count" class="mc-note" role="status"></div><div id="mc-bindings-list"></div><div id="mc-binding-result" class="mc-binding-result" aria-live="polite">Select an assignment, then test it.</div>
       </section>
       <section class="mc-page" id="mc-page-profiles" role="tabpanel" aria-labelledby="mc-nav-profiles" hidden>
-        <div class="mc-page-header"><div><div class="mc-eyebrow">A VIEW SET FOR EVERY FLIGHT</div><h3>Camera profiles</h3><p>Organize camera sets for your aircraft and airports.</p></div><button type="button" id="mc-new-profile" class="mc-primary"><i data-icon="plus"></i>Save as new</button></div>
+        <div class="mc-page-header"><div><div class="mc-eyebrow">A VIEW SET FOR EVERY FLIGHT</div><h3>Camera profiles</h3><p>Aircraft profiles and a shared airport library.</p></div><button type="button" id="mc-new-profile" class="mc-primary"><i data-icon="plus"></i>Save as new</button></div>
         <div id="mc-aircraft-card"></div>
+        <h4 class="mc-profile-section-title">Aircraft profiles</h4>
         <div class="mc-profile-list" id="mc-profiles-list"></div>
         <div class="mc-profile-actions"><button type="button" class="mc-secondary" id="mc-create-profile"><i data-icon="folder-plus"></i>New profile</button><button type="button" class="mc-secondary" id="mc-import-profile"><i data-icon="download"></i>Import profile</button><button type="button" class="mc-secondary" id="mc-export-profile"><i data-icon="upload"></i><span>Export current</span></button><button type="button" class="mc-secondary" id="mc-backups"><i data-icon="history"></i>Backups</button></div>
+        <div id="mc-airports-summary" class="mc-airports-summary"></div>
         <p class="mc-note">Profiles are stored with Camera Studio in the simulator. Import, export and restore use in-panel dialogs.</p>
       </section>
       <section class="mc-page" id="mc-page-settings" role="tabpanel" aria-labelledby="mc-nav-settings" hidden>
@@ -155,7 +157,7 @@
           <div class="mc-profile-actions"><button type="button" class="mc-secondary" id="mc-diagnostics"><i data-icon="info"></i>Diagnostics</button></div>
         </div>
       </section>
-      <footer class="mc-savebar"><div class="mc-save-state" id="mc-save-state" data-dirty="false" aria-live="polite"><i data-icon="check"></i><span id="mc-save-label">All changes saved</span></div><button type="button" class="mc-release" id="mc-release"><i data-icon="circle-stop"></i><span>Release camera</span></button><button type="button" id="mc-revert" class="mc-quiet" disabled>Revert</button><button type="button" id="mc-save" class="mc-primary" disabled><i data-icon="save"></i>Save changes</button></footer>
+      <footer class="mc-savebar"><div class="mc-save-state" id="mc-save-state" data-dirty="false" aria-live="polite"><i data-icon="check"></i><span id="mc-save-label">All changes saved</span></div><button type="button" class="mc-release" id="mc-release"><i data-icon="circle-stop"></i><span>Release camera</span></button><button type="button" id="mc-revert" class="mc-quiet" disabled>Revert</button><button type="button" id="mc-save" class="mc-primary" disabled><i data-icon="save"></i>Save all changes <span class="mc-save-shortcut">Ctrl+S</span></button></footer>
     </section>
     <div class="mc-flight-context"><small>CAMERA STUDIO - QUICK ACCESS</small><strong id="mc-flight-name">-</strong><span><span class="mc-status-dot"></span><span id="mc-flight-state">Starting Camera Studio...</span></span></div>
     <div class="mc-mini-off" id="mc-mini-off" role="note"><span>Mini control panel is turned off in Settings</span></div>

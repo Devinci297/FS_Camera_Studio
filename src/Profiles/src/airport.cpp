@@ -34,12 +34,19 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
  auto doc=makeStarterProfile(code+" airport cameras","",""); auto seed=doc["cameras"][0];
  doc["profileId"]=stableId(code);doc["scope"]="airport";doc["airport"]={{"icao",code},{"name",js::str(f,"name",code)},{"origin",asJson(origin)}};
  doc["requiredSchemaFeatures"]={"airport-world-v1"}; doc["cameras"]=json::array();doc["categories"]=json::array();
- const double height=std::clamp(js::num(o,"height",3),1.0,100.0), offset=std::clamp(js::num(o,"offset",12),3.0,150.0);
+ const double height=std::clamp(js::num(o,"height",3),0.0,1000.0), offset=std::clamp(js::num(o,"offset",12),3.0,150.0);
  bool towerPending=js::boolean(o,"tower",true);
  std::set<std::string> generatedIds;
  auto add=[&](std::string group,std::string key,std::string name,core::Vec3 pos,core::Vec3 target) {
    // Tower is generated last, but must survive large airports reaching the limit.
    if(doc["cameras"].size()>=kMaxCameras-(towerPending?1:0)) return;
+   const std::string heightCategory=group=="Runways"?"runways":group=="Gates"?"gates":group=="Apron"?"apron":group=="Tower"?"tower":"taxi";
+   const double minimum=key.find(":approach")!=std::string::npos?15:key.find(":overview")!=std::string::npos?25:0;
+   const double baseAltitude=group=="Tower"?origin.altitude:origin.altitude-target.z;
+   const bool explicitHeight=js::get(o,"height").is_number()&&!js::boolean(o,"useGlobalHeights",false);
+   const double inherited=std::clamp(js::num(js::object(o,"categoryHeights"),heightCategory.c_str(),heightCategory=="tower"?35:3),0.0,1000.0);
+   const double selectedHeight=std::max(minimum,explicitHeight?height:inherited);
+   pos.z=origin.altitude-baseAltitude-selectedHeight;
    if(std::max({std::abs(pos.x),std::abs(pos.y),std::abs(pos.z)})>core::kMaxPositionMeters) return;
    const auto catId=stableId(code+":"+group), id=stableId(code+":"+key);
    if(!generatedIds.insert(id).second)return;
@@ -47,9 +54,11 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
    json* cat=nullptr;for(auto& c:doc["categories"])if(js::str(c,"id")==catId)cat=&c;
    if(!cat){doc["categories"].push_back({{"id",catId},{"name",group},{"icon",iconName},{"airportIcao",code},{"cameraIds",json::array()}});cat=&doc["categories"].back();}
    auto delta=target-pos;auto q=core::Quat::fromPbh({-std::atan2(delta.z,std::hypot(delta.x,delta.y))/core::kDegToRad,0,std::atan2(delta.y,delta.x)/core::kDegToRad});
-   auto cam=seed;cam.update({{"id",id},{"categoryId",catId},{"name",name.substr(0,60)},{"mode","airport"},{"aircraftTracking","both"},{"viewId",nullptr},{"favorite",false},{"interaction",false},{"requiredCapabilities",json::array()},
+   auto cam=seed;cam.update({{"id",id},{"categoryId",catId},{"name",name.substr(0,60)},{"mode","airport"},{"aircraftTracking","both"},{"viewId",nullptr},{"favorite",true},{"interaction",false},{"requiredCapabilities",json::array()},
       {"airportIcao",code},{"worldOrigin",asJson(origin)},{"generatedKey",key},{"icon",iconName},{"positionMetersFRD",{pos.x,pos.y,pos.z}},{"orientationCameraToAnchorXYZW",{q.x,q.y,q.z,q.w}},
       {"transition",{{"kind","cut"},{"durationSeconds",0.6},{"delaySeconds",0}}}});
+   cam["airportHeight"]={{"category",heightCategory},{"baseAltitudeMeters",baseAltitude},{"minimumMeters",minimum}};
+   if(explicitHeight)cam["airportOverrides"]["heightMeters"]=selectedHeight;
    doc["cameras"].push_back(cam);(*cat)["cameraIds"].push_back(id);if(!cat->contains("defaultCameraId"))(*cat)["defaultCameraId"]=id;
  };
  if(js::boolean(o,"runways",true))for(const auto& r:js::array(f,"runways")) {

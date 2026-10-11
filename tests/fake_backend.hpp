@@ -23,6 +23,8 @@ public:
     bool setHeadTracking(bool enabled) override { calls.push_back(enabled?"tracking:on":"tracking:off");if(trackingWriteOk)tracking=enabled;return trackingWriteOk; }
     std::vector<std::string> calls;  // "acquire", "release", "submit", "flag:interaction:on", "get", ...
     std::vector<SdkPose> submitted;
+    std::optional<core::Vec3> actualWorldPosition;
+    std::optional<core::Vec3> worldCameraPosition() override { return actualWorldPosition; }
     std::vector<Referential> readFrames;
     std::deque<BackendEvent> inbox;
 
@@ -72,6 +74,9 @@ public:
     std::vector<std::string> mapped;            // latest mapped definitions
     std::string testInput;
     int controllerRequests = 0;
+    int captureDevice = -1;
+    std::uint64_t captureGeneration = 0;
+    bool captureControllerInputs(int deviceId, std::uint64_t generation = 0) override { captureDevice = deviceId; captureGeneration = generation; return true; }
     int nearbyRequests = 0;
     std::vector<std::pair<std::string,std::uint32_t>> airportRequests;
     bool requestNearbyAirports() override { ++nearbyRequests; return true; }

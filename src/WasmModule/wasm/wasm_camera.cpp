@@ -138,6 +138,14 @@ bool WasmCamera::setFlag(CameraFlag flag, bool enabled) {
     return enabled ? fsCameraEnableFlag(f) : fsCameraDisableFlag(f);
 }
 
+std::optional<core::Vec3> WasmCamera::worldCameraPosition() {
+    FsCameraData out{};
+    if (!subscribed_ || !fsCameraGet(FS_POSITION_REFERENTIAL_WORLD, &out) ||
+        out.positionReferential != FS_POSITION_REFERENTIAL_WORLD) return std::nullopt;
+    const core::Vec3 position{out.position.x,out.position.y,out.position.z};
+    return position.finite() ? std::optional<core::Vec3>(position) : std::nullopt;
+}
+
 bool WasmCamera::requestCameraData(Referential ref) {
     FsCameraData out{};
     if (!fsCameraGet(toFs(ref), &out)) return false;
