@@ -1,5 +1,5 @@
 /*
- * FS Camera Studio - inline SVG icon set.
+ * FS Camera Studio - simple aviation SVG icons, optimized for compact controls.
  * 24x24 viewBox, stroke = currentColor, stroke-width 2, round caps/joins, no fill.
  * icon(name) > <svg> element; hydrateIcons(root) replaces <i data-icon="name"> placeholders.
  * Uses only DOM Level 2 calls (setAttribute/appendChild/replaceChild) so it runs in Coherent GT.
@@ -13,6 +13,24 @@
   const dot = (x, y) => P('M' + x + ' ' + y + 'h.01');
 
   const ICONS = {
+    'view-runway': [P('M7 3H17L21 21H3ZM12 5V8M12 11V14M12 17V20')],
+    'view-gate': [P('M3 21V7H12V21M6 10H9M6 14H9M12 10H20V15H16V18M3 21H14')],
+    'view-apron': [R(3,3,18,18,2), P('M12 6V18M7 13L12 10L17 13M9 18H15')],
+    'view-taxiway': [P('M3 3H9V10L21 17V22L6 13H3ZM6 4V10L19 19')],
+    'view-tower': [P('M9 21V12H15V21M7 12L4 5H20L17 12ZM12 2V5M4 8H20M6 21H18')],
+    'view-move-horizontal': [P('M3 12H21M7 8L3 12L7 16M17 8L21 12L17 16')],
+    'view-move-vertical': [P('M12 3V21M8 7L12 3L16 7M8 17L12 21L16 17')],
+    'view-move-depth': [P('M4 20L20 4M13 4H20V11M4 13V20H11')],
+    'view-pitch': [P('M5 12H18M15 4A9 9 0 0 1 15 20M15 4L20 5M15 4L16 9')],
+    'view-yaw': [P('M3 9A10 10 0 0 1 21 9M3 9V4M3 9H8'), P('M12 11L8 20H16Z')],
+    'view-roll': [C(12,13,6), P('M7 13H17M12 8V18M3 7A11 11 0 0 1 20 4M20 4V9H15')],
+    save: [P('M4 3H17L21 7V21H3V3ZM7 3V9H16V3M7 21V14H17V21')],
+    paste: [R(5,5,14,16,2), R(9,2,6,5,1), P('M9 12H15M9 16H15')],
+    mouse: [R(6,2,12,20,6), P('M12 3V9')],
+    'head-tracking': [C(12,8,4), P('M5 21V18A7 7 0 0 1 19 18V21M3 5L1 8L3 11M21 5L23 8L21 11')],
+    'aircraft-tracking': [C(12,12,9), P('M12 6V18M7 13L12 10L17 13M9 18H15')],
+    'auto-switch': [P('M3 7H20L16 3M20 7L16 11M21 17H4L8 13M4 17L8 21')],
+
     'grip-vertical': [C(8,5,1),C(16,5,1),C(8,12,1),C(16,12,1),C(8,19,1),C(16,19,1)],
     'view-cockpit': [P('M3 18V10Q12 2 21 10V18ZM3 12H21M12 6V12'), C(8,16,1), C(16,16,1)],
     'view-instrument': [R(3,4,18,16,2), C(9,12,3), P('M9 12L10 10M15 9H18M15 13H18M15 16H18')],
@@ -75,6 +93,10 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
+  const PICKER_NAMES = ["camera", "view-cockpit", "view-instrument", "view-controls", "view-seat", "view-window", "view-front", "plane", "view-wing", "view-tail", "view-wheel", "view-orbit", "view-runway", "view-gate", "view-apron", "view-taxiway", "view-tower", "map-pin", "view-move-horizontal", "view-move-vertical", "view-move-depth", "view-pitch", "view-yaw", "view-roll", "save", "copy", "paste", "rotate-ccw", "plus", "star", "keyboard", "mouse", "head-tracking", "aircraft-tracking", "auto-switch", "settings-2"];
+  // SVGs inherit the exact camera/category color and remain sharp at mini-panel sizes.
+  function tint(svg, color) { if(svg)svg.style.color=color || ''; }
+
   function icon(name, className) {
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
@@ -114,5 +136,5 @@
     }
   }
 
-  root.FSCIcons = { icon, hydrateIcons, names: Object.keys(ICONS) };
+  root.FSCIcons = { icon, hydrateIcons, tint, pickerNames: PICKER_NAMES, names: Object.keys(ICONS) };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

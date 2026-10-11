@@ -49,6 +49,7 @@ private:
     std::vector<std::string> mapped_;
     std::vector<bool> isPov_;
     std::size_t clientEventsDefined_ = 0;
+    std::vector<unsigned long> inputMappingPackets_;
     std::vector<unsigned long> mouseMappingPackets_;
     bool mouseRegistered_ = false;
     bool mouseEnabled_ = false;

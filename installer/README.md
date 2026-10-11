@@ -2,22 +2,22 @@
 
 The Windows installer deploys the **verified packaged build**, not a fresh compile of the working tree.
 This matters while the in-simulator loading diagnostic uses a deliberately narrower UI than current source.
-The package's 22 files remain byte-identical to the selected release receipt. No user profiles or development
+The package's 26 files remain byte-identical to the selected release receipt. No user profiles or development
 configuration are included. Setup works offline, per user, without the MSFS SDK or a background service.
 
 ## Build
 
 ```powershell
 tools\get-installer-compiler.ps1
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.1.1
-python tools/diagnostics/stage-release.py
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.2.0
+python tools/diagnostics/stage-v0.2.py
 python tools/build-manual.py
-python tools/build-installer.py
+python tools/build-installer.py --version 0.2.0 --package build/release/0.2.0/fs-camera-studio --receipt build/release/0.2.0/staged.json
 ```
 
 The build dependency is Inno Setup 6.7.3, downloaded from its official GitHub release and checked for a valid
 Pyrsys B.V. Authenticode signature before execution. An existing compiler can be supplied with `--compiler`.
-Testers only need the resulting setup EXE. The release ID has the form `major.minor.patch-test.YYYYMMDD.iteration`;
+Testers only need the resulting setup EXE. The release ID has the form `major.minor.patch or major.minor.patch-test.YYYYMMDD.iteration`;
 increase it for every distributed build. `BUILD-INFO.json` records the tester ID and every shipped package hash.
 The add-on manifest version is preserved from the tested package rather than relabeling its payload.
 

@@ -55,6 +55,8 @@ struct CameraEntry {
     core::CameraPose pose;
     double originLat=0, originLon=0, originAltitude=0;
     core::TransitionSpec transition;
+    double motionRadiusMeters = 35, motionHeightMeters = 8, motionDurationSeconds = 30, motionSideMeters = 35;
+    bool motionClockwise = true, motionRepeat = false;
     bool interaction = true;
     std::string trackingPolicy = "nativeIfQualified";
     std::string aircraftTracking = "off";

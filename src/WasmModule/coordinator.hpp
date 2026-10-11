@@ -61,6 +61,7 @@ public:
     bool gameControlled() const { return gameControlled_; }
     const std::string& simVersion() const { return simVersion_; }
     json capabilitiesJson() const;
+    json walkaroundJson() const;
 
     // In-panel axis check (gate G01/G03): allows live control on an unqualified build while it runs, and shows
     // probe poses for the active camera through the current adapter contract.
@@ -73,8 +74,8 @@ public:
     void setMouseInputBlocked(bool blocked) { if (blocked) cancelMouseDrag(); mouseBlocked_ = blocked; }
     void cancelMouseDrag();
     void tick(double now);
-    void setAircraftPosition(double lat, double lon, double altitude, double now) { targetLat_=lat; targetLon_=lon; targetAltitude_=altitude; targetAt_=now; }
-    bool selectAutomaticCamera(const std::string& id, double now, bool acquire = false) { return (acquire ? canActivate() : eligibleToSubmit()) && activate(id,now,false).empty(); }
+    void setAircraftPosition(double lat, double lon, double altitude, double now, double headingDeg = 0) { targetLat_=lat; targetLon_=lon; targetAltitude_=altitude; targetHeading_=headingDeg; targetAt_=now; }
+    bool selectAutomaticCamera(const std::string& id, double now, bool acquire = false) { return (!walkaround_ || acquire) && (acquire ? canActivate() : eligibleToSubmit()) && activate(id,now,false).empty(); }
 
     // State the host app re-sends to a newly connected UI.
     void emitFullState();
@@ -108,6 +109,9 @@ private:
     void submit();
     void emitCapabilities(bool force = false);
     void emitActiveCamera();
+    void emitWalkaround();
+    void stopWalkaround();
+    core::CameraPose motionPose(const profiles::CameraEntry& cam) const;
     void emitLook(double now, bool force = false);
     void endPeek(std::uint64_t token, double now);
     std::string cycle(int delta, double now);
@@ -118,7 +122,11 @@ private:
 
     ICameraBackend& backend_;
     HeadTracking headTracking_{backend_};
-    double targetLat_=0, targetLon_=0, targetAltitude_=0, targetAt_=-100;
+    double targetLat_=0, targetLon_=0, targetAltitude_=0, targetHeading_=0, targetAt_=-100;
+    double flybyLat_=0, flybyLon_=0, flybyAltitude_=0, flybyHeading_=0, motionTime_=0;
+    struct Walkaround { std::string categoryId; double interval=5, elapsed=0; bool loop=true; };
+    std::optional<Walkaround> walkaround_;
+    bool walkaroundAdvancing_ = false, motionPaused_ = false;
     std::map<std::string, core::TemporaryLook> rememberedLooks_;
     std::string lookOwner_;
     EmitFn emit_;

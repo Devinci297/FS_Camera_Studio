@@ -252,7 +252,7 @@ TEST_CASE("repository: asynchronous IO completes in order") {
 
 TEST_CASE("exchange: export/import round trip remaps ids; bad codes are refused") {
     json p = twoCameraProfile();
-    p["cameras"][1]["mode"] = "orbit";
+    p["cameras"][1]["mode"] = "free";
     std::string err;
     auto rep = importProfileCode(exportProfileCode(p, true), &err);
     CHECK(rep.has_value());
@@ -289,6 +289,13 @@ TEST_CASE("settings: normalisation clamps and fills defaults") {
     CHECK(n["ui"]["miniEnabled"].get<bool>());
     CHECK_EQ(n["ui"]["nameDisplay"], "both");
     CHECK_NEAR(n["ui"]["miniOpacity"].get<double>(), 0.65, 1e-9);
+    CHECK_NEAR(n["ui"]["mainOpacity"].get<double>(), 1.0, 1e-9);
+    s["ui"]["mainOpacity"] = 0.35;
+    CHECK_NEAR(normalizeSettings(s)["ui"]["mainOpacity"].get<double>(), 0.35, 1e-9);
+    s["ui"]["mainOpacity"] = -1;
+    CHECK_NEAR(normalizeSettings(s)["ui"]["mainOpacity"].get<double>(), 0.0, 1e-9);
+    s["ui"]["mainOpacity"] = 3;
+    CHECK_NEAR(normalizeSettings(s)["ui"]["mainOpacity"].get<double>(), 1.0, 1e-9);
     s["ui"]["nameDisplay"] = "icons"; s["ui"]["miniOpacity"] = 3;
     n = normalizeSettings(s);
     CHECK_EQ(n["ui"]["nameDisplay"], "icons");
@@ -296,7 +303,7 @@ TEST_CASE("settings: normalisation clamps and fills defaults") {
     s["ui"]["nameDisplay"] = "invalid"; s["ui"]["miniOpacity"] = -1;
     n = normalizeSettings(s);
     CHECK_EQ(n["ui"]["nameDisplay"], "both");
-    CHECK_NEAR(n["ui"]["miniOpacity"].get<double>(), 0.15, 1e-9);
+    CHECK_NEAR(n["ui"]["miniOpacity"].get<double>(), 0.0, 1e-9);
 }
 
 TEST_CASE("bindings: movement migration preserves custom assignments and persists deliberate clearing") {
@@ -309,7 +316,7 @@ TEST_CASE("bindings: movement migration preserves custom assignments and persist
     CHECK_EQ(upgraded["bindings"][1], legacy["bindings"][1]);
     const auto parsed = parseBindings(upgraded); CHECK(parsed.problems.empty());
     for (const auto& b : parsed.bindings) {
-        CHECK(b.action != Action::MoveUp); // E belongs to another action.
+        CHECK(b.action != Action::MoveDown); // E belongs to another action.
         CHECK(b.input.definition != "W"); // Existing custom forward binding wins.
     }
     CHECK_EQ(upgradeMovementBindings(upgraded), upgraded);
@@ -317,7 +324,7 @@ TEST_CASE("bindings: movement migration preserves custom assignments and persist
     state.bindings["bindings"] = json::array(); // Clear all, then save/reload.
     const auto loaded = Repository::deserialize(Repository::serialize(state, {}), nullptr, nullptr);
     CHECK(loaded.has_value());
-    if (loaded) { CHECK(loaded->bindings["bindings"].empty()); CHECK_EQ(loaded->bindings["movementDefaultsVersion"], 1); }
+    if (loaded) { CHECK(loaded->bindings["bindings"].empty()); CHECK_EQ(loaded->bindings["movementDefaultsVersion"], 2); }
     auto wheel = InputSpec::fromJson({{"kind","simZoom"},{"definition","sim:ZOOM_IN"}});
     CHECK(wheel.has_value());
     if (wheel) { const auto encoded = wheel->toJson(); CHECK_EQ(encoded["kind"], "simZoom"); }
@@ -483,4 +490,112 @@ TEST_CASE("bindings: high view IDs and reassignable save shortcut survive reload
     CHECK(parseBindings(doc).problems.empty());doc=upgradeMovementBindings(doc);
     bool save=false;for(auto& b:parseBindings(doc).bindings)if(b.action==Action::SaveViews){save=true;CHECK_EQ(b.input.definition,std::string("VK_LCONTROL+S"));}CHECK(save);
     doc["bindings"]=json::array();CHECK(upgradeMovementBindings(doc)["bindings"].empty());
+}
+
+TEST_CASE("profiles: aircraft tracking stays airport-only through validation import and reload") {
+    for (const auto* mode : {"aircraftCockpit", "aircraftExterior", "orbit", "flyby", "free"}) {
+        auto p = makeStarterProfile("Tracking", "test", "Test");
+        auto& cam = p["cameras"][0];
+        cam["mode"] = mode;
+        cam["aircraftTracking"] = "both";
+        cam["trackingPolicy"] = "on"; // TrackIR/head tracking is a separate cockpit feature.
+        const auto beforeValidation = toSnapshot(p);
+        CHECK_EQ(beforeValidation.cameras[0].aircraftTracking, std::string("off"));
+        auto imported = importProfileCode(exportProfileCode(p, false), nullptr);
+        CHECK(imported.has_value());
+        if (imported) CHECK_EQ(imported->profile["cameras"][0]["aircraftTracking"], json("off"));
+        StoreState state; state.txn = 1;
+        state.settings = defaultSettingsDocument();
+        state.bindings = defaultBindingsDocument();
+        state.profiles[p["profileId"].get<std::string>()].current = p;
+        auto loaded = Repository::deserialize(Repository::serialize(state, {}), nullptr, nullptr);
+        CHECK(loaded.has_value());
+        if (loaded) CHECK_EQ(loaded->profiles.begin()->second.current["cameras"][0]["aircraftTracking"], json("off"));
+        const auto result = validateProfile(p);
+        CHECK(result.ok());
+        CHECK(!result.warnings.empty());
+        CHECK_EQ(cam["aircraftTracking"], json("off"));
+        CHECK_EQ(cam["trackingPolicy"], json("on"));
+        const auto normalized = toSnapshot(p);
+        CHECK_EQ(normalized.cameras[0].trackingPolicy, std::string("on"));
+    }
+    auto airport = makeStarterProfile("Airport", "test", "Test");
+    airport["cameras"][0].update({{"mode", "airport"}, {"aircraftTracking", "both"},
+                                  {"worldOrigin", {{"lat", 40.}, {"lon", -90.}, {"altitude", 100.}}}});
+    CHECK(validateProfile(airport).ok());
+    const auto airportSnapshot = toSnapshot(airport);
+    CHECK_EQ(airportSnapshot.cameras[0].aircraftTracking, std::string("both"));
+}
+
+TEST_CASE("bindings: Q raises and E lowers with stock-only migration and custom preservation") {
+    const auto fresh = defaultBindingsDocument();
+    auto definition = [](const json& doc, const std::string& action) {
+        for (const auto& binding : doc["bindings"])
+            if (binding["action"] == action) return binding["input"]["definition"].get<std::string>();
+        return std::string();
+    };
+    CHECK_EQ(fresh["movementDefaultsVersion"], json(2));
+    CHECK_EQ(definition(fresh, "moveUp"), std::string("Q"));
+    CHECK_EQ(definition(fresh, "moveDown"), std::string("E"));
+    auto legacy = fresh;
+    legacy["movementDefaultsVersion"] = 1;
+    for (auto& binding : legacy["bindings"]) {
+        if (binding["action"] == "moveUp") binding["action"] = "moveDown";
+        else if (binding["action"] == "moveDown") binding["action"] = "moveUp";
+    }
+    CHECK(upgradeMovementBindings(legacy) == fresh);
+    CHECK(upgradeMovementBindings(fresh) == fresh);
+    for (const auto* customization : {"key", "label", "extra", "removed"}) {
+        auto custom = legacy;
+        if (std::string(customization) == "extra") {
+            custom["bindings"].push_back({{"action", "moveUp"}, {"input", {{"kind", "key"}, {"definition", "U"}, {"label", "U"}}}});
+        } else {
+            for (auto it = custom["bindings"].begin(); it != custom["bindings"].end(); ++it) {
+                if ((*it)["action"] != "moveUp") continue;
+                if (std::string(customization) == "key") {
+                    (*it)["input"]["definition"] = "U"; (*it)["input"]["label"] = "U";
+                } else if (std::string(customization) == "label") (*it)["input"]["label"] = "My preferred raise key";
+                else custom["bindings"].erase(it);
+                break;
+            }
+        }
+        const auto before = custom["bindings"];
+        const auto migrated = upgradeMovementBindings(custom);
+        CHECK(migrated["bindings"] == before);
+        CHECK_EQ(migrated["movementDefaultsVersion"], json(2));
+        CHECK(parseBindings(migrated).problems.empty());
+    }
+}
+
+TEST_CASE("profiles: builtin cameras and categories carry semantic icons through export") {
+    const std::set<std::string> expected = {"view-cockpit", "view-instrument", "view-controls", "view-seat", "view-window", "view-front", "view-wing", "view-tail", "plane"};
+    for (auto doc : {makeStarterProfile("Starter", "test", "Test"), makeC172Profile("c172", "C172"), makeA320Profile("a320", "A320")}) {
+        CHECK(validateProfile(doc).ok());
+        const auto imported = json::parse(doc.dump());
+        CHECK_EQ(imported["cameras"], doc["cameras"]);
+        CHECK_EQ(imported["categories"], doc["categories"]);
+        for (const auto* key : {"categories", "cameras"})
+            for (const auto& entry : doc[key])
+                CHECK(expected.count(entry["icon"].get<std::string>()) != 0);
+    }
+}
+
+TEST_CASE("settings: tracking defaults are global and invalid values normalize safely") {
+    auto settings=fscs::profiles::defaultSettingsDocument();
+    CHECK_EQ(settings["host"]["globalHeadTrackingEnabled"],json(false));CHECK_EQ(settings["host"]["globalAircraftTracking"],json("both"));
+    settings["host"]["globalHeadTrackingEnabled"]=true;settings["host"]["globalAircraftTracking"]="heading";
+    auto parsed=fscs::profiles::parseHostSettings(settings);CHECK(parsed.globalHeadTrackingEnabled);CHECK_EQ(parsed.globalAircraftTracking,std::string("heading"));
+    auto normalized=fscs::profiles::normalizeSettings(settings);CHECK_EQ(normalized["host"]["globalHeadTrackingEnabled"],json(true));CHECK_EQ(normalized["host"]["globalAircraftTracking"],json("heading"));
+    settings["host"]["globalHeadTrackingEnabled"]="on";settings["host"]["globalAircraftTracking"]="invalid";normalized=fscs::profiles::normalizeSettings(settings);
+    CHECK_EQ(normalized["host"]["globalHeadTrackingEnabled"],json(false));CHECK_EQ(normalized["host"]["globalAircraftTracking"],json("both"));
+}
+
+TEST_CASE("profiles: flyby pass options validate and survive import normalization") {
+    auto doc=makeStarterProfile("Flyby","test","Test");auto& camera=doc["cameras"][0];camera["mode"]="flyby";
+    camera["motion"]={{"radiusMeters",150},{"heightMeters",15},{"durationSeconds",12},{"sideMeters",-40},{"repeat",true}};
+    CHECK(validateProfile(doc).ok());const auto snapshot=toSnapshot(doc);const auto& cam=snapshot.cameras[0];
+    CHECK_NEAR(cam.motionSideMeters,-40,1e-9);CHECK(cam.motionRepeat);CHECK_NEAR(cam.motionDurationSeconds,12,1e-9);
+    for (const auto& pair : {std::pair<const char*,json>{"sideMeters",5001},{"repeat","yes"},{"durationSeconds",0}}) {
+        auto invalid=doc;invalid["cameras"][0]["motion"][pair.first]=pair.second;CHECK(!validateProfile(invalid).ok());
+    }
 }

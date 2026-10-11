@@ -110,9 +110,24 @@
     root.fscsUpdateMiniRect();
   }
 
+  // common.js enables a native blurred scene behind each Coherent view. CSS cannot
+  // remove that compositor layer; disable it on this panel view before applying rgba.
+  let clearBackgroundReady = false;
+  function clearNativeBackground(force) {
+    if (clearBackgroundReady && !force) return;
+    if (typeof root.SetBlurredBackground !== 'function') return;
+    root.SetBlurredBackground(false);
+    clearBackgroundReady = true;
+  }
+
   function hostReady() {
     const panel = document.querySelector('ingame-ui');
     if (!panel) return;
+    clearNativeBackground(false);
+    if (!panel.fscsClearBackgroundBound) {
+      panel.addEventListener('panelActive', () => clearNativeBackground(true));
+      panel.fscsClearBackgroundBound = true;
+    }
     const shown = Boolean(panel.active && panel.visible);
     if (panel.fscsPointerWasVisible !== shown) {
       panel.fscsPointerWasVisible = shown;

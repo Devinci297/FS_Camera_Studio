@@ -51,6 +51,8 @@ private:
 
     std::vector<profiles::Binding> bindings_;
     std::set<std::size_t> fastBindings_; // Runtime modifier chords, never saved over user assignments.
+    std::map<std::size_t, std::string> movementFamilies_; // Shared base key for generated case/chord aliases.
+    std::map<std::size_t, std::string> fastModifiers_;
     std::vector<std::string> definitions_;
     std::map<std::size_t, std::vector<std::size_t>> bindingsForDefinition_;
     std::set<std::string> physicallyDown_;

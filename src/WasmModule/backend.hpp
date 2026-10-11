@@ -20,7 +20,7 @@ namespace backend_event {
 struct NativeMouseButton { bool down = false; };
 struct NativeMouseAxis { bool horizontal = true; std::int32_t delta = 0; };
 struct NativeMouseMapping { bool ready = false; };
-struct AircraftPosition { double lat=0, lon=0, altitude=0; };
+struct AircraftPosition { double lat=0, lon=0, altitude=0, headingDeg=0; };
 struct AirportList { nlohmann::json airports; bool complete=false; };
 struct AirportIdentity { std::string ident, region, icao; double lat=0, lon=0; };
 struct AirportFacility { std::uint32_t requestId=0; nlohmann::json facility; std::string error; };
@@ -37,6 +37,7 @@ struct SimRunning { bool running = false; };
 struct Paused { bool paused = false; };
 struct CameraException { std::uint32_t code = 0; std::string message; };
 struct CommBusMessage { std::string data; };  // one CommBus payload from a panel (may be a chunk)
+struct InputMappingStatus { bool ready = false; std::size_t definitions = 0; std::size_t failedCalls = 0; std::uint32_t code = 0; };
 struct InputEvent { std::size_t index = 0; bool down = true; std::uint32_t value = 0; bool test = false; };
 struct ControllersList { std::vector<std::pair<int, std::string>> controllers; };
 }  // namespace backend_event
@@ -45,7 +46,7 @@ using BackendEvent = std::variant<backend_event::Connected, backend_event::Disco
                                   backend_event::CameraData, backend_event::DefinitionList, backend_event::AircraftLoaded,
                                   backend_event::AircraftTitle, backend_event::FlightLoaded, backend_event::SimRunning,
                                   backend_event::Paused, backend_event::CameraException,
-                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::ControllersList, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity>;
+                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity>;
 
 enum class CameraFlag { Interaction, AboveGround };
 

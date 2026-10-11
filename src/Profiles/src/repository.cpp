@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <memory>
+#include <set>
 
 namespace fscs::profiles {
 
@@ -23,6 +24,13 @@ std::string hex32(std::uint32_t v) {
         v >>= 4;
     }
     return s;
+}
+
+std::string profileFileKey(const json& doc) {
+    std::string key = js::str(js::object(doc, "aircraftMatch"), "modelKey");
+    if (js::str(doc, "scope") == "airport") key = "airport-" + js::str(js::object(doc, "airport"), "icao");
+    if (key.empty()) key = "unassigned-" + js::str(doc, "profileId");
+    return key;
 }
 
 }  // namespace
@@ -234,6 +242,23 @@ void Repository::startNext() {
         return;
     }
 
+    const auto rememberRequest = [this, &req] {
+        if (!req.requestId.empty()) {
+            recentRequestIds_.push_back(req.requestId);
+            if (recentRequestIds_.size() > kRecentRequestIds) recentRequestIds_.erase(recentRequestIds_.begin());
+        }
+    };
+    // Ctrl+S without edits must not copy, serialize, or flush a multi-airport library.
+    if (req.upsertProfiles.empty() && req.removeProfiles.empty() &&
+        (!req.settings || *req.settings == state_.settings) &&
+        (!req.bindings || *req.bindings == state_.bindings) &&
+        (!req.navigation || *req.navigation == state_.navigation)) {
+        rememberRequest();
+        finish({CommitStatus::Committed, "Already saved.", state_.txn});
+        return;
+    }
+    std::set<std::string> exportKeys;
+    bool profilesChanged = false;
     StoreState next = state_;
     next.txn = state_.txn + 1;
     for (json doc : req.upsertProfiles) {
@@ -245,6 +270,11 @@ void Repository::startNext() {
         const std::string id = js::str(doc, "profileId");
         auto it = next.profiles.find(id);
         if (it != next.profiles.end()) {
+            doc["revision"] = js::integer(it->second.current, "revision", 0);
+            if (doc == it->second.current) continue;
+            exportKeys.insert(profileFileKey(it->second.current));
+            exportKeys.insert(profileFileKey(doc));
+            profilesChanged = true;
             doc["revision"] = js::integer(it->second.current, "revision", 0) + 1;
             if (req.backup) {
                 it->second.backups.insert(it->second.backups.begin(), it->second.current);
@@ -252,11 +282,16 @@ void Repository::startNext() {
             }
             it->second.current = std::move(doc);
         } else {
+            exportKeys.insert(profileFileKey(doc));
+            profilesChanged = true;
             doc["revision"] = 1;
             next.profiles[id] = ProfileRecord{std::move(doc), {}};
         }
     }
-    for (const auto& id : req.removeProfiles) next.profiles.erase(id);
+    for (const auto& id : req.removeProfiles) {
+        const auto found = next.profiles.find(id);
+        if (found != next.profiles.end()) { exportKeys.insert(profileFileKey(found->second.current)); profilesChanged = true; next.profiles.erase(found); }
+    }
     if (req.settings) next.settings = normalizeSettings(*req.settings);
     if (req.bindings) {
         auto parsed = parseBindings(*req.bindings);
@@ -267,6 +302,15 @@ void Repository::startNext() {
         next.bindings = *req.bindings;
     }
     if (req.navigation) next.navigation = *req.navigation;
+    if (!profilesChanged && next.settings == state_.settings && next.bindings == state_.bindings && next.navigation == state_.navigation) {
+        rememberRequest();
+        finish({CommitStatus::Committed, "Already saved.", state_.txn});
+        return;
+    }
+    const auto& beforePreferred = js::object(state_.navigation, "lastByModel");
+    const auto& afterPreferred = js::object(next.navigation, "lastByModel");
+    for (const auto& [key, value] : beforePreferred.items()) if (js::get(afterPreferred, key.c_str()) != value) exportKeys.insert(key);
+    for (const auto& [key, value] : afterPreferred.items()) if (js::get(beforePreferred, key.c_str()) != value) exportKeys.insert(key);
 
     std::vector<std::string> recent = recentRequestIds_;
     if (!req.requestId.empty()) {
@@ -278,6 +322,10 @@ void Repository::startNext() {
         finish({CommitStatus::Failed, "Camera Studio's library is full (more than 24 MiB). Delete unused profiles and try again.", state_.txn});
         return;
     }
+    json exportProfiles = json::array();
+    for (const auto& [id, record] : next.profiles)
+        if (exportKeys.count(profileFileKey(record.current))) exportProfiles.push_back({{"current", record.current}});
+    driver_.prepareProfileExports(aircraftProfileFiles({{"payload", {{"txn", next.txn}, {"navigation", next.navigation}, {"profiles", std::move(exportProfiles)}}}}));
     const int target = currentSlot_ == 0 ? 1 : 0;  // never overwrite the last valid save
     auto shared = std::make_shared<StoreState>(std::move(next));
     auto expected = std::make_shared<std::string>(bytes);
@@ -287,7 +335,9 @@ void Repository::startNext() {
             return;
         }
         driver_.readFile(slots_[target], [this, target, shared, expected, recent](std::optional<std::string> back) {
-            if (!back || *back != *expected || !deserialize(*back, nullptr, nullptr)) {
+            // The candidate was validated before serialization. Exact byte readback already
+            // verifies its checksum and content; reparsing every profile and backup is redundant.
+            if (!back || *back != *expected) {
                 finish({CommitStatus::Failed, "Your changes were not saved: the save could not be verified.", state_.txn});
                 return;
             }
@@ -310,6 +360,15 @@ void Repository::finish(CommitResult r) {
 std::string exportProfileCode(const json& profile, bool workingCopy) {
     json envelope{{"format", "fs-camera-studio-profile"}, {"version", 2}, {"workingCopy", workingCopy}, {"profile", profile}};
     return envelope.dump(2, ' ', false, json::error_handler_t::replace);
+}
+
+bool validProfileImportFilename(const std::string& name) {
+    if (name.size() < 6 || name.size() > 240 || name.front() == '.' || name.back() == ' ') return false;
+    for (const unsigned char ch : name)
+        if (ch < 32 || ch == 127 || ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|') return false;
+    auto suffix = name.substr(name.size() - 5);
+    for (char& ch : suffix) if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+    return suffix == ".json";
 }
 
 std::optional<ImportReport> importProfileCode(const std::string& code, std::string* error) {

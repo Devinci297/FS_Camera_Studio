@@ -93,7 +93,7 @@ json Coordinator::ack(const protocol::Command& c, AckStatus s, const std::string
 
 bool Coordinator::epochCommand(const std::string& a) const {
     return a == "ActivateCamera" || a == "BeginPeek" || a == "CycleCamera" || a == "NextCategory" ||
-           a == "ReturnToPilot" || a == "CaptureView" || a == "SeedFromDefinition" || a == "BakeTemporaryLook" || a == "MouseLookDelta";
+           a == "ReturnToPilot" || a == "CaptureView" || a == "SeedFromDefinition" || a == "BakeTemporaryLook" || a == "MouseLookDelta" || a == "StartWalkaround";
 }
 
 std::string Coordinator::blockReason() const {
@@ -114,14 +114,15 @@ const CameraEntry* Coordinator::activeEntry() const {
 }
 
 Referential Coordinator::referentialFor(const CameraEntry& cam) const {
-    if(cam.mode==profiles::CameraMode::Airport)return Referential::World;
-    return cam.mode == profiles::CameraMode::AircraftExterior ? Referential::SimObject : Referential::Eyepoint;
+    if(cam.mode==profiles::CameraMode::Airport || cam.mode==profiles::CameraMode::Flyby)return Referential::World;
+    return cam.mode == profiles::CameraMode::AircraftExterior || cam.mode == profiles::CameraMode::Orbit ? Referential::SimObject : Referential::Eyepoint;
 }
 
 void Coordinator::setState(Ownership s, const std::string& reason) {
     if (s == state_ && reason == stateReason_) return;
     if (s != Ownership::Active) headTracking_.restore();
     state_ = s;
+    if (s != Ownership::Active && s != Ownership::Acquiring && s != Ownership::SimulatorSuspended) stopWalkaround();
     if (s != Ownership::Active) cancelMouseDrag();
     stateReason_ = reason;
     emit_("OwnershipChanged", {{"state", toString(s)}, {"gameControlled", gameControlled_}, {"reason", reason}});
@@ -166,6 +167,47 @@ void Coordinator::emitActiveCamera() {
     lastTransitioning_ = engine_.transitioning();
 }
 
+json Coordinator::walkaroundJson() const {
+    return {{"running",walkaround_.has_value()},
+        {"categoryId",walkaround_ ? json(walkaround_->categoryId) : json(nullptr)},
+        {"intervalSeconds",walkaround_ ? walkaround_->interval : 5.0},
+        {"loop",walkaround_ ? walkaround_->loop : true}};
+}
+
+void Coordinator::emitWalkaround() {
+    emit_("WalkaroundChanged",walkaroundJson());
+}
+
+void Coordinator::stopWalkaround() {
+    if (walkaround_) { walkaround_.reset(); emitWalkaround(); }
+}
+
+core::CameraPose Coordinator::motionPose(const CameraEntry& cam) const {
+    auto pose = cam.pose;
+    const double radius = core::clamp(cam.motionRadiusMeters,2,5000);
+    const double height = core::clamp(cam.motionHeightMeters,1,2000);
+    if (cam.mode == profiles::CameraMode::Orbit) {
+        const double angle = motionTime_ * 2 * std::numbers::pi / core::clamp(cam.motionDurationSeconds,5,600) * (cam.motionClockwise ? 1 : -1);
+        pose.positionFRD = {radius * std::cos(angle),radius * std::sin(angle),-height};
+    } else if (cam.mode == profiles::CameraMode::Flyby) {
+        // A finite cinematic pass also moves when the aircraft is parked. Its WORLD
+        // origin and travel heading remain fixed from recall; tracking follows the
+        // actual aircraft independently. Cosine easing stops smoothly at each end.
+        const double duration = core::clamp(cam.motionDurationSeconds,5,600);
+        const double phase = cam.motionRepeat ? std::fmod(motionTime_ / duration,2.0) : std::min(motionTime_ / duration,1.0);
+        const double along = radius * std::cos(phase * std::numbers::pi);
+        pose.positionFRD = core::Quat::fromPbh({0,0,flybyHeading_}).rotate({along,core::clamp(cam.motionSideMeters,-5000,5000),-height});
+    }
+    const auto d = pose.positionFRD * -1;
+    if (settings_.globalAircraftTracking != "off") {
+        auto angles = pose.orientation.toPbh();
+        angles.headingDeg = std::atan2(d.y,d.x)*core::kRadToDeg;
+        if (settings_.globalAircraftTracking == "both") angles.pitchDeg = std::atan2(-d.z,std::hypot(d.x,d.y))*core::kRadToDeg;
+        pose.orientation = core::Quat::fromPbh(angles);
+    }
+    return pose;
+}
+
 void Coordinator::emitLook(double now, bool force) {
     const auto& l = engine_.look();
     const bool active = l.active();
@@ -181,6 +223,7 @@ void Coordinator::emitLook(double now, bool force) {
 }
 
 void Coordinator::emitFullState() {
+    emitWalkaround();
     emit_("ConnectionChanged", {{"simConnected", simConnected_}, {"sessionEpoch", epoch_},
                                 {"simVersion", simVersion_.empty() ? json(nullptr) : json(simVersion_)}, {"reason", nullptr}});
     emit_("AircraftChanged", aircraft_.known()
@@ -195,7 +238,8 @@ void Coordinator::emitFullState() {
 
 void Coordinator::setProfile(std::optional<profiles::ProfileSnapshot> snapshot, double now) {
     const bool same = profile_ && snapshot && profile_->profileId == snapshot->profileId;
-    if (!same) { rememberedLooks_.clear(); lookOwner_.clear(); }
+    if (!same) { stopWalkaround(); rememberedLooks_.clear(); lookOwner_.clear(); }
+    const auto previousCamera = activeEntry() ? std::optional<CameraEntry>(*activeEntry()) : std::nullopt;
     profile_ = std::move(snapshot);
     emitCapabilities();
     if (!profile_) {
@@ -220,7 +264,17 @@ void Coordinator::setProfile(std::optional<profiles::ProfileSnapshot> snapshot, 
                                             core::angleBetween(base->orientation, cam->pose.orientation) +
                                             std::abs(base->fovRad - cam->pose.fovRad)
                                       : 1.0;
-            if (delta > 1e-9) engine_.place(cam->pose);  // live preview of the edited draft
+            if (cam->mode == profiles::CameraMode::Orbit || cam->mode == profiles::CameraMode::Flyby) {
+                if (!previousCamera || previousCamera->mode != cam->mode || previousCamera->motionRadiusMeters != cam->motionRadiusMeters ||
+                    previousCamera->motionHeightMeters != cam->motionHeightMeters || previousCamera->motionDurationSeconds != cam->motionDurationSeconds ||
+                    previousCamera->motionClockwise != cam->motionClockwise || previousCamera->motionSideMeters != cam->motionSideMeters ||
+                    previousCamera->motionRepeat != cam->motionRepeat) startTransition(*cam,true);
+                else if (previousCamera->pose.fovRad != cam->pose.fovRad) {
+                    auto updated = engine_.basePose().value_or(motionPose(*cam));
+                    updated.fovRad = cam->pose.fovRad;
+                    engine_.animateBase(updated);
+                }
+            } else if (delta > 1e-9) engine_.place(cam->pose);  // live preview of the edited draft
         }
     }
     emitActiveCamera();
@@ -247,6 +301,8 @@ void Coordinator::refreshQualification() {
 
 void Coordinator::setSettings(const profiles::HostSettings& s, double now) {
     settings_ = s;
+    if (state_ == Ownership::Active && eligibleToSubmit())
+        headTracking_.update("global",settings_.globalHeadTrackingEnabled ? "on" : "off",now);
     engine_.setSpeeds({settings_.lookSpeedDegPerSec, settings_.moveSpeedMetersPerSec * settings_.movementPrecisionScale, 0.5, 6.0});
     emitCapabilities();
     if ((state_ == Ownership::Active || state_ == Ownership::SimulatorSuspended) && !blockReason().empty())
@@ -257,6 +313,29 @@ json Coordinator::handle(const protocol::Command& c, double now) {
     if (epochCommand(c.action) && c.sessionEpoch != epoch_) return ack(c, AckStatus::Rejected, "staleEpoch");
     const auto& p = c.payload;
 
+    if (c.action == "StopWalkaround") {
+        stopWalkaround();
+        return ack(c,AckStatus::Completed);
+    }
+    if (c.action == "StartWalkaround") {
+        if (!profile_) return ack(c,AckStatus::Rejected,"Open a camera profile first.");
+        const auto categoryId = js::str(p,"categoryId");
+        const double interval = js::num(p,"intervalSeconds",5);
+        if (!std::isfinite(interval) || interval < 1 || interval > 120) return ack(c,AckStatus::Rejected,"Walkaround dwell must be 1-120 seconds.");
+        const CameraEntry* first = nullptr;
+        for (const auto& category : profile_->categories) if (category.id == categoryId) {
+            for (const auto& id : category.cameraIds) {
+                const auto* entry = profile_->camera(id);
+                if (entry && entry->mode == profiles::CameraMode::AircraftExterior) { first = entry; break; }
+            }
+        }
+        if (!first) return ack(c,AckStatus::Rejected,"Choose a category containing exterior cameras for a walkaround.");
+        const auto error = activate(first->id,now,false);
+        if (!error.empty()) return ack(c,AckStatus::Rejected,error);
+        walkaround_ = Walkaround{categoryId,interval,0,js::boolean(p,"loop",true)};
+        emitWalkaround();
+        return ack(c,AckStatus::Accepted);
+    }
     if (c.action == "MouseLookDelta") {
         if (state_ != Ownership::Active || !eligibleToSubmit()) return ack(c, AckStatus::Rejected, "Select a camera before using mouse look.");
         const double heading = js::num(p, "headingDeg", 0), pitch = js::num(p, "pitchDeg", 0);
@@ -396,6 +475,9 @@ std::string Coordinator::activate(const std::string& cameraId, double now, bool 
     if (!cam) return "That camera is not in the open profile.";
     if (!profiles::modeActivatable(cam->mode)) return "This view type is not available in this version.";
     if (const auto block = blockReason(); !block.empty()) return block;
+    if (cam->mode == profiles::CameraMode::Flyby && (targetAt_ < 0 || now-targetAt_ > 5 || !std::isfinite(targetHeading_)))
+        return "Waiting for the aircraft position before starting a fly-by.";
+    if (!walkaroundAdvancing_) stopWalkaround();
     seedName_.clear();
     switch (state_) {
         case Ownership::Active: {
@@ -446,7 +528,7 @@ void Coordinator::beginAcquire(double now) {
     preAcquirePose_.reset();
     setState(Ownership::Acquiring, "Taking camera control…");
     const CameraEntry* cam = profile_ ? profile_->camera(pendingCameraId_) : nullptr;
-    if (cam && cam->mode != profiles::CameraMode::Airport && qual_.captureQualified && !readsUnreliable_ && read_ == ReadPurpose::None) {
+    if (cam && cam->mode != profiles::CameraMode::Airport && cam->mode != profiles::CameraMode::Flyby && qual_.captureQualified && !readsUnreliable_ && read_ == ReadPurpose::None) {
         requestRead(ReadPurpose::PreAcquire, referentialFor(*cam), now, kPreAcquireReadTimeout);
         if (read_ == ReadPurpose::PreAcquire) return;  // acquire once the read answers
     }
@@ -459,6 +541,11 @@ void Coordinator::beginAcquire(double now) {
 
 void Coordinator::startTransition(const CameraEntry& cam, bool cut) {
     cancelMouseDrag();
+    motionTime_ = 0;
+    if (cam.mode == profiles::CameraMode::Flyby) {
+        flybyLat_ = targetLat_; flybyLon_ = targetLon_; flybyAltitude_ = targetAltitude_; flybyHeading_ = targetHeading_;
+    }
+    const auto target = cam.mode == profiles::CameraMode::Orbit || cam.mode == profiles::CameraMode::Flyby ? motionPose(cam) : cam.pose;
     if (!lookOwner_.empty()) rememberedLooks_[lookOwner_] = engine_.look();
     const auto remembered = rememberedLooks_.find(cam.id);
     const auto look = cam.retainLook && remembered != rememberedLooks_.end() ? remembered->second : core::TemporaryLook{};
@@ -466,10 +553,10 @@ void Coordinator::startTransition(const CameraEntry& cam, bool cut) {
     backend_.setFlag(CameraFlag::Interaction, cam.interaction);
     backend_.setFlag(CameraFlag::AboveGround, cam.mode==profiles::CameraMode::Airport);
     core::TransitionSpec spec = cam.transition;
-    if (cut) spec.easing = core::Easing::Cut;
+    if (cut || cam.mode == profiles::CameraMode::Flyby) spec.easing = core::Easing::Cut;
     effects_.reset();
-    if (!engine_.hasPose()) engine_.place(cam.pose);
-    else engine_.select(cam.pose, spec, true);
+    if (!engine_.hasPose()) engine_.place(target);
+    else engine_.select(target, spec, true);
     // Each camera owns its temporary offsets; never inherit another camera's look.
     engine_.offsetLook(look.headingDeg,look.pitchDeg);
     engine_.offsetPosition(look.translationHeadingFrame);
@@ -560,6 +647,7 @@ std::string Coordinator::nextCategory(double now) {
 }
 
 void Coordinator::release(const std::string& reason, double now) {
+    stopWalkaround();
     headTracking_.restore();
     if (!lookOwner_.empty()) rememberedLooks_[lookOwner_] = engine_.look();
     lookOwner_.clear();
@@ -603,13 +691,14 @@ void Coordinator::invalidateSession(const std::string& reason, double now) {
         release(reason, now);
     peek_.reset();
     pendingCameraId_.clear();
-    engine_.reset(); effects_.reset(); motionReceivedAt_ = -1;
+    engine_.reset(); effects_.reset(); motionReceivedAt_ = -1; motionPaused_ = false;
     emit_("ConnectionChanged", {{"simConnected", simConnected_}, {"sessionEpoch", epoch_},
                                 {"simVersion", simVersion_.empty() ? json(nullptr) : json(simVersion_)}, {"reason", reason}});
 }
 
 // Sim session lost (simulator quit or module shutting down): nothing to release; start over in Observing.
 void Coordinator::resetSession(const std::string& reason, double now) {
+    stopWalkaround(); motionPaused_ = false;
     rememberedLooks_.clear(); lookOwner_.clear(); targetAt_=-100;
     (void)now;
     simConnected_ = false;
@@ -756,6 +845,7 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                 if (!e.running && (state_ == Ownership::Active || state_ == Ownership::Acquiring || state_ == Ownership::SimulatorSuspended))
                     release("The simulator left the flight.", now);
             } else if constexpr (std::is_same_v<T, backend_event::Paused>) {
+                motionPaused_ = e.paused;
                 // Ordinary pause keeps camera control; discard an in-flight mouse gesture on either edge.
                 cancelMouseDrag();
             } else if constexpr (std::is_same_v<T, backend_event::CameraException>) {
@@ -924,21 +1014,38 @@ void Coordinator::submit() {
     const CameraEntry* cam = activeEntry();
     if (!cam || !eligibleToSubmit()) return;
     const auto s = engine_.sample();
-    SdkPose sdk = toSdk(effects_.apply(s.pose), qual_.contract, referentialFor(*cam));
-    if(cam->mode==profiles::CameraMode::Airport){
-        sdk.trackUserAircraft = cam->aircraftTracking == "both" && !mouseHeld_;
-        auto w=profiles::airport::world({cam->originLat,cam->originLon,cam->originAltitude},s.pose.positionFRD);
+    auto submittedPose = effects_.apply(s.pose);
+    // Aircraft-relative exterior views aim at the aircraft origin. Interior cameras
+    // never inherit aircraft tracking even though the preference is global.
+    if ((cam->mode == profiles::CameraMode::AircraftExterior || cam->mode == profiles::CameraMode::Orbit) &&
+        settings_.globalAircraftTracking != "off" && !mouseHeld_) {
+        const auto target = submittedPose.positionFRD * -1;
+        const double horizontal = std::hypot(target.x,target.y);
+        if (target.length() > .5) {
+            auto angles = submittedPose.orientation.toPbh();
+            if (horizontal > .5) angles.headingDeg = std::atan2(target.y,target.x)*core::kRadToDeg;
+            if (settings_.globalAircraftTracking == "both") angles.pitchDeg = core::clamp(std::atan2(-target.z,horizontal)*core::kRadToDeg,-89.,89.);
+            submittedPose.orientation = core::Quat::fromPbh(angles);
+        }
+    }
+    SdkPose sdk = toSdk(submittedPose, qual_.contract, referentialFor(*cam));
+    if(cam->mode==profiles::CameraMode::Airport || cam->mode==profiles::CameraMode::Flyby){
+        // Keep WORLD translation and FOV independent of aircraft tracking. Submit the
+        // explicit look-at PBH below rather than the SDK's combined TARGETED mode.
+        sdk.trackUserAircraft = false;
+        const bool flyby = cam->mode==profiles::CameraMode::Flyby;
+        auto w=profiles::airport::world(flyby ? profiles::airport::Geo{flybyLat_,flybyLon_,flybyAltitude_} : profiles::airport::Geo{cam->originLat,cam->originLon,cam->originAltitude},s.pose.positionFRD);
         sdk.x=w.lat;sdk.y=w.lon;sdk.z=w.altitude;
         // World PBH uses local geographic north, not the aircraft's measured translational basis.
         auto p=s.pose.orientation.toPbh();
         // Keep the last known target through pauses/telemetry gaps instead of snapping
         // back to the saved direction. Flight changes invalidate targetAt_.
-        if(cam->aircraftTracking!="off" && targetAt_>=0 && !mouseHeld_) {
+        if(settings_.globalAircraftTracking!="off" && targetAt_>=0 && !mouseHeld_) {
             auto d=profiles::airport::local({w.lat,w.lon,w.altitude},{targetLat_,targetLon_,targetAltitude_});
             const double horizontal=std::hypot(d.x,d.y);
             if(d.finite() && horizontal>.5) {
                 p.headingDeg=std::atan2(d.y,d.x)*core::kRadToDeg;
-                if(cam->aircraftTracking=="both")p.pitchDeg=core::clamp(std::atan2(-d.z,horizontal)*core::kRadToDeg,-89.0,89.0);
+                if(settings_.globalAircraftTracking=="both")p.pitchDeg=core::clamp(std::atan2(-d.z,horizontal)*core::kRadToDeg,-89.0,89.0);
             }
         }
         sdk.pitchDeg=-p.pitchDeg;sdk.bankDeg=p.bankDeg;sdk.headingDeg=p.headingDeg;
@@ -1011,8 +1118,8 @@ void Coordinator::onAction(const ActionEvent& ev, double now) {
             emit_("SurfaceRequest", {{"target", "mini"}, {"op", "mouseLook"}});
             break;
         case Action::ToggleHeadTracking:
-            if (!ev.pressed || !eligibleToSubmit()) return;
-            emit_("HeadTrackingToggleRequested", {{"cameraId",activeCameraId_},{"enabled",headTracking_.nextEnabled()}});
+            if (!ev.pressed) return;
+            emit_("HeadTrackingToggleRequested", {{"enabled",!settings_.globalHeadTrackingEnabled}});
             break;
         case Action::SaveViews:
             if (!ev.pressed) return;
@@ -1080,7 +1187,7 @@ void Coordinator::tick(double now) {
     }
 
     if (state_ == Ownership::Active && eligibleToSubmit()) {
-        if(const auto* trackingCamera=activeEntry())headTracking_.update(activeCameraId_,trackingCamera->trackingPolicy,now);
+        if(activeEntry())headTracking_.update("global",settings_.globalHeadTrackingEnabled ? "on" : "off",now);
         emitCapabilities();
         const auto* effectCamera = activeEntry();
         effects_.tick(dt, flightMotion_, effectCamera ? effectCamera->effects : core::EffectsSettings{},
@@ -1097,9 +1204,38 @@ void Coordinator::tick(double now) {
             mouseHeadingPending_ -= heading; mousePitchPending_ -= pitch;
         }
         std::optional<core::Quat> movement;
-        if(effectCamera && effectCamera->mode==profiles::CameraMode::Airport && effectCamera->aircraftTracking!="off" && lastSubmitted_ && lastSubmitted_->referential==Referential::World)
-            movement=core::Quat::fromPbh({-lastSubmitted_->pitchDeg,lastSubmitted_->bankDeg,lastSubmitted_->headingDeg});
+        if (effectCamera && settings_.globalAircraftTracking != "off" && lastSubmitted_) {
+            if (lastSubmitted_->referential == Referential::World)
+                movement=core::Quat::fromPbh({-lastSubmitted_->pitchDeg,lastSubmitted_->bankDeg,lastSubmitted_->headingDeg});
+            else if (lastSubmitted_->referential == Referential::SimObject)
+                movement=fromSdk(*lastSubmitted_,qual_.contract).orientation;
+        }
+        const bool manualActive = mouseHeld_ || manual_.lookRight != 0 || manual_.lookUp != 0 || manual_.moveForward != 0 ||
+            manual_.moveRight != 0 || manual_.moveUp != 0 || manual_.zoomIn != 0;
         engine_.tick(dt, manual_, movement);
+        if (effectCamera && (effectCamera->mode == profiles::CameraMode::Orbit || effectCamera->mode == profiles::CameraMode::Flyby) && !engine_.transitioning() && !manualActive && !motionPaused_ && dt <= .1) {
+            motionTime_ += dt;
+            engine_.animateBase(motionPose(*effectCamera));
+        }
+        if (walkaround_ && !engine_.transitioning()) {
+            if (manualActive) walkaround_->elapsed = 0;
+            else if (!motionPaused_ && dt <= .1) walkaround_->elapsed += dt;
+            if (walkaround_->elapsed >= walkaround_->interval) {
+                std::vector<std::string> ids;
+                if (profile_) for (const auto& category : profile_->categories) if (category.id == walkaround_->categoryId)
+                    for (const auto& id : category.cameraIds) if (const auto* entry=profile_->camera(id); entry && entry->mode==profiles::CameraMode::AircraftExterior) ids.push_back(id);
+                const auto current = std::find(ids.begin(),ids.end(),activeCameraId_);
+                if (ids.empty() || current == ids.end() || (std::next(current) == ids.end() && !walkaround_->loop)) stopWalkaround();
+                else {
+                    const auto next = std::next(current) == ids.end() ? ids.front() : *std::next(current);
+                    walkaround_->elapsed = 0;
+                    walkaroundAdvancing_ = true;
+                    const auto error = activate(next,now,false);
+                    walkaroundAdvancing_ = false;
+                    if (!error.empty()) stopWalkaround();
+                }
+            }
+        }
         const auto s = engine_.sample();
         if (!s.valid) {
             fault("invalidPose", "Camera stopped: the computed view was outside the allowed range.", now);

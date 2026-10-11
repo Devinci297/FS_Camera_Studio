@@ -23,7 +23,7 @@ constexpr const char* kDiagnosticsFile = "\\work\\fscs-diagnostics.log";
 // Latest-state events: only the newest payload matters, so they are coalesced and flushed at <= 10 Hz.
 bool isStateEvent(const std::string& n) {
     return n == "SessionChanged" || n == "AircraftChanged" || n == "OwnershipChanged" || n == "CapabilitiesChanged" ||
-           n == "ActiveCameraChanged" || n == "SelectionChanged" || n == "TemporaryLookChanged" || n == "ProfilesChanged";
+           n == "ActiveCameraChanged" || n == "WalkaroundChanged" || n == "SelectionChanged" || n == "TemporaryLookChanged" || n == "ProfilesChanged";
 }
 
 // Pinning the mini panel is a global UI preference, saved on its own and never an unsaved edit (design 2.0 §4.3).
@@ -123,7 +123,7 @@ void ModuleApp::update(double now) {
     for (const auto& [token, g] : gestures_) manual = add(manual, g.input);
     coord_.setManualInput(manual);
     if (manual.moveForward || manual.moveRight || manual.moveUp || manual.lookRight || manual.lookUp)
-        setAirportAuto(false, now);
+        lastAutoSwitch_ = now; // Manual movement pauses the shared mode; it does not turn it off.
     updateAirportAuto(now);
 
     if (!testDefinition_.empty() && now > testUntil_) {
@@ -161,10 +161,22 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
             if (!testDefinition_.empty()) emitNow("InputTest", {{"definition", testDefinition_}, {"phase", in->down ? "down" : "up"}, {"value", in->value}});
             return;
         }
+        const auto before = router_.manualInput();
         for (const auto& a : router_.onInput(in->index, in->down, in->value)) {
             if (a.pulse && (paused_ || !simRunning_)) continue;
             coord_.onAction(a, now);
         }
+        const auto after = router_.manualInput();
+        if (before.moveForward != after.moveForward || before.moveRight != after.moveRight ||
+            before.moveUp != after.moveUp || before.fast != after.fast) {
+            diag("movement " + js::dump({{"forward", after.moveForward}, {"right", after.moveRight},
+                 {"up", after.moveUp}, {"fast", after.fast}}));
+        }
+        return;
+    }
+    if (const auto* mapping = std::get_if<backend_event::InputMappingStatus>(&ev)) {
+        diag("input mapping result " + js::dump({{"ready", mapping->ready}, {"definitions", mapping->definitions},
+             {"failedCalls", mapping->failedCalls}, {"code", mapping->code}}));
         return;
     }
     if (const auto* c = std::get_if<backend_event::ControllersList>(&ev)) {
@@ -234,7 +246,7 @@ json ModuleApp::snapshot() const {
     const json displayProfile=combinedProfile();
     json hasCommitted = json::object();
     const json committed = working_.profile.is_object() ? committedProfile(js::str(working_.profile, "profileId")) : json(nullptr);
-    if (working_.profile.is_object())
+    if (displayProfile.is_object())
         for (const auto& cam : js::array(displayProfile, "cameras")) {
             bool found = false;
             for (const auto& c : js::array(committed, "cameras")) found = found || js::str(c, "id") == js::str(cam, "id");
@@ -259,14 +271,15 @@ json ModuleApp::snapshot() const {
             {"ownership", {{"state", toString(coord_.ownership())}, {"gameControlled", coord_.gameControlled()}, {"reason", coord_.stateReason()}}},
             {"capabilities", coord_.capabilitiesJson()},
             {"activeCamera", active},
-            {"selection", {{"profileId", working_.profile.is_object() ? js::get(working_.profile, "profileId") : json(nullptr)},
+            {"walkaround", coord_.walkaroundJson()},
+            {"selection", {{"profileId", displayProfile.is_object() ? js::get(displayProfile, "profileId") : json(nullptr)},
                            {"cameraId", selection_.empty() ? json(nullptr) : json(selection_)}}},
             {"profiles", profilesList()},
             {"working", {{"profile", displayProfile},
                          {"settings", working_.settings},
                          {"bindings", working_.bindings},
                          {"draftRevision", working_.draftRevision},
-                         {"dirty", {{"profile", working_.dirtyProfile}, {"settings", working_.dirtySettings}, {"bindings", working_.dirtyBindings}}},
+                         {"dirty", {{"profile", working_.dirtyProfile}, {"aircraftProfile", aircraftDirty()}, {"airport", airportDirty()}, {"settings", working_.dirtySettings}, {"bindings", working_.dirtyBindings}}},
                          {"committedRevision", js::get(committed, "revision")},
                          {"hasCommittedVersion", hasCommitted}}},
             {"pendingCommit", pendingCommit_ ? json(pendingCommit_->requestId) : json(nullptr)},
@@ -378,7 +391,7 @@ void ModuleApp::handle(const Command& c, double now) {
     }
     if (a == "BeginPeek" || a == "EndPeek" || a == "CycleCamera" || a == "NextCategory" || a == "ReturnToPilot" ||
         a == "RecenterLook" || a == "CancelMotion" || a == "BakeTemporaryLook" || a == "EnumerateDefinitions" ||
-        a == "CaptureView" || a == "SeedFromDefinition" || a == "MouseLookDelta") {
+        a == "CaptureView" || a == "SeedFromDefinition" || a == "MouseLookDelta" || a == "StartWalkaround" || a == "StopWalkaround") {
         if (a == "CaptureView" || a == "SeedFromDefinition") captureRequester_ = c.uiInstanceId;
         send(forward(c, now));
         return;
@@ -479,7 +492,7 @@ void ModuleApp::handle(const Command& c, double now) {
             commit(std::move(pref), {c.requestId, "preference", working_.draftRevision, nullptr, {}}, now);
         }
         emitNow("DraftChanged", {{"draftRevision", working_.draftRevision},
-                                 {"dirty", {{"profile", working_.dirtyProfile}, {"settings", working_.dirtySettings}, {"bindings", working_.dirtyBindings}}},
+                                 {"dirty", {{"profile", working_.dirtyProfile}, {"aircraftProfile", aircraftDirty()}, {"airport", airportDirty()}, {"settings", working_.dirtySettings}, {"bindings", working_.dirtyBindings}}},
                                  {"ops", applied},
                                  {"origin", c.uiInstanceId}});
         return;
@@ -505,10 +518,10 @@ void ModuleApp::handle(const Command& c, double now) {
         return;
     }
     if (a == "CommitChanges") {
-        if (!working_.profile.is_object() && !working_.dirtySettings && !working_.dirtyBindings)
+        if (!working_.profile.is_object() && !working_.dirtyProfile && !working_.dirtySettings && !working_.dirtyBindings)
             return reply(c, AckStatus::Rejected, "There is nothing to save.");
         CommitRequest req;
-        if (working_.profile.is_object() && working_.dirtyProfile) req.upsertProfiles.push_back(working_.profile);
+        if (aircraftDirty()) req.upsertProfiles.push_back(working_.profile);
         for(const auto& [code,doc]:airportDrafts_)if(withoutRevision(doc)!=withoutRevision(committedProfile(js::str(doc,"profileId"))))req.upsertProfiles.push_back(doc);
         req.settings = working_.settings;
         req.bindings = working_.bindings;
@@ -524,7 +537,7 @@ void ModuleApp::handle(const Command& c, double now) {
         const std::string id = js::str(p, "profileId");
         if (!repo_.committed().profiles.count(id)) return reply(c, AckStatus::Rejected, "That profile does not exist.");
         if (pendingCommit_) return reply(c, AckStatus::Rejected, "A save is in progress.");
-        if (working_.dirtyProfile && !js::boolean(p, "discard", false)) return reply(c, AckStatus::Rejected, "unsavedChanges");
+        if (aircraftDirty() && !js::boolean(p, "discard", false)) return reply(c, AckStatus::Rejected, "unsavedChanges");
         if(js::str(committedProfile(id),"scope")=="airport")return reply(c,AckStatus::Rejected,"Choose this airport from Nearby airports.");
         openProfile(id, now);
         reply(c, AckStatus::Completed);
@@ -542,6 +555,7 @@ void ModuleApp::handle(const Command& c, double now) {
         } else if (from == "profile") {
             doc = committedProfile(js::str(p, "profileId"));
             if (!doc.is_object()) return reply(c, AckStatus::Rejected, "That profile does not exist.");
+            if(js::str(doc,"scope")=="airport")return reply(c,AckStatus::Rejected,"Airport cameras are shared globally and cannot be copied into an aircraft profile.");
             profiles::reassignIds(doc);
         } else {
             const bool forAircraft = js::boolean(p, "forAircraft", true) && !aircraftModelKey_.empty();
@@ -553,7 +567,7 @@ void ModuleApp::handle(const Command& c, double now) {
         if (js::boolean(p, "forAircraft", false) && !aircraftModelKey_.empty())
             doc["aircraftMatch"] = {{"strategy", "aircraftPath"}, {"modelKey", aircraftModelKey_}, {"variantKey", nullptr},
                                     {"displayName", aircraftTitle_.empty() ? json(aircraftModelKey_) : json(aircraftTitle_)}, {"confirmed", false}};
-        if (from != "working" && working_.dirtyProfile && !js::boolean(p, "discard", false))
+        if (from != "working" && aircraftDirty() && !js::boolean(p, "discard", false))
             return reply(c, AckStatus::Rejected, "unsavedChanges");
         CommitRequest req;
         req.upsertProfiles.push_back(doc);
@@ -583,6 +597,7 @@ void ModuleApp::handle(const Command& c, double now) {
         const std::string id = js::str(p, "profileId");
         json doc = committedProfile(id);
         if (!doc.is_object()) return reply(c, AckStatus::Rejected, "That profile does not exist.");
+        if(js::str(doc,"scope")=="airport")return reply(c,AckStatus::Rejected,"Airport cameras are shared by every aircraft and cannot be bound to one aircraft.");
         const json match{{"strategy", "userConfirmedModelVariant"}, {"modelKey", aircraftModelKey_}, {"variantKey", nullptr},
                          {"displayName", aircraftTitle_.empty() ? json(aircraftModelKey_) : json(aircraftTitle_)}, {"confirmed", true}};
         doc["aircraftMatch"] = match;
@@ -623,34 +638,59 @@ void ModuleApp::handle(const Command& c, double now) {
     if (a == "ExportProfile") {
         const std::string id = js::str(p, "profileId");
         const bool isWorking = working_.profile.is_object() && js::str(working_.profile, "profileId") == id;
-        const bool useWorking = isWorking && js::boolean(p, "working", working_.dirtyProfile);
+        const bool useWorking = isWorking && js::boolean(p, "working", aircraftDirty());
         json doc = useWorking ? working_.profile : committedProfile(id);
         if (!doc.is_object()) return reply(c, AckStatus::Rejected, "That profile does not exist.");
         return reply(c, AckStatus::Completed, {},
-                     {{"code", profiles::exportProfileCode(doc, useWorking && working_.dirtyProfile)},
-                      {"label", useWorking && working_.dirtyProfile ? "working copy" : "saved"},
+                     {{"code", profiles::exportProfileCode(doc, useWorking && aircraftDirty())},
+                      {"label", useWorking && aircraftDirty() ? "working copy" : "saved"},
                       {"path", nullptr}});
     }
+    if (a == "ListImportFiles") {
+        storage_.listImportFiles([this, c](std::vector<std::string> names, std::string error) {
+            json files = json::array();
+            for (const auto& name : names) if (profiles::validProfileImportFilename(name)) files.push_back(name);
+            reply(c, AckStatus::Completed, {}, {{"files", files}, {"error", error},
+                {"folder", "%APPDATA%\\Microsoft Flight Simulator 2024\\WASM\\MSFS2024\\fs-camera-studio\\work\\imports"},
+                {"nativePicker", false}, {"openFolder", false}});
+        });
+        return;
+    }
+    if (a == "ImportProfileFile") {
+        const auto name = js::str(p, "filename");
+        if (!profiles::validProfileImportFilename(name)) return reply(c, AckStatus::Rejected, "Choose a JSON profile from the imports folder.");
+        storage_.readFile(std::string(profiles::kProfileImportFolder) + name,
+            [this, c](std::optional<std::string> bytes) {
+                if (!bytes) return reply(c, AckStatus::Rejected, "That profile file is missing or could not be read. Refresh and choose it again.");
+                if (bytes->size() >= 3 && bytes->compare(0, 3, "\xEF\xBB\xBF") == 0) bytes->erase(0, 3);
+                importProfileCode(c, *bytes, now_);
+            });
+        return;
+    }
     if (a == "ImportProfile") {
-        std::string err;
-        auto report = profiles::importProfileCode(js::str(p, "code"), &err);
-        if (!report) return reply(c, AckStatus::Rejected, err);
-        json rep{{"cameraCount", report->cameraCount},
-                 {"unsupportedCount", report->unsupportedCount},
-                 {"notes", report->notes},
-                 {"name", js::get(report->profile, "name")},
-                 {"aircraft", js::get(js::object(report->profile, "aircraftMatch"), "displayName")},
-                 {"matchesLoadedAircraft", !aircraftModelKey_.empty() &&
-                                               js::str(js::object(report->profile, "aircraftMatch"), "modelKey") == aircraftModelKey_}};
-        CommitRequest req;
-        req.upsertProfiles.push_back(report->profile);
-        req.navigation = navigation();
-        req.requestId = c.uiInstanceId + ":" + c.requestId;
-        reply(c, AckStatus::Pending, {}, {{"report", rep}, {"profileId", js::get(report->profile, "profileId")}});
-        commit(std::move(req), {c.requestId, "import", working_.draftRevision, rep, {}}, now);
+        importProfileCode(c, js::str(p, "code"), now);
         return;
     }
     reply(c, AckStatus::Rejected, "unknownAction");
+}
+
+void ModuleApp::importProfileCode(const protocol::Command& c, const std::string& code, double now) {
+    std::string err;
+    auto report = profiles::importProfileCode(code, &err);
+    if (!report) return reply(c, AckStatus::Rejected, err);
+    json rep{{"cameraCount", report->cameraCount},
+             {"unsupportedCount", report->unsupportedCount},
+             {"notes", report->notes},
+             {"name", js::get(report->profile, "name")},
+             {"aircraft", js::get(js::object(report->profile, "aircraftMatch"), "displayName")},
+             {"matchesLoadedAircraft", !aircraftModelKey_.empty() &&
+                                           js::str(js::object(report->profile, "aircraftMatch"), "modelKey") == aircraftModelKey_}};
+    CommitRequest req;
+    req.upsertProfiles.push_back(report->profile);
+    req.navigation = navigation();
+    req.requestId = c.uiInstanceId + ":" + c.requestId;
+    reply(c, AckStatus::Pending, {}, {{"report", rep}, {"profileId", js::get(report->profile, "profileId")}});
+    commit(std::move(req), {c.requestId, "import", working_.draftRevision, rep, {}}, now);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -660,15 +700,12 @@ void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
     if (name == "SaveViewsRequested") { saveViewsRequested_=true; return; }
     if (name == "AirportAutoToggleRequested") { setAirportAuto(!airportAuto_,now_); return; }
     if (name == "HeadTrackingToggleRequested") {
-        const auto display=combinedProfile();
-        for (auto cam : js::array(display,"cameras")) if(js::str(cam,"id")==js::str(payload,"cameraId")) {
-            cam["trackingPolicy"]=js::boolean(payload,"enabled",true)?"on":"off";
-            json applied; std::string err;
-            if(applyOps(json::array({{{"op","setCamera"},{"camera",cam}}}),applied,err)) {
-                publishWorking(now_,false);
-                emitNow("DraftChanged",{{"draftRevision",working_.draftRevision},{"dirty",{{"profile",working_.dirtyProfile},{"settings",working_.dirtySettings},{"bindings",working_.dirtyBindings}}},{"ops",applied},{"origin","module"}});
-            }
-            break;
+        json settings=working_.settings;
+        settings["host"]["globalHeadTrackingEnabled"]=js::boolean(payload,"enabled",false);
+        json applied; std::string err;
+        if(applyOps(json::array({{{"op","setSettings"},{"settings",settings}}}),applied,err)) {
+            publishWorking(now_,false);
+            emitNow("DraftChanged",{{"draftRevision",working_.draftRevision},{"dirty",{{"profile",working_.dirtyProfile},{"aircraftProfile",aircraftDirty()},{"airport",airportDirty()},{"settings",working_.dirtySettings},{"bindings",working_.dirtyBindings}}},{"ops",applied},{"origin","module"}});
         }
         return;
     }
@@ -708,7 +745,7 @@ void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
                 if (applyOps(json::array({{{"op", "setCamera"}, {"camera", updated}}}), applied, err)) {
                     publishWorking(now_, false);
                     emitNow("DraftChanged", {{"draftRevision", working_.draftRevision},
-                                             {"dirty", {{"profile", working_.dirtyProfile}, {"settings", working_.dirtySettings}, {"bindings", working_.dirtyBindings}}},
+                                             {"dirty", {{"profile", working_.dirtyProfile}, {"aircraftProfile", aircraftDirty()}, {"airport", airportDirty()}, {"settings", working_.dirtySettings}, {"bindings", working_.dirtyBindings}}},
                                              {"ops", applied},
                                              {"origin", "module"}});
                 }
@@ -769,12 +806,12 @@ json ModuleApp::navigation() const {
 void ModuleApp::selectCamera(const std::string& cameraId) {
     selection_ = cameraId;
     if (working_.profile.is_object()) lastCamera_[js::str(working_.profile, "profileId")] = cameraId;
-    emitState("SelectionChanged", {{"profileId", working_.profile.is_object() ? js::get(working_.profile, "profileId") : json(nullptr)},
+    emitState("SelectionChanged", {{"profileId", coord_.profile() ? json(coord_.profile()->profileId) : json(nullptr)},
                                    {"cameraId", cameraId.empty() ? json(nullptr) : json(cameraId)}});
 }
 
 std::string ModuleApp::selectionFallback() const {
-    if (!working_.profile.is_object()) return {};
+    if (!working_.profile.is_object()) return js::str(combinedProfile(),"defaultCameraId");
     return js::str(working_.profile, "defaultCameraId");
 }
 
@@ -790,6 +827,10 @@ void ModuleApp::openProfile(const std::string& profileId, double now) {
     selectCamera(sel);
 }
 
+bool ModuleApp::aircraftDirty() const {
+    return working_.profile.is_object() && withoutRevision(working_.profile)!=withoutRevision(committedProfile(js::str(working_.profile,"profileId")));
+}
+
 void ModuleApp::recomputeDirty() {
     const auto& st = repo_.committed();
     const json committed = working_.profile.is_object() ? committedProfile(js::str(working_.profile, "profileId")) : json(nullptr);
@@ -799,9 +840,13 @@ void ModuleApp::recomputeDirty() {
 }
 
 void ModuleApp::publishWorking(double now, bool bindingsChanged) {
-    if (working_.profile.is_object()) {
-        json copy = combinedProfile();
-        coord_.setProfile(profiles::toSnapshot(copy), now);
+    json copy = combinedProfile();
+    if (copy.is_object()) {
+        auto runtimeProfile = profiles::toSnapshot(copy);
+        // Airport-only libraries are global. Bind their runtime camera snapshot to
+        // the loaded aircraft without changing the persisted airport identity.
+        if (js::str(copy, "scope") == "airport") runtimeProfile.modelKey = coord_.aircraft().modelKey;
+        coord_.setProfile(std::move(runtimeProfile), now);
     } else {
         coord_.setProfile(std::nullopt, now);
     }
@@ -920,7 +965,9 @@ void ModuleApp::commit(CommitRequest req, PendingCommit pending, double now) {
     }
     pendingCommit_ = pending;
     // Snapshot of what this transaction publishes; later edits stay dirty.
-    const json profileAtRequest = req.upsertProfiles.empty() ? json(nullptr) : req.upsertProfiles.front();
+    json profileAtRequest = nullptr;
+    if(working_.profile.is_object())for(const auto& doc:req.upsertProfiles)
+        if(js::str(doc,"profileId")==js::str(working_.profile,"profileId"))profileAtRequest=doc;
     const auto airportAtRequest=airportDrafts_;
     repo_.commit(std::move(req), [this, profileAtRequest, airportAtRequest](const CommitResult& r) {
         PendingCommit pc = *pendingCommit_;
@@ -935,8 +982,14 @@ void ModuleApp::commit(CommitRequest req, PendingCommit pending, double now) {
             if (pc.kind == "bind" && working_.profile.is_object() && js::str(working_.profile, "profileId") == pc.openAfter) {
                 working_.profile["aircraftMatch"] = js::get(committedProfile(pc.openAfter), "aircraftMatch");
             }
-            if(pc.kind=="save" || pc.kind=="airport")for(auto& [code,doc]:airportDrafts_){auto it=airportAtRequest.find(code);if(it!=airportAtRequest.end()&&withoutRevision(doc)==withoutRevision(it->second)){auto saved=committedProfile(js::str(doc,"profileId"));if(saved.is_object())doc=saved;}}
-            if(pc.kind=="airport") {airportDrafts_.erase(js::str(pc.report,"icao"));refreshAirports(now_);}
+            if(pc.kind=="save" || pc.kind=="airport")for(auto& [code,doc]:airportDrafts_){if(pc.kind=="airport"&&code!=js::str(pc.report,"icao"))continue;auto it=airportAtRequest.find(code);if(it!=airportAtRequest.end()&&withoutRevision(doc)==withoutRevision(it->second)){auto saved=committedProfile(js::str(doc,"profileId"));if(saved.is_object())doc=saved;}}
+            if(pc.kind=="airport") {
+                const auto code=js::str(pc.report,"icao");
+                // The loop above already replaces an unchanged draft with the verified
+                // saved document. Never erase edits made while this commit was pending.
+                if(!airportAtRequest.count(code))airportDrafts_.erase(code);
+                refreshAirports(now_);
+            }
             recomputeDirty();
             if (pc.kind == "qualification") coord_.refreshQualification();
             if (pc.kind == "create" && !pc.openAfter.empty()) {
@@ -965,13 +1018,25 @@ void ModuleApp::commit(CommitRequest req, PendingCommit pending, double now) {
             completed["g03"] = js::boolean(pc.report, "g03", false);
         }
         emitNow("CommitCompleted", std::move(completed));
+        // A shortcut save broadcasts its completion, but only one live panel speaks.
+        // Never acknowledge success before the storage transaction commits.
+        if (r.status == CommitStatus::Committed && pc.kind == "save" && pc.requestId.rfind("save-views-", 0) == 0) {
+            std::string speaker;
+            int best = -1;
+            for (const auto& [id, instance] : instances_) {
+                if (instance.lapsed) continue;
+                const int score = (instance.visible ? 2 : 0) + (instance.surface == "main" ? 1 : 0);
+                if (score > best) { best = score; speaker = id; }
+            }
+            if (!speaker.empty()) emitNow("CamerasSaved", {{"requestId", pc.requestId}}, speaker);
+        }
         if (r.status == CommitStatus::Committed) {
             if (pc.kind == "create" || pc.kind == "bind" || pc.kind == "import" || pc.kind == "delete" || pc.kind == "airport") {
                 resolveAircraft_ = pc.kind == "bind";
                 broadcastSnapshot();
             } else {
                 emitNow("DraftChanged", {{"draftRevision", working_.draftRevision},
-                                         {"dirty", {{"profile", working_.dirtyProfile}, {"settings", working_.dirtySettings}, {"bindings", working_.dirtyBindings}}},
+                                         {"dirty", {{"profile", working_.dirtyProfile}, {"aircraftProfile", aircraftDirty()}, {"airport", airportDirty()}, {"settings", working_.dirtySettings}, {"bindings", working_.dirtyBindings}}},
                                          {"ops", json::array()},
                                          {"origin", "module"}});
                 emitState("ProfilesChanged", {{"profiles", profilesList()}});
@@ -997,7 +1062,7 @@ void ModuleApp::resolveAircraftProfile(double now) {
     }
     const auto& st = repo_.committed();
     const std::string preferred = js::str(js::object(st.navigation, "lastByModel"), aircraftModelKey_.c_str());
-    if (profiles::isA320(aircraftModelKey_, aircraftTitle_) && !working_.dirtyProfile && !pendingCommit_) {
+    if (profiles::isA320(aircraftModelKey_, aircraftTitle_) && !aircraftDirty() && !pendingCommit_) {
         // A saved user profile takes precedence. Never install over or reopen it with starter poses.
         bool hasModelProfile = false;
         for (const auto& [id, rec] : st.profiles)
@@ -1017,7 +1082,7 @@ void ModuleApp::resolveAircraftProfile(double now) {
             return;
         }
     }
-    if (profiles::isC172(aircraftModelKey_, aircraftTitle_) && !working_.dirtyProfile && !pendingCommit_) {
+    if (profiles::isC172(aircraftModelKey_, aircraftTitle_) && !aircraftDirty() && !pendingCommit_) {
         bool installed = false;
         for (const auto& [id, rec] : st.profiles) {
             if (js::str(rec.current, "builtinTemplate") == "c172-complete-v1" &&
@@ -1054,7 +1119,7 @@ void ModuleApp::resolveAircraftProfile(double now) {
         reason = strategy == "userConfirmedModelVariant" ? "Matched because you chose this profile for this aircraft"
                                                           : "Matched by the aircraft's package";
         if (chosen != openId) {
-            if (!working_.dirtyProfile && !pendingCommit_) {
+            if (!aircraftDirty() && !pendingCommit_) {
                 openProfile(chosen, now);
                 broadcastSnapshot();
             } else {

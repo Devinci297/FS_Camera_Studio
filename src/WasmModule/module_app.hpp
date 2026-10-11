@@ -73,6 +73,7 @@ private:
     // Panel messages
     void onPanelText(const std::string& text, double now);
     void handle(const protocol::Command& c, double now);
+    void importProfileCode(const protocol::Command& c, const std::string& code, double now);
     void reply(const protocol::Command& c, protocol::AckStatus s, const std::string& reason = {}, json result = nullptr);
     void send(const json& message);
     void emitState(const std::string& name, json payload);  // coalesced latest-state event
@@ -92,6 +93,7 @@ private:
     void openProfile(const std::string& profileId, double now);
     void publishWorking(double now, bool bindingsChanged);
     void recomputeDirty();
+    bool aircraftDirty() const;
     bool applyOps(const json& ops, json& applied, std::string& error);
     json committedProfile(const std::string& profileId) const;
     void resolveAircraftProfile(double now);
@@ -111,7 +113,7 @@ private:
     void refreshAirports(double now);
     bool setAirportAuto(bool enabled, double now);
     void updateAirportAuto(double now);
-    bool airportAuto_=false, saveViewsRequested_=false;
+    bool airportAuto_=false, autoMouseDown_=false, saveViewsRequested_=false;
     std::string autoCameraId_;
     double lastAutoCheck_=-100, lastAutoSwitch_=-100, positionAt_=-100;
     json airportState() const;

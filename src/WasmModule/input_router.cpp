@@ -28,6 +28,8 @@ const std::vector<std::string>& InputRouter::setBindings(std::vector<profiles::B
     releaseAll();
     bindings_ = std::move(bindings);
     fastBindings_.clear();
+    movementFamilies_.clear();
+    fastModifiers_.clear();
     const auto configured = bindings_;
     std::set<std::string> modifiers;
     for (const auto& b : configured) {
@@ -41,19 +43,25 @@ const std::vector<std::string>& InputRouter::setBindings(std::vector<profiles::B
             modifiers.insert(key);
         }
     }
-    const auto alias = [&](profiles::Binding b, const std::string& definition, bool fast) {
+    const auto alias = [&](profiles::Binding b, const std::string& definition, const std::string& family, const std::string& modifier) {
         if (std::any_of(bindings_.begin(), bindings_.end(), [&](const auto& existing) {
                 return existing.input.definition == definition;
             })) return;
         b.input.definition = definition;
-        if (fast) fastBindings_.insert(bindings_.size());
+        const auto index = bindings_.size();
+        if (!family.empty()) movementFamilies_[index] = family;
+        if (!modifier.empty()) {
+            fastBindings_.insert(index);
+            fastModifiers_[index] = modifier;
+        }
         bindings_.push_back(std::move(b));
     };
-    for (const auto& b : configured) {
+    for (std::size_t bindingIndex = 0; bindingIndex < configured.size(); ++bindingIndex) {
+        const auto& b = configured[bindingIndex];
         if (b.action == Action::MoveFast && b.input.kind == profiles::InputKind::Key &&
             b.input.definition == "VK_SHIFT") {
-            alias(b, "VK_LSHIFT", false);
-            alias(b, "VK_RSHIFT", false);
+            alias(b, "VK_LSHIFT", {}, {});
+            alias(b, "VK_RSHIFT", {}, {});
         }
         const bool movement = b.action == Action::MoveForward || b.action == Action::MoveBack ||
                               b.action == Action::MoveLeft || b.action == Action::MoveRight ||
@@ -65,10 +73,11 @@ const std::vector<std::string>& InputRouter::setBindings(std::vector<profiles::B
         const auto key = static_cast<unsigned char>(b.input.definition[0]);
         const std::string lower(1, static_cast<char>(std::tolower(key)));
         const std::string upper(1, static_cast<char>(std::toupper(key)));
-        alias(b, lower, false);
-        alias(b, upper, false);
+        movementFamilies_[bindingIndex] = lower;
+        alias(b, lower, lower, {});
+        alias(b, upper, lower, {});
         for (const auto& modifier : modifiers)
-            for (const auto& letter : {lower, upper}) alias(b, modifier + "+" + letter, true);
+            for (const auto& letter : {lower, upper}) alias(b, modifier + "+" + letter, lower, modifier);
     }
     definitions_.clear();
     bindingsForDefinition_.clear();
@@ -122,8 +131,31 @@ std::vector<ActionEvent> InputRouter::onInput(std::size_t index, bool down, std:
             if (!physicallyDown_.insert(physical).second) return {};  // repeat
             out = press(candidates.front(), physical);  // one action per input
         } else {
-            physicallyDown_.erase(physical);
-            out = release(physical);
+            // A key's release may arrive under a different case/chord after Shift changes.
+            // Reconcile only our movement aliases; unrelated configured shortcuts stay independent.
+            const auto family = movementFamilies_.find(candidates.front());
+            const auto& releasedDefinition = first.input.definition;
+            const auto isShift = [](const std::string& def) {
+                return def == "VK_SHIFT" || def == "VK_LSHIFT" || def == "VK_RSHIFT";
+            };
+            for (const auto& [otherIndex, otherCandidates] : bindingsForDefinition_) {
+                const auto other = otherCandidates.front();
+                const auto otherFamily = movementFamilies_.find(other);
+                const auto modifier = fastModifiers_.find(other);
+                const bool sameFamily = family != movementFamilies_.end() &&
+                    otherFamily != movementFamilies_.end() && family->second == otherFamily->second;
+                const bool releasedModifier = modifier != fastModifiers_.end() &&
+                    (modifier->second == releasedDefinition || (releasedDefinition == "VK_SHIFT" && isShift(modifier->second)));
+                const auto& otherBinding = bindings_[other];
+                const bool shiftAlias = isShift(releasedDefinition) && otherBinding.action == Action::MoveFast &&
+                    isShift(otherBinding.input.definition) &&
+                    (releasedDefinition == "VK_SHIFT" || otherBinding.input.definition == "VK_SHIFT");
+                if (otherIndex != index && !sameFamily && !releasedModifier && !shiftAlias) continue;
+                const std::string otherPhysical = "d" + std::to_string(otherIndex);
+                physicallyDown_.erase(otherPhysical);
+                auto events = release(otherPhysical);
+                out.insert(out.end(), events.begin(), events.end());
+            }
         }
         return out;
     }

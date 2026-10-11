@@ -46,9 +46,12 @@ $definition = Join-Path $project 'PackageDefinitions\fs-camera-studio.xml'
 # Web UI
 $panelDir = Join-Path $project 'PackageSources\html_ui\InGamePanels\FSCameraStudio'
 New-Item -ItemType Directory -Force $panelDir | Out-Null
-foreach ($f in 'app.css', 'app.js', 'bridge.js', 'icons.js', 'math.js', 'msfs-panel.js', 'version.js', 'updates.js') {
+foreach ($f in 'app.css', 'app.js', 'bridge.js', 'icons.js', 'math.js', 'msfs-panel.js', 'version.js', 'updates.js', 'save-feedback.js') {
     Copy-Item (Join-Path $root "ui\$f") $panelDir
 }
+
+Copy-Item -Recurse (Join-Path $root "ui\audio") $panelDir
+Copy-Item -Recurse (Join-Path $root "ui\icons") $panelDir
 
 # Panel pages: the shared index.html wrapped in the simulator's <ingame-ui> host, with the sim's CommBus library.
 # Files are read and written as UTF-8 without BOM (Windows PowerShell's defaults would mangle non-ASCII text).

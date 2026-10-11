@@ -114,6 +114,7 @@ public:
     void offsetLook(double headingDeg, double pitchDeg);
     void offsetPosition(const Vec3& delta);
     void offsetFov(double deltaRad);
+    void animateBase(const CameraPose& pose) { if (pose.withinLimits() && !transition_) base_ = pose; }
     void freeze();  // simulator suspension: stop time and held motion
     void recenterLook() { look_ = {}; mover_.neutralize(); }
     void setSpeeds(const ManualSpeeds& s) { mover_.setSpeeds(s); }

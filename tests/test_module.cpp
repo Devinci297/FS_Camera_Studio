@@ -527,9 +527,11 @@ TEST_CASE("module: Ctrl S bakes manual movement and commits all changes once per
     m.app.onEvent(be::InputEvent{save,false},m.t);
     auto bindings=fscs::profiles::defaultBindingsDocument();bindings["bindings"].push_back({{"action","toggleHeadTracking"},{"input",{{"kind","key"},{"definition","T"}}}});
     m.panel("UpdateDraft",{{"ops",{{{"op","setBindings"},{"bindings",bindings}}}}},"main-1",m.app.draftRevision());
-    m.app.onEvent(be::InputEvent{index("T"),true},m.t);m.frame();CHECK_EQ(m.app.workingProfile()["cameras"][0]["trackingPolicy"],json("off"));CHECK(m.camera.tracking==false);
+    const auto legacyPolicy=m.app.workingProfile()["cameras"][0]["trackingPolicy"];
+    m.app.onEvent(be::InputEvent{index("T"),true},m.t);m.frame();CHECK_EQ(m.app.workingProfile()["cameras"][0]["trackingPolicy"],legacyPolicy);CHECK(m.camera.tracking==true);
+    m.panel("RequestSnapshot");CHECK(m.lastEvent("Snapshot")["payload"]["working"]["settings"]["host"]["globalHeadTrackingEnabled"].get<bool>());
 }
-TEST_CASE("module: airport nearest auto switch has a dwell and manual movement turns it off") {
+TEST_CASE("module: airport auto switch stays on during manual movement and resumes after dwell") {
     ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});m.panel("CreateProfile",{{"name","Airport switching"},{"forAircraft",true}});
     m.app.onEvent(be::AircraftPosition{40,-90,100},m.t);
     m.panel("PreviewAirportSource",{{"facility",airportFixture()}});auto preview=m.lastEvent("AirportPreview")["payload"]["profile"];
@@ -546,7 +548,12 @@ TEST_CASE("module: airport nearest auto switch has a dwell and manual movement t
     for(int i=0;i<100;++i){m.app.onEvent(be::AircraftPosition{near.lat,near.lon,near.altitude},m.t);m.frame();}
     CHECK_EQ(m.app.coordinator().activeCameraId(),second["id"].get<std::string>());
     auto move=static_cast<std::size_t>(std::find(m.services.mapped.begin(),m.services.mapped.end(),"W")-m.services.mapped.begin());m.app.onEvent(be::InputEvent{move,true},m.t);m.frame();
-    m.panel("RequestSnapshot");CHECK(!m.lastEvent("Snapshot")["payload"]["airports"]["autoSwitch"].get<bool>());
+    m.panel("RequestSnapshot");CHECK(m.lastEvent("Snapshot")["payload"]["airports"]["autoSwitch"].get<bool>());
+    for(int i=0;i<240;++i){m.app.onEvent(be::AircraftPosition{firstWorld.lat,firstWorld.lon,firstWorld.altitude},m.t);m.frame();}
+    CHECK_EQ(m.app.coordinator().activeCameraId(),second["id"].get<std::string>());
+    m.app.onEvent(be::InputEvent{move,false},m.t);
+    for(int i=0;i<220;++i){m.app.onEvent(be::AircraftPosition{firstWorld.lat,firstWorld.lon,firstWorld.altitude},m.t);m.frame();}
+    CHECK_EQ(m.app.coordinator().activeCameraId(),first["id"].get<std::string>());
 }
 
 TEST_CASE("module: global airport auto acquires nearest view from released or cockpit camera") {
@@ -570,6 +577,35 @@ TEST_CASE("module: global airport auto acquires nearest view from released or co
     CHECK_EQ(m.app.coordinator().activeCameraId(),target["id"].get<std::string>());
     m.panel("SetAirportAuto",{{"enabled",false}});m.frame(181);
     CHECK_EQ(js::str(m.ackFor(m.panel("SetAirportAuto",{{"enabled",true}})),"status"),std::string("Rejected"));
+}
+
+TEST_CASE("module: auto switch is shared across camera selections panels and mouse look") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});m.panel("Hello",{{"surface","mini"}},"mini-1");
+    m.panel("CreateProfile",{{"name","Shared auto"},{"forAircraft",true}});
+    const auto pilot=js::str(m.app.workingProfile(),"defaultCameraId");
+    m.app.onEvent(be::AircraftPosition{40,-90,100},m.t);
+    m.panel("PreviewAirportSource",{{"facility",airportFixture()}});const auto preview=m.lastEvent("AirportPreview")["payload"]["profile"];
+    json ids=json::array();for(const auto& c:preview["cameras"])ids.push_back(c["id"]);
+    m.panel("SaveAirportPreview",{{"icao","KAAA"},{"cameraIds",ids}});
+    const auto camera=preview["cameras"][1],pose=camera["positionMetersFRD"];
+    const auto near=fscs::profiles::airport::world({40,-90,100},{pose[0],pose[1],pose[2]});
+    const auto frames=[&](int count){for(int i=0;i<count;++i){m.app.onEvent(be::AircraftPosition{near.lat,near.lon,near.altitude},m.t);m.frame();}};
+    const auto enabled=[&](const std::string& panel){m.panel("RequestSnapshot",json::object(),panel);return m.lastEvent("Snapshot")["payload"]["airports"]["autoSwitch"].get<bool>();};
+    frames(1);m.panel("SetAirportAuto",{{"enabled",true}},"mini-1");
+    m.app.onEvent(be::CameraStatus{SdkAvailability::Acquired,false},m.t);frames(1);
+    CHECK(enabled("main-1"));CHECK(enabled("mini-1"));
+    m.panel("ActivateCamera",{{"cameraId",pilot}});frames(1);
+    CHECK(enabled("main-1"));CHECK_EQ(m.app.coordinator().activeCameraId(),pilot);
+    frames(120);CHECK_EQ(m.app.coordinator().activeCameraId(),pilot);
+    frames(100);CHECK_EQ(m.app.coordinator().activeCameraId(),camera["id"].get<std::string>());
+    m.panel("ActivateCamera",{{"cameraId",preview["cameras"][0]["id"]}},"mini-1");frames(1);
+    m.app.onEvent(be::NativeMouseButton{true},m.t);frames(240);
+    CHECK(enabled("main-1"));CHECK_EQ(m.app.coordinator().activeCameraId(),preview["cameras"][0]["id"].get<std::string>());
+    m.app.onEvent(be::NativeMouseButton{false},m.t);frames(220);
+    CHECK_EQ(m.app.coordinator().activeCameraId(),camera["id"].get<std::string>());
+    m.panel("ReleaseCamera");frames(240);CHECK(enabled("mini-1"));CHECK(m.app.coordinator().ownership()!=Ownership::Active);
+    m.panel("SetAirportAuto",{{"enabled",false}},"main-1");CHECK(!enabled("mini-1"));
+    CHECK(!m.app.workingProfile()["cameras"][0].contains("autoSwitch"));
 }
 
 TEST_CASE("module: export selected saved profile leaves another profile's working draft intact") {
@@ -642,4 +678,233 @@ TEST_CASE("module: imported profile is persisted as a separate copy with a repor
     restarted.start(0);
     CHECK_EQ(restarted.repository().committed().profiles.size(), std::size_t{2});
     CHECK(restarted.repository().committed().profiles.at(importedId).current == imported);
+}
+
+TEST_CASE("module: cockpit edits cannot enable aircraft tracking but retain head tracking") {
+    ModuleRig m; m.flight();
+    m.panel("CreateProfile", {{"name", "Cockpit"}, {"forAircraft", true}});
+    auto cam = m.app.workingProfile()["cameras"][0];
+    cam["aircraftTracking"] = "both";
+    cam["trackingPolicy"] = "on";
+    const auto request = m.panel("UpdateDraft", {{"ops", {{{"op", "setCamera"}, {"camera", cam}}}}}, "main-1", m.app.draftRevision());
+    CHECK_EQ(js::str(m.ackFor(request), "status"), std::string("Completed"));
+    CHECK_EQ(m.app.workingProfile()["cameras"][0]["aircraftTracking"], json("off"));
+    CHECK_EQ(m.app.workingProfile()["cameras"][0]["trackingPolicy"], json("on"));
+    m.panel("CommitChanges");
+    const auto& stored = m.app.repository().committed().profiles.begin()->second.current;
+    CHECK_EQ(stored["cameras"][0]["aircraftTracking"], json("off"));
+    CHECK_EQ(stored["cameras"][0]["trackingPolicy"], json("on"));
+}
+
+TEST_CASE("module: Shift boost survives simulator input delivery and logical movement diagnostics omit key strings") {
+    auto run = [](const char* modifier, const char* movement) {
+        ModuleRig m; m.flight();
+        m.panel("CreateProfile", {{"name", "Movement test"}, {"forAircraft", true}});
+        const auto camera = js::str(m.app.workingProfile()["cameras"][0], "id");
+        m.panel("ActivateCamera", {{"cameraId", camera}});
+        m.app.onEvent(be::CameraStatus{SdkAvailability::Acquired, false}, m.t);
+        m.frame(2);
+        const auto press = [&](const std::string& definition, bool down) {
+            const auto it = std::find(m.services.mapped.begin(), m.services.mapped.end(), definition);
+            CHECK(it != m.services.mapped.end());
+            m.app.onEvent(be::InputEvent{static_cast<std::size_t>(it - m.services.mapped.begin()), down, down ? 1u : 0u, false}, m.t);
+        };
+        if (*modifier) press(modifier, true);
+        press(movement, true);
+        m.frame(120);
+        const auto distance = m.app.coordinator().engine().look().translationHeadingFrame.length();
+        CHECK(distance > .5);
+        press("w", false); // Also releases a shifted/uppercase alias hold.
+        if (*modifier) press(modifier, false);
+        m.frame(240);
+        const auto stopped = m.app.coordinator().engine().look().translationHeadingFrame.length();
+        m.frame(120);
+        CHECK_NEAR(m.app.coordinator().engine().look().translationHeadingFrame.length(), stopped, 1e-9);
+        const auto log = m.storage.files["\\work\\fscs-diagnostics.log"];
+        CHECK(log.find("movement {") != std::string::npos);
+        CHECK(log.find("VK_SHIFT") == std::string::npos);
+        CHECK(log.find("VK_LSHIFT") == std::string::npos);
+        CHECK(log.find("VK_RSHIFT") == std::string::npos);
+        if (*modifier || std::string(movement).find('+') != std::string::npos)
+            CHECK(log.find("\"fast\":true") != std::string::npos);
+        CHECK(log.find("\"fast\":false") != std::string::npos);
+        m.app.onEvent(be::InputMappingStatus{false, m.services.mapped.size(), 1, 99}, m.t);
+        m.frame(121);
+        CHECK(m.storage.files["\\work\\fscs-diagnostics.log"].find("input mapping result") != std::string::npos);
+        CHECK(m.app.coordinator().ownership() == Ownership::Active);
+        return distance;
+    };
+    const auto normal = run("", "W");
+    CHECK_NEAR(run("VK_LSHIFT", "w"), normal * 4, 1e-9);
+    CHECK_NEAR(run("VK_RSHIFT", "W"), normal * 4, 1e-9);
+    CHECK_NEAR(run("", "VK_LSHIFT+w"), normal * 4, 1e-9);
+    CHECK_NEAR(run("", "VK_RSHIFT+W"), normal * 4, 1e-9);
+}
+
+TEST_CASE("module: shortcut save announces once only after successful storage and to one live panel") {
+    ModuleRig m; m.flight();
+    m.panel("Hello", {{"surface", "main"}}, "main-1");
+    m.panel("Hello", {{"surface", "mini"}}, "mini-1");
+    m.panel("CreateProfile", {{"name", "Saved announcement"}, {"forAircraft", true}});
+    const auto save = static_cast<std::size_t>(std::find(m.services.mapped.begin(), m.services.mapped.end(), "VK_LCONTROL+S") - m.services.mapped.begin());
+    CHECK(save < m.services.mapped.size());
+    auto announcements = [&]() {
+        std::vector<json> result;
+        for (auto& event : m.drain()) if (js::str(event, "name") == "CamerasSaved") result.push_back(event);
+        return result;
+    };
+    auto key = [&](bool down) { m.app.onEvent(be::InputEvent{save, down}, m.t); m.frame(); };
+    m.drain(); m.storage.deferred = true;
+    key(true);
+    CHECK(announcements().empty()); // Disk write/readback has not completed.
+    key(true); // OS repeat while still held does not enqueue a second save.
+    CHECK(announcements().empty());
+    m.storage.runDeferred();
+    auto spoken = announcements();
+    CHECK_EQ(spoken.size(), std::size_t{1});
+    CHECK_EQ(js::str(spoken[0], "to"), std::string("main-1"));
+    CHECK(js::str(spoken[0]["payload"], "requestId").rfind("save-views-", 0) == 0);
+    m.storage.deferred = false;
+    key(true); CHECK(announcements().empty());
+    key(false);
+    auto edited = m.app.workingProfile()["cameras"][0]; edited["name"] = "Unsaved announcement edit";
+    m.panel("UpdateDraft", {{"ops", {{{"op", "setCamera"}, {"camera", edited}}}}}, "main-1", m.app.draftRevision());
+    m.storage.failNextWrite = true; key(true);
+    CHECK(announcements().empty()); // A failed transaction must never speak success.
+    key(false); m.panel("CommitChanges"); CHECK(announcements().empty()); // Ordinary UI save is distinct.
+    m.panel("RenewLease", {{"visible", false}}, "main-1");
+    m.panel("RenewLease", {{"visible", true}}, "mini-1"); m.drain();
+    key(true); spoken = announcements();
+    CHECK_EQ(spoken.size(), std::size_t{1});
+    CHECK_EQ(js::str(spoken[0], "to"), std::string("mini-1"));
+    key(false); m.frame(400); m.drain();
+    key(true); CHECK(announcements().empty()); // No lapsed panel may speak.
+}
+TEST_CASE("module: folder profile import lists JSON files and validates before committing a copy") {
+    ModuleRig m;
+    m.flight();
+    m.panel("Hello", {{"surface", "main"}});
+    m.panel("CreateProfile", {{"name", "Original"}, {"forAircraft", true}});
+    const auto original = m.app.workingProfile();
+    const auto originalId = js::str(original, "profileId");
+    const std::string prefix = fscs::profiles::kProfileImportFolder;
+    m.storage.files[prefix + "test.JSON"] = std::string("\xEF\xBB\xBF") + fscs::profiles::exportProfileCode(original, false);
+    m.storage.files[prefix + "bad.json"] = "not json";
+    m.storage.files[prefix + "ignored.txt"] = "not a profile";
+    m.storage.files[prefix + "nested\\outside.json"] = "not a direct child";
+    m.drain();
+    auto listing = m.ackFor(m.panel("ListImportFiles"));
+    CHECK_EQ(js::str(listing, "status"), std::string("Completed"));
+    CHECK_EQ(listing["result"]["files"].size(), std::size_t{2});
+    CHECK(!js::boolean(listing["result"], "nativePicker", true));
+    CHECK(js::str(listing["result"], "folder").find("work\\imports") != std::string::npos);
+    const auto count = m.app.repository().committed().profiles.size();
+    for (const std::string name : {"../outside.json", "..\\outside.json", "C:\\outside.json", "nested/other.json", "bad.json", "missing.json"}) {
+        const auto ack = m.ackFor(m.panel("ImportProfileFile", {{"filename", name}}));
+        CHECK_EQ(js::str(ack, "status"), std::string("Rejected"));
+        CHECK_EQ(m.app.repository().committed().profiles.size(), count);
+    }
+    m.storage.deferred = true;
+    const auto req = m.panel("ImportProfileFile", {{"filename", "test.JSON"}});
+    CHECK(m.ackFor(req).is_null());
+    m.storage.runDeferred();
+    CHECK_EQ(js::str(m.ackFor(req), "status"), std::string("Pending"));
+    CHECK_EQ(m.app.repository().committed().profiles.size(), count + 1);
+    CHECK_EQ(js::str(m.app.workingProfile(), "profileId"), originalId);
+    CHECK_EQ(m.app.workingProfile(), original);
+    CHECK_EQ(m.storage.files[prefix + "test.JSON"], std::string("\xEF\xBB\xBF") + fscs::profiles::exportProfileCode(original, false));
+}
+
+TEST_CASE("module: folder import failures preserve saved profiles") {
+    ModuleRig m;
+    m.flight();
+    m.panel("Hello", {{"surface", "main"}});
+    m.panel("CreateProfile", {{"name", "Original"}, {"forAircraft", true}});
+    const auto original = m.app.workingProfile();
+    const std::string path = std::string(fscs::profiles::kProfileImportFolder) + "test.json";
+    m.storage.files[path] = fscs::profiles::exportProfileCode(original, false);
+    m.storage.failNextWrite = true;
+    m.drain();
+    m.panel("ImportProfileFile", {{"filename", "test.json"}});
+    bool failed = false;
+    for (const auto& msg : m.drain())
+        if (js::str(msg, "name") == "CommitCompleted") failed = js::str(msg["payload"], "status") == "Failed";
+    CHECK(failed);
+    CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{1});
+    CHECK_EQ(m.app.workingProfile(), original);
+    m.storage.files[path] = std::string((10u << 20) + 1, 'x');
+    auto ack = m.ackFor(m.panel("ImportProfileFile", {{"filename", "test.json"}}));
+    CHECK_EQ(js::str(ack, "status"), std::string("Rejected"));
+    CHECK(js::str(ack, "reason").find("10 MiB") != std::string::npos);
+}
+
+TEST_CASE("module: global tracking settings survive profile changes, save and second panel snapshots") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});m.panel("CreateProfile",{{"name","Tracking globals"},{"forAircraft",true}});
+    m.panel("RequestSnapshot");auto settings=m.lastEvent("Snapshot")["payload"]["working"]["settings"];
+    CHECK(!settings["host"]["globalHeadTrackingEnabled"].get<bool>());CHECK_EQ(settings["host"]["globalAircraftTracking"],json("both"));
+    settings["host"]["globalHeadTrackingEnabled"]=true;settings["host"]["globalAircraftTracking"]="heading";
+    m.panel("UpdateDraft",{{"ops",{{{"op","setSettings"},{"settings",settings}}}}},"main-1",m.app.draftRevision());
+    m.panel("CommitChanges");CHECK(m.app.repository().committed().settings["host"]["globalHeadTrackingEnabled"].get<bool>());
+    CHECK_EQ(m.app.repository().committed().settings["host"]["globalAircraftTracking"],json("heading"));
+    m.panel("CreateProfile",{{"name","Another aircraft"},{"forAircraft",false}});
+    m.panel("Hello",{{"surface","mini"}},"mini-1");const auto snapshot=m.lastEvent("Snapshot")["payload"];
+    CHECK(snapshot["working"]["settings"]["host"]["globalHeadTrackingEnabled"].get<bool>());CHECK_EQ(snapshot["working"]["settings"]["host"]["globalAircraftTracking"],json("heading"));
+}
+
+TEST_CASE("module: global airport library works without an aircraft profile") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});CHECK(!m.app.workingProfile().is_object());
+    m.app.onEvent(be::AircraftPosition{40,-90,100},m.t);
+    m.panel("PreviewAirportSource",{{"facility",airportFixture()}});auto airport=m.lastEvent("AirportPreview")["payload"]["profile"];
+    json ids=json::array();for(const auto& cam:airport["cameras"])ids.push_back(cam["id"]);
+    m.panel("SaveAirportPreview",{{"icao","KAAA"},{"cameraIds",ids}});
+    m.panel("RequestSnapshot");auto snap=m.lastEvent("Snapshot")["payload"];
+    CHECK_EQ(snap["airports"]["scope"],json("global"));CHECK_EQ(snap["working"]["profile"]["scope"],json("airport"));
+    CHECK(!m.app.workingProfile().is_object());CHECK(m.app.coordinator().profile()!=nullptr);
+    auto cam=snap["working"]["profile"]["cameras"][0];cam["name"]="Shared airport camera";cam["positionMetersFRD"][2]=-70;
+    auto edit=m.panel("UpdateDraft",{{"ops",{{{"op","setCamera"},{"camera",cam}}}}},"main-1",m.app.draftRevision());CHECK_EQ(js::str(m.ackFor(edit),"status"),std::string("Completed"));
+    m.panel("CommitChanges");CHECK(!m.app.dirty());
+    CHECK_EQ(m.app.repository().committed().profiles.at(js::str(airport,"profileId")).current["cameras"][0]["name"],json("Shared airport camera"));
+    CHECK(!m.app.workingProfile().is_object());
+    const auto activate = m.panel("ActivateCamera",{{"cameraId",cam["id"]}});
+    CHECK_EQ(js::str(m.ackFor(activate), "status"), std::string("Accepted"));
+    m.app.onEvent(be::CameraStatus{SdkAvailability::Acquired,false},m.t);m.frame();
+    CHECK_EQ(m.app.coordinator().activeCameraId(),cam["id"].get<std::string>());CHECK(m.camera.submitted.back().referential==Referential::World);
+}
+
+TEST_CASE("module: airport drafts follow aircraft profile changes and never enter aircraft copies or exports") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});m.panel("CreateProfile",{{"name","Aircraft A"},{"forAircraft",true}});
+    const auto aircraft=m.app.workingProfile();m.app.onEvent(be::AircraftPosition{40,-90,100},m.t);
+    m.panel("PreviewAirportSource",{{"facility",airportFixture()}});auto airport=m.lastEvent("AirportPreview")["payload"]["profile"];
+    json ids=json::array();for(const auto& cam:airport["cameras"])ids.push_back(cam["id"]);m.panel("SaveAirportPreview",{{"icao","KAAA"},{"cameraIds",ids}});
+    m.panel("RequestSnapshot");auto snap=m.lastEvent("Snapshot")["payload"];auto cam=snap["working"]["profile"]["cameras"].back();cam["name"]="Global modified tower";
+    m.panel("UpdateDraft",{{"ops",{{{"op","setCamera"},{"camera",cam}}}}},"main-1",m.app.draftRevision());CHECK(m.app.dirty());
+    const auto created=m.panel("CreateProfile",{{"name","Aircraft B"},{"from","working"},{"forAircraft",false}});CHECK_EQ(js::str(m.ackFor(created),"status"),std::string("Pending"));
+    CHECK_EQ(m.app.workingProfile()["cameras"].size(),aircraft["cameras"].size());
+    m.panel("RequestSnapshot");snap=m.lastEvent("Snapshot")["payload"];CHECK_EQ(snap["working"]["profile"]["cameras"].back()["id"],cam["id"]);CHECK_EQ(snap["working"]["profile"]["cameras"].back()["name"],cam["name"]);
+    const auto open=m.panel("OpenProfile",{{"profileId",aircraft["profileId"]}});CHECK_EQ(js::str(m.ackFor(open),"status"),std::string("Completed"));
+    auto exportRequest=m.panel("ExportProfile",{{"profileId",aircraft["profileId"]},{"working",true}});auto exported=js::parse(js::str(m.ackFor(exportRequest)["result"],"code"));
+    CHECK(exported.is_object());CHECK_EQ(exported["profile"]["cameras"].size(),aircraft["cameras"].size());
+    m.panel("CommitChanges");CHECK_EQ(m.app.repository().committed().profiles.at(js::str(aircraft,"profileId")).current,aircraft);
+    CHECK_EQ(m.app.repository().committed().profiles.at(js::str(airport,"profileId")).current["cameras"].back()["name"],cam["name"]);
+    auto bind=m.panel("BindProfileToAircraft",{{"profileId",airport["profileId"]}});CHECK_EQ(js::str(m.ackFor(bind),"status"),std::string("Rejected"));
+}
+
+TEST_CASE("module: explicit airport regeneration discards only target edits and failed saves preserve them") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});m.panel("CreateProfile",{{"name","Aircraft"},{"forAircraft",true}});m.app.onEvent(be::AircraftPosition{40,-90,100},m.t);
+    for(const auto* code:{"KAAA","KBBB"}) {
+        m.panel("PreviewAirportSource",{{"facility",airportFixture(code,std::string(code)=="KAAA"?40:40.1)}});auto preview=m.lastEvent("AirportPreview")["payload"]["profile"];
+        json ids=json::array();for(const auto& cam:preview["cameras"])ids.push_back(cam["id"]);m.panel("SaveAirportPreview",{{"icao",code},{"cameraIds",ids}});
+        m.panel("SelectAirport",{{"icao",code}});m.panel("RequestSnapshot");auto cam=m.lastEvent("Snapshot")["payload"]["working"]["profile"]["cameras"].back();cam["name"]=std::string(code)+" unsaved edit";
+        m.panel("UpdateDraft",{{"ops",{{{"op","setCamera"},{"camera",cam}}}}},"main-1",m.app.draftRevision());
+    }
+    m.panel("UpdateDraft",{{"ops",{{{"op","setProfileFields"},{"name","Unsaved aircraft title"}}}}},"main-1",m.app.draftRevision());
+    m.panel("SelectAirport",{{"icao","KAAA"}});
+    m.panel("PreviewAirportSource",{{"facility",airportFixture()},{"options",{{"runways",false},{"parking",false},{"taxi",false},{"tower",true}}}});auto preview=m.lastEvent("AirportPreview")["payload"]["profile"];
+    const json request={{"icao","KAAA"},{"cameraIds",{preview["cameras"][0]["id"]}},{"replace",true},{"discardAirportEdits",true}};
+    auto guarded=request;guarded.erase("discardAirportEdits");auto refused=m.panel("SaveAirportPreview",guarded);CHECK_EQ(js::str(m.ackFor(refused),"status"),std::string("Rejected"));
+    m.storage.failNextWrite=true;m.panel("SaveAirportPreview",request);CHECK_EQ(js::str(m.lastEvent("CommitCompleted")["payload"],"status"),std::string("Failed"));
+    m.panel("RequestSnapshot");const auto failedSnapshot=m.lastEvent("Snapshot");CHECK_EQ(failedSnapshot["payload"]["working"]["profile"]["cameras"].back()["name"],json("KAAA unsaved edit"));
+    m.panel("SaveAirportPreview",request);CHECK_EQ(js::str(m.lastEvent("CommitCompleted")["payload"],"status"),std::string("Committed"));
+    m.panel("RequestSnapshot");auto snap=m.lastEvent("Snapshot")["payload"];CHECK_EQ(snap["working"]["profile"]["cameras"].size(),m.app.workingProfile()["cameras"].size()+1);CHECK_EQ(m.app.workingProfile()["name"],json("Unsaved aircraft title"));
+    m.panel("SelectAirport",{{"icao","KBBB"}});m.panel("RequestSnapshot");const auto otherSnapshot=m.lastEvent("Snapshot");CHECK_EQ(otherSnapshot["payload"]["working"]["profile"]["cameras"].back()["name"],json("KBBB unsaved edit"));CHECK(m.app.dirty());
 }

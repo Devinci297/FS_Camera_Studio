@@ -319,9 +319,9 @@ TEST_CASE("coordinator: view-ID bindings select through the open profile; toggle
     CHECK(r.c.ownership() == Ownership::Releasing);
 }
 
-TEST_CASE("coordinator: non-cockpit modes stay visible but cannot activate") {
+TEST_CASE("coordinator: unsupported free mode stays visible but cannot activate") {
     Rig r;
-    r.profile["cameras"][1]["mode"] = "orbit";
+    r.profile["cameras"][1]["mode"] = "free";
     r.connect();
     CHECK_EQ(r.send("ActivateCamera", {{"cameraId", r.pfd}})["status"].get<std::string>(), std::string("Rejected"));
 }
@@ -379,8 +379,8 @@ TEST_CASE("input: visible movement defaults, boost and zoom pulses can be remove
         CHECK(i < r.definitions().size());
         CHECK_EQ(r.onInput(i, true, 1).size(), std::size_t{1});
         if (std::string(def) == "VK_SHIFT") CHECK(r.manualInput().fast);
-        if (std::string(def) == "Q") CHECK(r.manualInput().moveUp < 0);
-        if (std::string(def) == "E") CHECK(r.manualInput().moveUp > 0);
+        if (std::string(def) == "Q") CHECK(r.manualInput().moveUp > 0);
+        if (std::string(def) == "E") CHECK(r.manualInput().moveUp < 0);
         CHECK_EQ(r.onInput(i, false, 0).size(), std::size_t{1});
     }
     const auto zoom = indexOf(r, "sim:ZOOM_IN");
@@ -403,7 +403,7 @@ TEST_CASE("input: movement letter aliases and both Shift chords release cleanly 
         const auto index = indexOf(r, def);
         CHECK(index < r.definitions().size());
         r.onInput(index, true, 0);
-        CHECK_NEAR(r.manualInput().moveUp, def.back() == 'q' || def.back() == 'Q' ? -1 : 1, 1e-9);
+        CHECK_NEAR(r.manualInput().moveUp, def.back() == 'q' || def.back() == 'Q' ? 1 : -1, 1e-9);
         CHECK(r.manualInput().fast == (def.find('+') != std::string::npos));
         r.onInput(index, false, 0);
         CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
@@ -412,10 +412,10 @@ TEST_CASE("input: movement letter aliases and both Shift chords release cleanly 
     r.onInput(indexOf(r, "E"), true, 0);
     r.onInput(indexOf(r, "e"), true, 0);
     r.onInput(indexOf(r, "VK_RSHIFT+e"), true, 0);
-    CHECK_NEAR(r.manualInput().moveUp, 1, 1e-9);
+    CHECK_NEAR(r.manualInput().moveUp, -1, 1e-9);
     CHECK(r.manualInput().fast);
     r.onInput(indexOf(r, "VK_RSHIFT+e"), false, 0);
-    CHECK_NEAR(r.manualInput().moveUp, 1, 1e-9);
+    CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
     CHECK(!r.manualInput().fast);
     r.onInput(indexOf(r, "VK_LSHIFT+e"), true, 0);
     r.setTextFocus(true);
@@ -425,7 +425,7 @@ TEST_CASE("input: movement letter aliases and both Shift chords release cleanly 
     CHECK(r.onInput(indexOf(r, "VK_LSHIFT+e"), true, 0).empty());
     r.onInput(indexOf(r, "VK_LSHIFT+e"), false, 0);
     r.onInput(indexOf(r, "VK_LSHIFT+e"), true, 0);
-    CHECK_NEAR(r.manualInput().moveUp, 1, 1e-9);
+    CHECK_NEAR(r.manualInput().moveUp, -1, 1e-9);
     CHECK(r.manualInput().fast);
     r.releaseAll();
     CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
@@ -449,7 +449,7 @@ TEST_CASE("input: boost aliases preserve custom bindings and follow rebound move
         if (binding.action == Action::MoveFast) binding.input.definition = "VK_RSHIFT";
     }
     r.setBindings(parsed.bindings);
-    CHECK(indexOf(r, "e") == r.definitions().size());
+    CHECK(indexOf(r, "q") == r.definitions().size());
     CHECK(indexOf(r, "VK_LSHIFT+u") == r.definitions().size());
     r.onInput(indexOf(r, "VK_RSHIFT+u"), true, 0);
     CHECK_NEAR(r.manualInput().moveUp, 1, 1e-9);
@@ -489,7 +489,7 @@ TEST_CASE("airports: Q E and Shift chords move world altitude with tracking and 
         r.advance(1.0 / 60, 120);
         const auto after = r.backend.submitted.back();
         CHECK(after.referential == Referential::World);
-        CHECK(after.trackUserAircraft);
+        CHECK(!after.trackUserAircraft);
         CHECK_NEAR(after.x, before.x, 1e-10);
         CHECK_NEAR(after.y, before.y, 1e-10);
         input.onInput(index, false, 0);
@@ -500,13 +500,13 @@ TEST_CASE("airports: Q E and Shift chords move world altitude with tracking and 
         CHECK_NEAR(r.backend.submitted.back().z, stopped, 1e-6);
         return after.z - before.z;
     };
-    const auto up = run("e", "normal"), down = run("q", "normal");
-    const auto coarse = run("e", "coarse");
+    const auto up = run("q", "normal"), down = run("e", "normal");
+    const auto coarse = run("q", "coarse");
     CHECK(up > .5);
     CHECK_NEAR(down, -up, 1e-8);
     CHECK_NEAR(coarse, up * 10, 1e-8);
-    CHECK_NEAR(run("VK_LSHIFT+E", "coarse"), coarse * 4, 1e-8);
-    CHECK_NEAR(run("VK_RSHIFT+q", "coarse"), -coarse * 4, 1e-8);
+    CHECK_NEAR(run("VK_LSHIFT+Q", "coarse"), coarse * 4, 1e-8);
+    CHECK_NEAR(run("VK_RSHIFT+e", "coarse"), -coarse * 4, 1e-8);
 }
 
 TEST_CASE("coordinator: precision scales keyboard translation and boost independently of look") {
@@ -795,24 +795,27 @@ TEST_CASE("coordinator: mouse motion remains continuous beyond joystick limits a
     }
 }
 
-TEST_CASE("tracking: per-camera simulator switch restores ownership and respects external changes") {
-    Rig r; r.profile["cameras"][0]["trackingPolicy"]="off";r.profile["cameras"][1]["trackingPolicy"]="on";
+TEST_CASE("tracking: global simulator switch ignores camera policy and restores ownership") {
+    Rig r; r.profile["cameras"][0]["trackingPolicy"]="on";r.profile["cameras"][1]["trackingPolicy"]="off";
     r.connect();r.advance(.02);CHECK_EQ(r.backend.count("tracking:read"),std::size_t{0});
     r.activate(r.pilot);r.grant();r.advance(.02);CHECK(r.backend.tracking==false);
-    r.activate(r.pfd);r.advance(.02);CHECK(r.backend.tracking==true);
-    r.activate(r.pilot);r.advance(.02);CHECK(r.backend.tracking==false);
+    const auto writes=r.backend.count("tracking:off");
+    r.activate(r.pfd);r.advance(.02);CHECK(r.backend.tracking==false);CHECK_EQ(r.backend.count("tracking:off"),writes);
+    fscs::profiles::HostSettings settings;settings.globalHeadTrackingEnabled=true;r.c.setSettings(settings,r.t);r.advance(.02);
+    CHECK(r.backend.tracking==true);
+    r.activate(r.pilot);r.advance(.02);CHECK(r.backend.tracking==true);
     r.send("ReleaseCamera");CHECK(r.backend.tracking==true);
     r.deliver(be::CameraStatus{SdkAvailability::NotAcquired,false});r.backend.tracking=false;
     r.activate(r.pfd);r.grant();r.advance(.02);CHECK(r.backend.tracking==true);
-    r.backend.tracking=false; // external user preference wins over release restoration
-    const auto writes=r.backend.count("tracking:off");r.send("ReleaseCamera");CHECK_EQ(r.backend.count("tracking:off"),writes);
+    r.backend.tracking=false; // External change wins over release restoration.
+    const auto offWrites=r.backend.count("tracking:off");r.send("ReleaseCamera");CHECK_EQ(r.backend.count("tracking:off"),offWrites);
 }
 TEST_CASE("tracking: unavailable and rejected controls report failure without repeated writes") {
     Rig r;r.profile["cameras"][0]["trackingPolicy"]="off";r.backend.trackingWriteOk=false;
     r.connect();r.activate(r.pilot);r.grant();r.advance(.02,100);
     CHECK_EQ(r.backend.count("tracking:off"),std::size_t{1});
     CHECK(!r.c.capabilitiesJson()["headTracking"]["error"].get<std::string>().empty());
-    r.backend.tracking.reset();r.activate(r.pfd);r.advance(.02);
+    r.backend.tracking.reset();r.activate(r.pfd);r.advance(.02,20);
     CHECK(r.c.capabilitiesJson()["headTracking"]["enabled"].is_null());
 }
 TEST_CASE("look: temporary offsets belong to each camera and return on release or panel cancellation") {
@@ -836,20 +839,262 @@ TEST_CASE("airports: sub-centimeter edits reach world SDK and heading/pitch trac
     CHECK(r.backend.submitted.back().x>first.x);CHECK(r.backend.submitted.back().x-first.x<1e-7);
     r.profile["cameras"].back()["aircraftTracking"]="both";r.setProfile();r.c.setAircraftPosition(40,-89.999,150,r.t);r.advance(.02);
     CHECK_NEAR(r.backend.submitted.back().headingDeg,90,0.1);CHECK(r.backend.submitted.back().pitchDeg<0);
-    CHECK(r.backend.submitted.back().trackUserAircraft);
+    CHECK(!r.backend.submitted.back().trackUserAircraft);
     const auto fov=r.backend.submitted.back().fovRad;
     r.c.onAction({fscs::profiles::Action::ZoomIn,0,true,0,true},r.t);r.advance(.02);
     CHECK(r.backend.submitted.back().fovRad<fov);
-    CHECK(r.backend.submitted.back().trackUserAircraft);
-    // Native targeting stays enabled if telemetry pauses; right-drag takes over explicitly.
-    r.advance(.02,60);CHECK(r.backend.submitted.back().trackUserAircraft);
+    CHECK(!r.backend.submitted.back().trackUserAircraft);
+    // Explicit world look-at keeps the last target through telemetry pauses; right-drag takes over.
+    r.advance(.02,60);CHECK(!r.backend.submitted.back().trackUserAircraft);
     r.deliver(be::NativeMouseMapping{true});r.deliver(be::NativeMouseButton{true});r.advance(.02);
     CHECK(!r.backend.submitted.back().trackUserAircraft);
     r.deliver(be::NativeMouseButton{false});r.advance(.02);
-    CHECK(r.backend.submitted.back().trackUserAircraft);
+    CHECK(!r.backend.submitted.back().trackUserAircraft);
     const auto trackingPosition=r.backend.submitted.back();r.c.setAircraftPosition(40.001,-90,150,r.t);r.advance(.02);
     CHECK_NEAR(r.backend.submitted.back().headingDeg,0,0.1);CHECK_NEAR(r.backend.submitted.back().x,trackingPosition.x,1e-12);
-    r.profile["cameras"].back()["aircraftTracking"]="off";r.setProfile();r.advance(.02);CHECK_NEAR(r.backend.submitted.back().headingDeg,0,1e-9);
+    fscs::profiles::HostSettings fixed;fixed.globalAircraftTracking="off";r.c.setSettings(fixed,r.t);r.advance(.02);CHECK_NEAR(r.backend.submitted.back().headingDeg,0,1e-9);
     CHECK(!r.backend.submitted.back().trackUserAircraft);
     fscs::core::ManualInput input;input.moveForward=1;r.c.setManualInput(input);r.advance(.02,50);CHECK(r.backend.submitted.back().x>trackingPosition.x);
+}
+
+TEST_CASE("input: releasing another case or modifier alias neutralizes movement without affecting other keys") {
+    for (const auto& pair : std::vector<std::pair<const char*, const char*>>{
+             {"Q", "q"}, {"e", "E"}, {"VK_LSHIFT+Q", "q"}, {"VK_RSHIFT+e", "E"}}) {
+        auto r = routerWithDefaults();
+        r.onInput(indexOf(r, pair.first), true, 0);
+        CHECK(std::abs(r.manualInput().moveUp) == 1);
+        r.onInput(indexOf(r, pair.second), false, 0);
+        CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
+        CHECK(!r.manualInput().fast);
+        // A wheel pulse after key release must not revive a stale translation hold.
+        r.onInput(indexOf(r, "sim:ZOOM_IN"), true, 1);
+        CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
+        CHECK_EQ(r.onInput(indexOf(r, pair.first), true, 0).size(), std::size_t{1});
+    }
+    for (const auto* modifier : {"VK_LSHIFT", "VK_RSHIFT", "VK_SHIFT"}) {
+        for (bool modifierFirst : {false, true}) {
+            auto r = routerWithDefaults();
+            r.onInput(indexOf(r, modifier), true, 0);
+            r.onInput(indexOf(r, "VK_LSHIFT+q"), true, 0);
+            r.onInput(indexOf(r, "w"), true, 0);
+            if (modifierFirst) {
+                // The generic Shift release also clears either generated side's chord.
+                r.onInput(indexOf(r, "VK_SHIFT"), false, 0);
+                CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
+                r.onInput(indexOf(r, "Q"), false, 0);
+            } else {
+                r.onInput(indexOf(r, "Q"), false, 0);
+                r.onInput(indexOf(r, "VK_SHIFT"), false, 0);
+            }
+            CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
+            CHECK(!r.manualInput().fast);
+            CHECK_NEAR(r.manualInput().moveForward, 1, 1e-9);
+            r.onInput(indexOf(r, "W"), false, 0);
+            CHECK_NEAR(r.manualInput().moveForward, 0, 1e-9);
+        }
+    }
+    auto doc = fscs::profiles::defaultBindingsDocument();
+    doc["bindings"].push_back({{"action", "nextCamera"}, {"input", {{"kind", "key"}, {"definition", "VK_LSHIFT+Q"}}}});
+    InputRouter custom; custom.setBindings(fscs::profiles::parseBindings(doc).bindings);
+    const auto pressed = custom.onInput(indexOf(custom, "VK_LSHIFT+Q"), true, 0);
+    CHECK_EQ(pressed.size(), std::size_t{1});
+    custom.onInput(indexOf(custom, "q"), false, 0);
+    custom.onInput(indexOf(custom, "VK_LSHIFT"), false, 0);
+    const auto released = custom.onInput(indexOf(custom, "VK_LSHIFT+Q"), false, 0);
+    CHECK_EQ(released.size(), std::size_t{1});
+    if (!pressed.empty() && !released.empty()) CHECK_EQ(pressed[0].holdId, released[0].holdId);
+}
+
+TEST_CASE("airports: fixed and tracked views accept vertical keys and live altitude edits independently") {
+    std::vector<double> raised;
+    for (const auto* tracking : {"off", "heading", "both"}) {
+        Rig r; std::vector<std::string> notes;
+        const auto airport = fscs::profiles::airport::generate(airportFixture(), json::object(), notes);
+        auto cam = airport["cameras"][0];
+        cam["positionMetersFRD"] = {0, 0, -3};
+        cam["orientationCameraToAnchorXYZW"] = {0, 0, 0, 1};
+        cam["aircraftTracking"] = tracking;
+        cam["transition"]["kind"] = "cut";
+        auto cat = airport["categories"][0]; cat["cameraIds"] = json::array({cam["id"]}); cat["defaultCameraId"] = cam["id"];
+        r.profile["categories"].push_back(cat); r.profile["cameras"].push_back(cam);
+        r.connect(); fscs::profiles::HostSettings settings;settings.globalAircraftTracking=tracking;r.c.setSettings(settings,r.t);r.c.setAircraftPosition(40.001, -89.999, 150, r.t);
+        r.activate(cam["id"]); r.grant(); r.advance(.02);
+        const auto first = r.backend.submitted.back();
+        auto input = routerWithDefaults();
+        input.onInput(indexOf(input, "Q"), true, 0); r.c.setManualInput(input.manualInput()); r.advance(.02, 50);
+        const auto up = r.backend.submitted.back();
+        CHECK(up.z > first.z); raised.push_back(up.z-first.z);
+        CHECK_NEAR(up.x, first.x, 1e-10); CHECK_NEAR(up.y, first.y, 1e-10);
+        CHECK(!up.trackUserAircraft);
+        input.onInput(indexOf(input, "Q"), false, 0);
+        input.onInput(indexOf(input, "E"), true, 0); r.c.setManualInput(input.manualInput()); r.advance(.02, 100);
+        CHECK(r.backend.submitted.back().z < up.z);
+        input.onInput(indexOf(input, "E"), false, 0); r.c.setManualInput(input.manualInput());
+        r.send("RecenterLook");
+        r.profile["cameras"].back()["positionMetersFRD"] = {0, 0, -30};
+        r.setProfile(); r.advance(.02);
+        const auto edited = r.backend.submitted.back();
+        CHECK_NEAR(edited.z, 130, 1e-6);
+        CHECK(!edited.trackUserAircraft);
+        CHECK(r.backend.count("flag:ground:on") > 0);
+        if (std::string(tracking) == "both") {
+            CHECK(edited.pitchDeg < 0);
+            CHECK(edited.pitchDeg > first.pitchDeg);
+            r.c.setAircraftPosition(40.001, -90, 160, r.t); r.advance(.02);
+            const auto followed = r.backend.submitted.back();
+            CHECK_NEAR(followed.headingDeg, 0, .1);
+            CHECK_NEAR(followed.z, edited.z, 1e-6);
+            CHECK(std::abs(followed.pitchDeg-edited.pitchDeg) > .1);
+        }
+    }
+    CHECK_NEAR(raised[0], raised[1], 1e-9);
+    CHECK_NEAR(raised[0], raised[2], 1e-9);
+}
+
+TEST_CASE("motion views: orbit circles aircraft with stable radius and opposite directions") {
+    for (const bool clockwise : {true,false}) {
+        Rig r;
+        auto& cam=r.profile["cameras"][0]; cam["mode"]="orbit"; cam["transition"]["kind"]="cut";
+        cam["motion"]={{"radiusMeters",40},{"heightMeters",12},{"durationSeconds",8},{"clockwise",clockwise}};
+        r.connect();r.activate(r.pilot);r.grant();r.advance(.02,100);
+        const auto pose=r.c.engine().sample().pose;
+        CHECK_NEAR(std::hypot(pose.positionFRD.x,pose.positionFRD.y),40,1e-7);
+        CHECK_NEAR(pose.positionFRD.z,-12,1e-7);
+        CHECK(std::abs(pose.positionFRD.x)<2);
+        CHECK(clockwise ? pose.positionFRD.y>39 : pose.positionFRD.y< -39);
+        CHECK(r.backend.submitted.back().referential==Referential::SimObject);
+        auto forward=pose.orientation.rotate({1,0,0});
+        CHECK(fscs::core::dot(forward,pose.positionFRD)<-40);
+        const auto before=pose.positionFRD;
+        r.deliver(be::Paused{true});r.advance(.02,100);
+        CHECK_NEAR((r.c.engine().sample().pose.positionFRD-before).length(),0,1e-9);
+    }
+}
+
+TEST_CASE("motion views: paused flyby remains world stationary and tracks a moving aircraft") {
+    Rig r;auto& cam=r.profile["cameras"][0];cam["mode"]="flyby";cam["transition"]["kind"]="cut";
+    cam["motion"]={{"radiusMeters",100},{"heightMeters",10},{"durationSeconds",30},{"clockwise",true}};
+    r.connect();
+    CHECK_EQ(r.send("ActivateCamera",{{"cameraId",r.pilot}})["status"].get<std::string>(),std::string("Rejected"));
+    r.c.setAircraftPosition(40,-90,1000,r.t,90);
+    r.activate(r.pilot);r.grant();r.deliver(be::Paused{true});r.advance(.02);
+    const auto first=r.backend.submitted.back();
+    CHECK(first.referential==Referential::World);
+    CHECK(first.y> -90); // ahead of an eastbound aircraft
+    CHECK_NEAR(first.z,1010,1e-5);
+    r.c.setAircraftPosition(40,-89.998,1000,r.t,90);r.advance(.02);
+    const auto next=r.backend.submitted.back();
+    CHECK_NEAR(next.x,first.x,1e-10);CHECK_NEAR(next.y,first.y,1e-10);CHECK_NEAR(next.z,first.z,1e-10);
+    CHECK(std::abs(fscs::core::wrapDeg(next.headingDeg-first.headingDeg))>45);
+    CHECK(!next.trackUserAircraft);
+}
+
+TEST_CASE("walkaround: ordered exterior views auto advance dwell after transition and stop at end") {
+    Rig r;for(auto& cam:r.profile["cameras"]) {cam["mode"]="aircraftExterior";cam["transition"]["kind"]="cut";}
+    r.connect();const std::string category=r.profile["categories"][0]["id"];
+    CHECK_EQ(r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",1},{"loop",false}})["status"].get<std::string>(),std::string("Accepted"));
+    r.grant();r.advance(.02,40);CHECK_EQ(r.c.activeCameraId(),r.pilot);
+    r.advance(.02,12);CHECK_EQ(r.c.activeCameraId(),r.pfd);
+    r.advance(.02,55);CHECK_EQ(r.c.activeCameraId(),r.pfd);
+    bool stopped=false;for(const auto& [name,p]:r.events)if(name=="WalkaroundChanged")stopped=!p["running"].get<bool>();
+    CHECK(stopped);
+}
+
+TEST_CASE("walkaround: manual motion resets dwell and explicit recall cancels sequence") {
+    Rig r;for(auto& cam:r.profile["cameras"]) {cam["mode"]="aircraftExterior";cam["transition"]["kind"]="cut";}
+    r.connect();const std::string category=r.profile["categories"][0]["id"];
+    r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",1},{"loop",true}});r.grant();
+    fscs::core::ManualInput input;input.moveForward=1;r.c.setManualInput(input);r.advance(.02,110);
+    CHECK_EQ(r.c.activeCameraId(),r.pilot);
+    r.c.setManualInput({});r.advance(.02,30);CHECK_EQ(r.c.activeCameraId(),r.pilot);
+    r.advance(.02,25);CHECK_EQ(r.c.activeCameraId(),r.pfd);
+    r.activate(r.pilot);r.advance(.02,100);CHECK_EQ(r.c.activeCameraId(),r.pilot);
+}
+
+TEST_CASE("walkaround: loops and ignores background airport recall until stopped") {
+    Rig r;for(auto& cam:r.profile["cameras"]) {cam["mode"]="aircraftExterior";cam["transition"]["kind"]="cut";}
+    r.connect();const std::string category=r.profile["categories"][0]["id"];
+    r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",1},{"loop",true}});r.grant();
+    CHECK(!r.c.selectAutomaticCamera(r.pfd,r.t));
+    r.advance(.02,103);CHECK_EQ(r.c.activeCameraId(),r.pilot);
+    CHECK_EQ(r.send("StopWalkaround")["status"].get<std::string>(),std::string("Completed"));
+    r.advance(.02,100);CHECK_EQ(r.c.activeCameraId(),r.pilot);
+    CHECK(r.c.selectAutomaticCamera(r.pfd,r.t));
+}
+
+TEST_CASE("motion views: orbit zoom survives animation and unrelated profile updates") {
+    Rig r;r.profile["cameras"][0]["mode"]="orbit";r.profile["cameras"][0]["transition"]["kind"]="cut";
+    r.connect();r.activate(r.pilot);r.grant();r.advance(.02,30);
+    const auto before=r.c.engine().sample().pose;
+    fscs::core::ManualInput input;input.zoomIn=1;r.c.setManualInput(input);r.advance(.02,10);r.c.setManualInput({});
+    const auto zoomed=r.c.engine().sample().pose;
+    r.profile["name"]="Renamed profile";r.setProfile();r.advance(.02,20);
+    const auto after=r.c.engine().sample().pose;
+    CHECK(after.fovRad < before.fovRad);
+    CHECK(after.fovRad <= zoomed.fovRad);
+    CHECK((after.positionFRD-before.positionFRD).length()>1);
+}
+
+TEST_CASE("tracking: shared aircraft preference applies to exterior views and never cockpit") {
+    Rig r;for(auto& cam:r.profile["cameras"]) {cam["mode"]="aircraftExterior";cam["transition"]["kind"]="cut";cam["positionMetersFRD"]={20,20,-10};cam["orientationCameraToAnchorXYZW"]={0,0,0,1};}
+    r.connect();r.activate(r.pilot);r.grant();r.advance(.02);
+    auto tracked=fromSdk(r.backend.submitted.back(),r.qual.contract).orientation.toPbh();
+    CHECK_NEAR(tracked.headingDeg,-135,1e-7);CHECK(tracked.pitchDeg< -10);
+    fscs::profiles::HostSettings settings;settings.globalAircraftTracking="off";r.c.setSettings(settings,r.t);r.advance(.02);
+    auto fixed=fromSdk(r.backend.submitted.back(),r.qual.contract).orientation.toPbh();CHECK_NEAR(fixed.headingDeg,0,1e-7);CHECK_NEAR(fixed.pitchDeg,0,1e-7);
+    r.activate(r.pfd);r.advance(.02);fixed=fromSdk(r.backend.submitted.back(),r.qual.contract).orientation.toPbh();CHECK_NEAR(fixed.headingDeg,0,1e-7);
+    settings.globalAircraftTracking="heading";r.c.setSettings(settings,r.t);r.advance(.02);
+    auto heading=fromSdk(r.backend.submitted.back(),r.qual.contract).orientation.toPbh();CHECK_NEAR(heading.headingDeg,-135,1e-7);CHECK_NEAR(heading.pitchDeg,0,1e-7);
+    r.profile["cameras"][1]["mode"]="aircraftCockpit";r.setProfile();r.advance(.02);
+    settings.globalAircraftTracking="both";r.c.setSettings(settings,r.t);r.advance(.02);
+    const auto cockpit=fromSdk(r.backend.submitted.back(),r.qual.contract).orientation.toPbh();CHECK_NEAR(cockpit.headingDeg,0,1e-7);CHECK_NEAR(cockpit.pitchDeg,0,1e-7);
+}
+
+TEST_CASE("tracking: airport and flyby use shared mode despite legacy camera overrides") {
+    Rig r;std::vector<std::string> notes;auto airport=fscs::profiles::airport::generate(airportFixture(),json::object(),notes);
+    auto cam=airport["cameras"][0];cam["positionMetersFRD"]={0,0,-3};cam["orientationCameraToAnchorXYZW"]={0,0,0,1};cam["transition"]["kind"]="cut";cam["aircraftTracking"]="off";
+    auto cat=airport["categories"][0];cat["cameraIds"]=json::array({cam["id"]});cat["defaultCameraId"]=cam["id"];r.profile["categories"].push_back(cat);r.profile["cameras"].push_back(cam);
+    r.connect();r.c.setAircraftPosition(40,-89.999,150,r.t);r.activate(cam["id"]);r.grant();r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().headingDeg,90,.1);CHECK(r.backend.submitted.back().pitchDeg<0);
+    fscs::profiles::HostSettings settings;settings.globalAircraftTracking="off";r.c.setSettings(settings,r.t);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().headingDeg,0,1e-7);CHECK_NEAR(r.backend.submitted.back().pitchDeg,0,1e-7);
+    r.profile["cameras"][0]["mode"]="flyby";r.profile["cameras"][0]["transition"]["kind"]="cut";r.setProfile();r.activate(r.pilot);r.advance(.02);
+    const auto before=r.backend.submitted.back();r.c.setAircraftPosition(40,-89.997,160,r.t);r.advance(.02);
+    CHECK_NEAR(r.backend.submitted.back().headingDeg,before.headingDeg,1e-7);CHECK_NEAR(r.backend.submitted.back().pitchDeg,before.pitchDeg,1e-7);
+    settings.globalAircraftTracking="both";r.c.setSettings(settings,r.t);r.advance(.02);
+    CHECK(std::abs(r.backend.submitted.back().headingDeg-before.headingDeg)>1);
+}
+
+TEST_CASE("motion views: flyby animates parked pass with side height duration and finite end") {
+    for (const double duration : {5.,10.}) {
+        Rig r;auto& cam=r.profile["cameras"][0];cam["mode"]="flyby";cam["transition"]["kind"]="cut";
+        cam["motion"]={{"radiusMeters",100},{"heightMeters",20},{"durationSeconds",duration},{"sideMeters",-30},{"repeat",false}};
+        r.connect();r.c.setAircraftPosition(40,-90,1000,r.t,0);r.activate(r.pilot);r.grant();
+        r.advance(.02,static_cast<int>(duration/.04));
+        auto middle=r.c.engine().sample().pose.positionFRD;
+        CHECK_NEAR(middle.x,0,1e-7);CHECK_NEAR(middle.y,-30,1e-7);CHECK_NEAR(middle.z,-20,1e-7);
+        const auto world=r.backend.submitted.back();CHECK(world.referential==Referential::World);CHECK_NEAR(world.z,1020,1e-5);
+        CHECK(std::abs(world.headingDeg)>80); // aim back at stationary aircraft from closest approach
+        r.advance(.02,static_cast<int>(duration/.04)+100);
+        CHECK_NEAR(r.c.engine().sample().pose.positionFRD.x,-100,1e-7);
+        const auto end=r.c.engine().sample().pose.positionFRD;r.advance(.02,200);
+        CHECK_NEAR((r.c.engine().sample().pose.positionFRD-end).length(),0,1e-9);
+        r.c.setAircraftPosition(40,-90,1000,r.t,0);r.activate(r.pilot);r.advance(.02);
+        CHECK(r.c.engine().sample().pose.positionFRD.x>99.9); // recall starts another pass
+    }
+}
+
+TEST_CASE("motion views: repeated flyby reverses continuously and pauses for manual input or simulation pause") {
+    Rig r;auto& cam=r.profile["cameras"][0];cam["mode"]="flyby";cam["transition"]["kind"]="cut";
+    cam["motion"]={{"radiusMeters",50},{"heightMeters",10},{"durationSeconds",5},{"sideMeters",20},{"repeat",true}};
+    r.connect();r.c.setAircraftPosition(40,-90,1000,r.t,0);r.activate(r.pilot);r.grant();r.advance(.02,250);
+    const auto end=r.c.engine().basePose()->positionFRD;CHECK_NEAR(end.x,-50,1e-7);
+    r.advance(.02);const auto reverse=r.c.engine().basePose()->positionFRD;
+    CHECK((reverse-end).length()<.01);CHECK(reverse.x>end.x);
+    r.deliver(be::Paused{true});r.advance(.02,40);CHECK_NEAR((r.c.engine().basePose()->positionFRD-reverse).length(),0,1e-9);
+    r.deliver(be::Paused{false});fscs::core::ManualInput input;input.lookRight=1;r.c.setManualInput(input);r.advance(.02,40);
+    CHECK_NEAR((r.c.engine().basePose()->positionFRD-reverse).length(),0,1e-9);
+    input={};input.moveUp=1;r.c.setManualInput(input);r.advance(.02,40);
+    CHECK_NEAR((r.c.engine().basePose()->positionFRD-reverse).length(),0,1e-9);
+    r.c.setManualInput({});r.advance(.02,249);CHECK_NEAR(r.c.engine().basePose()->positionFRD.x,50,1e-7);
 }

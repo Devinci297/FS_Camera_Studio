@@ -1,6 +1,6 @@
 #pragma once
 // Recoverable in-sim persistence (design 2.0 §8.2). The WASM IO API offers open/read/write/close only — no rename,
-// delete or listing — so the store is two fixed slot files, each a complete checksummed snapshot of every profile
+// delete needed by this protocol — so the store is two fixed slot files, each a complete checksummed snapshot of every profile
 // (with up to five backups), settings, bindings and navigation metadata. A commit overwrites only the OLDER slot,
 // reads it back and verifies it before it counts; loading picks the highest valid transaction. One commit carries
 // profile, settings and bindings together, so a partial write can never publish half a transaction.
@@ -25,11 +25,20 @@ using json = nlohmann::json;
 class IStorageDriver {
 public:
     virtual ~IStorageDriver() = default;
+    // Readable mirrors for this transaction only; the checksummed slot remains authoritative.
+    virtual void prepareProfileExports(std::map<std::string, std::string>) {}
+    // Nonrecursive JSON candidates from the dedicated persistent import folder.
+    virtual void listImportFiles(std::function<void(std::vector<std::string>, std::string)> done) {
+        done({}, "Folder listing is unavailable in this host.");
+    }
     // Creates/truncates and writes the whole file; `done(ok, error)` after the file is written and closed.
     virtual void writeFile(const std::string& path, std::string bytes, std::function<void(bool, std::string)> done) = 0;
     // Reads the whole file; `done(nullopt)` when missing or unreadable.
     virtual void readFile(const std::string& path, std::function<void(std::optional<std::string>)> done) = 0;
 };
+
+inline constexpr const char* kProfileImportFolder = "\\work\\imports\\";
+bool validProfileImportFilename(const std::string& name);
 
 constexpr std::size_t kMaxStoreBytes = 24u << 20;
 constexpr std::size_t kBackupsPerProfile = 5;

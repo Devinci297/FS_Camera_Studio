@@ -128,7 +128,7 @@ std::optional<CameraMode> parseMode(const std::string& s) {
     return it->second;
 }
 
-bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior || m == CameraMode::Airport; }
+bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior || m == CameraMode::Airport || m == CameraMode::Orbit || m == CameraMode::Flyby; }
 
 std::string ValidationResult::summary() const {
     if (errors.empty()) return "valid";
@@ -163,6 +163,8 @@ ValidationResult validateProfile(json& doc) {
     if (!doc.contains("revision") || !doc["revision"].is_number_integer()) doc["revision"] = 0;
     if (doc["revision"].get<std::int64_t>() < 0) c.error("$.revision", "must not be negative");
 
+    // Airport libraries are global regardless of legacy aircraft-match metadata.
+    if(airportProfile)doc["aircraftMatch"]={{"strategy","none"},{"modelKey",nullptr},{"variantKey",nullptr},{"displayName",nullptr},{"confirmed",false}};
     // Aircraft match.
     if (!doc.contains("aircraftMatch") || !doc["aircraftMatch"].is_object()) doc["aircraftMatch"] = {{"strategy", "none"}};
     {
@@ -277,12 +279,32 @@ ValidationResult validateProfile(json& doc) {
                 {"effects", {{"enabled", false}}}, {"requiredCapabilities", json::array()}};
             for (const auto& [k, v] : defaults)
                 if (!cam.contains(k)) cam[k] = v;
+            if (cam.contains("motion") && !cam["motion"].is_object()) c.error(p + ".motion", "must be an object");
+            if (!cam.contains("motion")) cam["motion"] = json::object();
+            if (cam["motion"].is_object()) {
+                auto& motion = cam["motion"];
+                struct Range { const char* key; double value, lo, hi; };
+                for (const auto& v : {Range{"radiusMeters",35,2,5000}, Range{"heightMeters",8,1,2000}, Range{"durationSeconds",30,5,600}, Range{"sideMeters",35,-5000,5000}}) {
+                    if (!motion.contains(v.key)) motion[v.key] = v.value;
+                    const double value = js::num(motion,v.key,-1);
+                    if (!motion[v.key].is_number() || !std::isfinite(value) || value<v.lo || value>v.hi)
+                        c.error(p + ".motion." + v.key, "outside allowed motion range");
+                }
+                if (!motion.contains("clockwise")) motion["clockwise"] = true;
+                if (!motion["clockwise"].is_boolean()) c.error(p + ".motion.clockwise", "must be true or false");
+                if (!motion.contains("repeat")) motion["repeat"] = false;
+                if (!motion["repeat"].is_boolean()) c.error(p + ".motion.repeat", "must be true or false");
+            }
             auto& fx = cam["effects"];
             const auto tracking = js::str(cam, "trackingPolicy");
             if (tracking != "nativeIfQualified" && tracking != "on" && tracking != "off") c.error(p + ".trackingPolicy", "must be nativeIfQualified, on or off");
             if (!cam.contains("aircraftTracking")) cam["aircraftTracking"] = "off";
             const auto target = js::str(cam, "aircraftTracking");
             if (target != "off" && target != "heading" && target != "both") c.error(p + ".aircraftTracking", "must be off, heading or both");
+            else if (js::str(cam, "mode") != "airport" && target != "off") {
+                cam["aircraftTracking"] = "off";
+                c.warn(p + ".aircraftTracking", "Aircraft tracking is only available for airport cameras; disabled for this view.");
+            }
             if (!fx.is_object()) c.error(p + ".effects", "must be an object");
             else {
                 if (!fx.contains("enabled")) fx["enabled"] = false;
@@ -413,9 +435,16 @@ ProfileSnapshot toSnapshot(const json& doc) {
         e.transition.easing = kind == "cut" ? core::Easing::Cut : kind == "smoothstep5" ? core::Easing::Smoothstep5 : core::Easing::Smoothstep3;
         e.transition.durationSeconds = js::num(t, "durationSeconds", core::kDefaultTransitionSeconds);
         e.transition.delaySeconds = js::num(t, "delaySeconds", 0.0);
+        const auto& motion = js::object(cam,"motion");
+        e.motionRadiusMeters = js::num(motion,"radiusMeters",35);
+        e.motionHeightMeters = js::num(motion,"heightMeters",8);
+        e.motionDurationSeconds = js::num(motion,"durationSeconds",30);
+        e.motionClockwise = js::boolean(motion,"clockwise",true);
+        e.motionSideMeters = js::num(motion,"sideMeters",35);
+        e.motionRepeat = js::boolean(motion,"repeat",false);
         e.interaction = js::boolean(cam, "interaction", true);
         e.trackingPolicy = js::str(cam, "trackingPolicy", "nativeIfQualified");
-        e.aircraftTracking = js::str(cam, "aircraftTracking", "off");
+        e.aircraftTracking = e.mode == CameraMode::Airport ? js::str(cam, "aircraftTracking", "off") : "off";
         e.retainLook = js::str(cam, "temporaryLookPolicy") == "retain";
         e.originLat=js::num(js::object(cam,"worldOrigin"),"lat",0); e.originLon=js::num(js::object(cam,"worldOrigin"),"lon",0); e.originAltitude=js::num(js::object(cam,"worldOrigin"),"altitude",0);
         e.resetMouseLookOnRelease = js::str(cam, "mouseLookOnRelease", "retain") == "reset";
@@ -482,6 +511,58 @@ bool isUuid(const std::string& s) {
     return true;
 }
 
+namespace {
+// Explicit defaults remain recognizable when users rename their cameras.
+const char* builtinViewIcon(const std::string& name) {
+    static const std::map<std::string, const char*> icons = {
+        {"Cockpit", "view-cockpit"},
+        {"Flight deck", "view-cockpit"},
+        {"Instruments", "view-instrument"},
+        {"Controls", "view-controls"},
+        {"Cabin", "view-seat"},
+        {"Exterior (Preview)", "plane"},
+        {"External preview", "plane"},
+        {"Pilot view", "view-cockpit"},
+        {"Pilot - normal", "view-cockpit"},
+        {"Pilot - landing", "view-cockpit"},
+        {"Pilot - wide cockpit", "view-cockpit"},
+        {"Pilot - wide", "view-cockpit"},
+        {"Copilot", "view-seat"},
+        {"G1000 - PFD", "view-instrument"},
+        {"G1000 - MFD", "view-instrument"},
+        {"G1000 - full panel", "view-instrument"},
+        {"Standby instruments", "view-instrument"},
+        {"Throttle, mixture and trim", "view-controls"},
+        {"Electrical and lighting", "view-controls"},
+        {"Overhead and cabin lighting", "view-controls"},
+        {"Rear seats - forward", "view-seat"},
+        {"Front left quarter", "view-front"},
+        {"Front right quarter", "view-front"},
+        {"Left wing", "view-wing"},
+        {"Right wing", "view-wing"},
+        {"Tail - chase", "view-tail"},
+        {"Tail chase", "view-tail"},
+        {"Nose - head on", "view-front"},
+        {"Above - overview", "plane"},
+        {"Rear left quarter", "view-tail"},
+        {"Left window", "view-window"},
+        {"Right cockpit", "view-cockpit"},
+        {"Captain displays", "view-instrument"},
+        {"Center displays", "view-instrument"},
+        {"Main panel overview", "view-instrument"},
+        {"Glareshield", "view-controls"},
+        {"Overhead", "view-controls"},
+        {"Pedestal", "view-controls"},
+        {"Left side controls", "view-controls"},
+        {"Flight instruments", "view-instrument"},
+        {"Radios and navigation", "view-instrument"},
+        {"Lower controls", "view-controls"},
+    };
+    const auto it = icons.find(name);
+    return it == icons.end() ? "camera" : it->second;
+}
+}  // namespace
+
 json makeStarterProfile(const std::string& name, const std::string& modelKey, const std::string& displayName) {
     const std::string cat = newUuid(), cam = newUuid();
     return {
@@ -497,10 +578,11 @@ json makeStarterProfile(const std::string& name, const std::string& modelKey, co
         {"calibration", starterCalibration()},
         {"requiredSchemaFeatures", json::array()},
         {"defaultCameraId", cam},
-        {"categories", json::array({{{"id", cat}, {"name", "Cockpit"}, {"cameraIds", json::array({cam})}}})},
+        {"categories", json::array({{{"id", cat}, {"name", "Cockpit"}, {"icon", "view-cockpit"}, {"cameraIds", json::array({cam})}}})},
         {"cameras", json::array({{{"id", cam},
                                   {"categoryId", cat},
                                   {"name", "Pilot view"},
+                                  {"icon", "view-cockpit"},
                                   {"mode", "aircraftCockpit"},
                                   {"requiredCapabilities", {"cockpitPose", "interaction", "fov"}},
                                   {"viewId", 1},
@@ -534,7 +616,7 @@ json makeC172Profile(const std::string& modelKey, const std::string& displayName
     int viewId = 0;
     auto category = [&](const std::string& name) {
         std::string id = newUuid();
-        doc["categories"].push_back({{"id", id}, {"name", name}, {"cameraIds", json::array()}});
+        doc["categories"].push_back({{"id", id}, {"name", name}, {"icon", builtinViewIcon(name)}, {"cameraIds", json::array()}});
         return id;
     };
     auto view = [&](const std::string& group, const char* name, double f, double r, double d, double pitch,
@@ -545,6 +627,7 @@ json makeC172Profile(const std::string& modelKey, const std::string& displayName
         cam["id"] = id;
         cam["categoryId"] = group;
         cam["name"] = name;
+        cam["icon"] = builtinViewIcon(name);
         cam["viewId"] = ++viewId;
         cam["favorite"] = favorite;
         cam["positionMetersFRD"] = {f, r, d};
@@ -611,7 +694,7 @@ json makeA320Profile(const std::string& modelKey, const std::string& displayName
     int viewId = 0;
     auto category = [&](const char* name, const char* color) {
         const auto id = newUuid();
-        doc["categories"].push_back({{"id", id}, {"name", name}, {"color", color}, {"cameraIds", json::array()}});
+        doc["categories"].push_back({{"id", id}, {"name", name}, {"icon", builtinViewIcon(name)}, {"color", color}, {"cameraIds", json::array()}});
         return id;
     };
     auto view = [&](const std::string& group, const char* name, double pitch, double heading, double fov, bool favorite = false) {
@@ -621,6 +704,7 @@ json makeA320Profile(const std::string& modelKey, const std::string& displayName
         cam["id"] = id;
         cam["categoryId"] = group;
         cam["name"] = name;
+        cam["icon"] = builtinViewIcon(name);
         cam["viewId"] = ++viewId;
         cam["favorite"] = favorite;
         // No cross-model cockpit coordinates: all views start at this model's pilot eyepoint.

@@ -41,6 +41,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "Pilot - normal",
+        "icon": "view-cockpit",
         "orientationCameraToAnchorXYZW": [
           0.0,
           0.0,
@@ -83,6 +84,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "Pilot - landing",
+        "icon": "view-cockpit",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.026176948307873156,
@@ -125,6 +127,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "Pilot - wide cockpit",
+        "icon": "view-cockpit",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.06975647374412532,
@@ -167,6 +170,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "Copilot",
+        "icon": "view-seat",
         "orientationCameraToAnchorXYZW": [
           0.0,
           0.0,
@@ -209,6 +213,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "G1000 - PFD",
+        "icon": "view-instrument",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.10452846326765348,
@@ -251,6 +256,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "G1000 - MFD",
+        "icon": "view-instrument",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.10452846326765348,
@@ -293,6 +299,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "G1000 - full panel",
+        "icon": "view-instrument",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.12186934340514749,
@@ -335,6 +342,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "Standby instruments",
+        "icon": "view-instrument",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.1908089953765448,
@@ -377,6 +385,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "Throttle, mixture and trim",
+        "icon": "view-controls",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.40673664307580026,
@@ -419,6 +428,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "Electrical and lighting",
+        "icon": "view-controls",
         "orientationCameraToAnchorXYZW": [
           -0.04249517150940228,
           -0.32278287376350306,
@@ -461,6 +471,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "Overhead and cabin lighting",
+        "icon": "view-controls",
         "orientationCameraToAnchorXYZW": [
           0.0,
           0.3420201433256687,
@@ -503,6 +514,7 @@
         "levelHorizon": false,
         "mode": "aircraftCockpit",
         "name": "Rear seats - forward",
+        "icon": "view-seat",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.043619387365336,
@@ -545,6 +557,7 @@
         "levelHorizon": false,
         "mode": "aircraftExterior",
         "name": "Front left quarter",
+        "icon": "view-front",
         "orientationCameraToAnchorXYZW": [
           0.1269276517325909,
           -0.05257515478780803,
@@ -585,6 +598,7 @@
         "levelHorizon": false,
         "mode": "aircraftExterior",
         "name": "Front right quarter",
+        "icon": "view-front",
         "orientationCameraToAnchorXYZW": [
           -0.1269276517325909,
           -0.05257515478780803,
@@ -625,6 +639,7 @@
         "levelHorizon": false,
         "mode": "aircraftExterior",
         "name": "Left wing",
+        "icon": "view-wing",
         "orientationCameraToAnchorXYZW": [
           0.07641258616044552,
           -0.07641258616044552,
@@ -665,6 +680,7 @@
         "levelHorizon": false,
         "mode": "aircraftExterior",
         "name": "Right wing",
+        "icon": "view-wing",
         "orientationCameraToAnchorXYZW": [
           -0.07641258616044552,
           -0.07641258616044552,
@@ -705,6 +721,7 @@
         "levelHorizon": false,
         "mode": "aircraftExterior",
         "name": "Tail - chase",
+        "icon": "view-tail",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.1327331510254086,
@@ -745,6 +762,7 @@
         "levelHorizon": false,
         "mode": "aircraftExterior",
         "name": "Nose - head on",
+        "icon": "view-front",
         "orientationCameraToAnchorXYZW": [
           -0.08892883679185484,
           -5.44532076645212e-18,
@@ -785,6 +803,7 @@
         "levelHorizon": false,
         "mode": "aircraftExterior",
         "name": "Above - overview",
+        "icon": "plane",
         "orientationCameraToAnchorXYZW": [
           0.0,
           -0.5941019067308558,
@@ -825,6 +844,7 @@
         "levelHorizon": false,
         "mode": "aircraftExterior",
         "name": "Rear left quarter",
+        "icon": "view-tail",
         "orientationCameraToAnchorXYZW": [
           0.048221084435608776,
           -0.12833797632622582,
@@ -864,7 +884,8 @@
           "a2bf6ffe-1a55-42df-9113-7a5bda5b125a"
         ],
         "id": "731a7cc3-0b95-48c9-ae80-dc5c76724725",
-        "name": "Flight deck"
+        "name": "Flight deck",
+        "icon": "view-cockpit"
       },
       {
         "cameraIds": [
@@ -874,7 +895,8 @@
           "2877befc-0b46-4a56-9f35-99fc1ca3747e"
         ],
         "id": "c3943183-a988-4b2b-a926-e6b6861248cf",
-        "name": "Instruments"
+        "name": "Instruments",
+        "icon": "view-instrument"
       },
       {
         "cameraIds": [
@@ -883,14 +905,16 @@
           "0e973f3a-3e3a-4e29-b36b-ec88e2d88693"
         ],
         "id": "e0eaa77a-e473-4c1f-876f-8bc99c43c324",
-        "name": "Controls"
+        "name": "Controls",
+        "icon": "view-controls"
       },
       {
         "cameraIds": [
           "d32a17d4-47af-466a-b684-5381304d5b25"
         ],
         "id": "b4189e4f-7bd3-4355-af61-19ff98dc994c",
-        "name": "Cabin"
+        "name": "Cabin",
+        "icon": "view-seat"
       },
       {
         "cameraIds": [
@@ -904,7 +928,8 @@
           "fc84428e-8ab3-46b2-b8e7-4b4de6d34033"
         ],
         "id": "5c987613-8578-4594-9aeb-6de3f1a698f1",
-        "name": "Exterior (Preview)"
+        "name": "Exterior (Preview)",
+        "icon": "plane"
       }
     ],
     "defaultCameraId": "134203d5-64f9-41bb-a0da-b345987e3e23",

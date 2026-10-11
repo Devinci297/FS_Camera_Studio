@@ -3,7 +3,7 @@
 #include <optional>
 
 namespace fscs::host {
-// TRACK IR ENABLE is global. Lease it only while an explicitly configured camera owns the view.
+// TRACK IR ENABLE is global. Lease it while Camera Studio owns the view, using the shared host preference.
 // Never synthesize head poses: MSFS adds the native tracking offset to the add-on camera.
 class HeadTracking {
 public:
@@ -37,7 +37,7 @@ public:
         if (now >= nextRead_) {
             observed_ = backend_.headTracking(); nextRead_ = now + .25;
             if (error_.empty() && now >= deadline_ && written_ && observed_ != written_)
-                error_ = "Simulator head tracking differs from this camera's preference.";
+                error_ = "Simulator head tracking differs from the global preference.";
         }
     }
     bool nextEnabled() const { return !observed_.value_or(false); }

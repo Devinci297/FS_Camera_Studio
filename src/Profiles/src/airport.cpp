@@ -35,17 +35,20 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
  doc["profileId"]=stableId(code);doc["scope"]="airport";doc["airport"]={{"icao",code},{"name",js::str(f,"name",code)},{"origin",asJson(origin)}};
  doc["requiredSchemaFeatures"]={"airport-world-v1"}; doc["cameras"]=json::array();doc["categories"]=json::array();
  const double height=std::clamp(js::num(o,"height",3),1.0,100.0), offset=std::clamp(js::num(o,"offset",12),3.0,150.0);
+ bool towerPending=js::boolean(o,"tower",true);
  std::set<std::string> generatedIds;
  auto add=[&](std::string group,std::string key,std::string name,core::Vec3 pos,core::Vec3 target) {
-   if(doc["cameras"].size()>=kMaxCameras) return;
+   // Tower is generated last, but must survive large airports reaching the limit.
+   if(doc["cameras"].size()>=kMaxCameras-(towerPending?1:0)) return;
    if(std::max({std::abs(pos.x),std::abs(pos.y),std::abs(pos.z)})>core::kMaxPositionMeters) return;
    const auto catId=stableId(code+":"+group), id=stableId(code+":"+key);
    if(!generatedIds.insert(id).second)return;
+   const char* iconName=group=="Runways"?"view-runway":group=="Gates"?"view-gate":group=="Apron"?"view-apron":group=="Tower"?"view-tower":"view-taxiway";
    json* cat=nullptr;for(auto& c:doc["categories"])if(js::str(c,"id")==catId)cat=&c;
-   if(!cat){doc["categories"].push_back({{"id",catId},{"name",group},{"icon","map-pin"},{"airportIcao",code},{"cameraIds",json::array()}});cat=&doc["categories"].back();}
+   if(!cat){doc["categories"].push_back({{"id",catId},{"name",group},{"icon",iconName},{"airportIcao",code},{"cameraIds",json::array()}});cat=&doc["categories"].back();}
    auto delta=target-pos;auto q=core::Quat::fromPbh({-std::atan2(delta.z,std::hypot(delta.x,delta.y))/core::kDegToRad,0,std::atan2(delta.y,delta.x)/core::kDegToRad});
    auto cam=seed;cam.update({{"id",id},{"categoryId",catId},{"name",name.substr(0,60)},{"mode","airport"},{"aircraftTracking","both"},{"viewId",nullptr},{"favorite",false},{"interaction",false},{"requiredCapabilities",json::array()},
-      {"airportIcao",code},{"worldOrigin",asJson(origin)},{"generatedKey",key},{"icon","camera"},{"positionMetersFRD",{pos.x,pos.y,pos.z}},{"orientationCameraToAnchorXYZW",{q.x,q.y,q.z,q.w}},
+      {"airportIcao",code},{"worldOrigin",asJson(origin)},{"generatedKey",key},{"icon",iconName},{"positionMetersFRD",{pos.x,pos.y,pos.z}},{"orientationCameraToAnchorXYZW",{q.x,q.y,q.z,q.w}},
       {"transition",{{"kind","cut"},{"durationSeconds",0.6},{"delaySeconds",0}}}});
    doc["cameras"].push_back(cam);(*cat)["cameraIds"].push_back(id);if(!cat->contains("defaultCameraId"))(*cat)["defaultCameraId"]=id;
  };
@@ -77,7 +80,28 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
      add("Taxiway intersections","junction:"+std::to_string(index),"Taxiway junction "+std::to_string(index+1),pos,target);
    }
  }
- if(js::boolean(o,"tower",true)){auto t=geo(js::get(f,"tower"));if(t.valid()&&(t.lat!=0||t.lon!=0)){auto p=local(origin,t);p.z-=height;add("Tower","tower","Tower overview",p,{0,0,0});}else notes.push_back("No tower position in scenery data.");}
+ if(towerPending){
+   towerPending=false;
+   const auto t=geo(js::get(f,"tower"));auto pos=local(origin,t);pos.z-=height;
+   const bool usable=t.valid()&&(t.lat!=0||t.lon!=0)&&std::max({std::abs(pos.x),std::abs(pos.y),std::abs(pos.z)})<=core::kMaxPositionMeters;
+   if(usable)add("Tower","tower","Tower overview",pos,{0,0,0});
+   else {
+     // Some scenery omits tower coordinates. Provide a usable, explicitly
+     // estimated overview rather than hiding the selected Tower category.
+     core::Vec3 target{0,0,0};pos={100,100,-std::max(35.0,height)};
+     double longest=0;
+     for(const auto& r:js::array(f,"runways")){
+       const auto g=geo(r);const double length=js::num(r,"length",0),heading=js::num(r,"heading",NAN)*core::kDegToRad;
+       if(!g.valid()||length<50||length>10000||length<=longest||!std::isfinite(heading))continue;
+       const auto center=local(origin,g);const double clearance=std::clamp(js::num(r,"width",30),0.0,300.0)/2+std::max(80.0,offset);
+       const auto candidate=center+core::Vec3{-std::sin(heading)*clearance,std::cos(heading)*clearance,-std::max(35.0,height)};
+       if(std::max({std::abs(candidate.x),std::abs(candidate.y),std::abs(candidate.z)})>core::kMaxPositionMeters)continue;
+       longest=length;target=center;pos=candidate;
+     }
+     add("Tower","tower","Tower overview (estimated)",pos,target);
+     notes.push_back("No usable tower position in scenery data; added an estimated elevated overview. Move it to the control tower if needed.");
+   }
+ }
  if(doc["cameras"].empty()){notes.push_back("No usable selected scenery features.");return nullptr;}
  doc["defaultCameraId"]=doc["cameras"][0]["id"];
  if(doc["cameras"].size()==kMaxCameras)notes.push_back("Limited to 500 cameras; select fewer feature groups for larger airports.");
@@ -85,9 +109,25 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
 }
 json merge(const json& saved,const json& generated,bool replace) {
  if(!saved.is_object())return generated;auto out=saved;
+ if(replace) {
+  // Explicit regeneration removes old generated views that are no longer in
+  // the selected scenery features, while keeping manually created views.
+  auto& cameras=out["cameras"];
+  cameras.erase(std::remove_if(cameras.begin(),cameras.end(),[&](const json& cam){
+   if(js::str(cam,"generatedKey").empty())return false;
+   for(const auto& fresh:generated["cameras"])if(fresh["id"]==cam["id"])return false;
+   return true;
+  }),cameras.end());
+ }
  for(const auto& cat:generated["categories"]){bool found=false;for(const auto& c:out["categories"])found=found||c["id"]==cat["id"];if(!found){auto copy=cat;copy["cameraIds"]=json::array();out["categories"].push_back(copy);}}
- for(const auto& cam:generated["cameras"]){bool found=false;for(auto& c:out["cameras"])if(c["id"]==cam["id"]){found=true;if(replace)c=cam;}if(!found)out["cameras"].push_back(cam);}
- for(auto& cat:out["categories"]){cat["cameraIds"]=json::array();for(const auto& c:out["cameras"])if(c["categoryId"]==cat["id"])cat["cameraIds"].push_back(c["id"]);}
+ for(const auto& cam:generated["cameras"]){bool found=false;for(auto& c:out["cameras"])if(c["id"]==cam["id"]){found=true;if(replace){auto viewId=js::get(c,"viewId");c=cam;if(viewId.is_number_integer())c["viewId"]=viewId;}}if(!found)out["cameras"].push_back(cam);}
+ for(auto& cat:out["categories"]){cat["cameraIds"]=json::array();for(const auto& c:out["cameras"])if(c["categoryId"]==cat["id"])cat["cameraIds"].push_back(c["id"]);
+  bool defaultExists=false;for(const auto& id:cat["cameraIds"])defaultExists=defaultExists||id==js::get(cat,"defaultCameraId");
+  if(!defaultExists){if(cat["cameraIds"].empty())cat.erase("defaultCameraId");else cat["defaultCameraId"]=cat["cameraIds"][0];}
+ }
+ if(replace)out["categories"].erase(std::remove_if(out["categories"].begin(),out["categories"].end(),[](const json& cat){return cat["cameraIds"].empty();}),out["categories"].end());
+ bool defaultExists=false;for(const auto& cam:out["cameras"])defaultExists=defaultExists||cam["id"]==out["defaultCameraId"];
+ if(!defaultExists&&!out["cameras"].empty())out["defaultCameraId"]=out["cameras"][0]["id"];
  return out;
 }
 json nearby(const std::vector<json>& profiles,Geo pos,double radius){json result=json::array();if(!pos.valid())return result;

@@ -21,8 +21,8 @@ def inventory(folder):
 
 
 def build(args):
-    if not re.fullmatch(r'\d+\.\d+\.\d+-test\.\d{8}\.\d+', args.version):
-        raise ValueError('Use a release ID such as 0.1.0-test.20261011.1')
+    if not re.fullmatch(r'\d+\.\d+\.\d+(?:-test\.\d{8}\.\d+)?', args.version):
+        raise ValueError('Use a release ID such as 0.2.0 or 0.2.0-test.20261011.1')
     package = (ROOT / args.package).resolve()
     receipt = json.loads((ROOT / args.receipt).read_text(encoding='utf-8-sig'))
     actual = inventory(package)
@@ -66,7 +66,7 @@ def build(args):
     notices += 'This package includes nlohmann/json:\n\n'
     notices += (ROOT / 'third_party/nlohmann/LICENSE.MIT').read_text(encoding='utf-8')
     (stage / 'THIRD-PARTY-NOTICES.txt').write_text(notices, encoding='utf-8')
-    info = dict(product='FS Camera Studio', buildId=args.version, channel='tester',
+    info = dict(product='FS Camera Studio', buildId=args.version, channel='tester' if '-test.' in args.version else 'release',
                 packageVersion=manifest['package_version'], minimumSimulatorVersion=manifest['minimum_game_version'],
                 builtUtc=datetime.now(timezone.utc).isoformat(),
                 sourceReceipt=Path(args.receipt).name, sourceTrial=Path(args.receipt).parent.name,
@@ -74,7 +74,7 @@ def build(args):
                 liveSimulatorVerified=bool(receipt.get('liveVerified', False)),
                 installerSigned=False, testHarness=args.test_harness)
     (stage / 'BUILD-INFO.json').write_text(json.dumps(info, indent=2)+'\n', encoding='utf-8')
-    numeric = args.version.split('-')[0] + '.' + args.version.rsplit('.', 1)[1]
+    numeric = args.version.split('-')[0] + '.' + (args.version.rsplit('.', 1)[1] if '-test.' in args.version else '0')
     (stage / 'release.iss').write_text(
         f'#define ReleaseVersion "{args.version}"\n#define NumericVersion "{numeric}"\n'
         f'#define ReleaseOutput "{output}"\n#define StageRoot "{stage}"\n' +

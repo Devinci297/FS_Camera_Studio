@@ -58,7 +58,7 @@ void SimSession::setup() {
     SimConnect_RequestSystemState(h, kReqAircraftState, "AircraftLoaded");
     airportDefinitionReady_=false;airportRequests_.clear();
     airportIdentityDefinitionReady_=false;airportIdentityRequests_.clear();
-    for(const auto& v:std::vector<std::pair<const char*,const char*>>{{"PLANE LATITUDE","degrees"},{"PLANE LONGITUDE","degrees"},{"PLANE ALTITUDE","meters"}})
+    for(const auto& v:std::vector<std::pair<const char*,const char*>>{{"PLANE LATITUDE","degrees"},{"PLANE LONGITUDE","degrees"},{"PLANE ALTITUDE","meters"},{"PLANE HEADING DEGREES TRUE","degrees"}})
         SimConnect_AddToDataDefinition(h,kDefPosition,v.first,v.second,SIMCONNECT_DATATYPE_FLOAT64);
     SimConnect_RequestDataOnSimObject(h,kReqPosition,kDefPosition,SIMCONNECT_OBJECT_ID_USER,SIMCONNECT_PERIOD_SIM_FRAME,SIMCONNECT_DATA_REQUEST_FLAG_DEFAULT,0,1);
     // Fixed double layout, in SI units except RPM. Read-only, throttled to every second sim frame.
@@ -75,6 +75,7 @@ void SimSession::setup() {
     SimConnect_SetNotificationGroupPriority(h, kNotifyInput, SIMCONNECT_GROUP_PRIORITY_HIGHEST);
     // A loading crash was observed with startup-time native mouse subscriptions. Keep setup free of them.
     mouseMappingPackets_.clear();
+    inputMappingPackets_.clear();
     mouseRegistered_ = mouseEnabled_ = mouseAxesEnabled_ = mouseFailed_ = false;
     clientEventsDefined_ = 0;
     zoomRegistered_ = false;
@@ -149,7 +150,7 @@ bool SimSession::ensureClientEvents(std::size_t count) {
     for (; clientEventsDefined_ < count; ++clientEventsDefined_) {
         const DWORD id = kEvtInputBase + static_cast<DWORD>(clientEventsDefined_);
         if (FAILED(SimConnect_MapClientEventToSimEvent(asHandle(handle_), id, ""))) return false;
-        SimConnect_AddClientEventToNotificationGroup(asHandle(handle_), kNotifyInput, id, FALSE);
+        if (FAILED(SimConnect_AddClientEventToNotificationGroup(asHandle(handle_), kNotifyInput, id, FALSE))) return false;
     }
     return true;
 }
@@ -171,26 +172,41 @@ bool SimSession::ensureZoomEvents() {
 
 bool SimSession::mapInputs(const std::vector<std::string>& definitions) {
     if (!handle_) return false;
-    const std::size_t n = definitions.size() < kMaxInputs ? definitions.size() : kMaxInputs;
-    SimConnect_ClearInputGroup(asHandle(handle_), kInputGroup);
+    const std::size_t n = (std::min)(definitions.size(), kMaxInputs);
+    const HANDLE h = asHandle(handle_);
+    inputMappingPackets_.clear();
+    std::size_t failed = definitions.size() - n;
+    std::uint32_t error = 0;
+    const auto check = [&](HRESULT result) {
+        DWORD packet = 0;
+        if (SUCCEEDED(result) && SUCCEEDED(SimConnect_GetLastSentPacketID(h, &packet))) inputMappingPackets_.push_back(packet);
+        if (FAILED(result)) { ++failed; error = static_cast<std::uint32_t>(result); return false; }
+        return true;
+    };
+    const auto report = [&]() {
+        staged_.push_back(backend_event::InputMappingStatus{failed == 0, n, failed, error});
+        return failed == 0;
+    };
+    if (!check(SimConnect_ClearInputGroup(h, kInputGroup))) return report();
     mapped_.assign(definitions.begin(), definitions.begin() + static_cast<long>(n));
     isPov_.clear();
-    if (!ensureClientEvents(n)) return false;
+    if (!ensureClientEvents(n)) { ++failed; return report(); }
     for (std::size_t i = 0; i < n; ++i) {
         const DWORD id = kEvtInputBase + static_cast<DWORD>(i);
         const bool pov = isPovDefinition(mapped_[i]);
         isPov_.push_back(pov);
         if (mapped_[i] == "sim:ZOOM_IN" || mapped_[i] == "sim:ZOOM_OUT") {
-            if (!ensureZoomEvents()) return false;
+            if (!ensureZoomEvents()) ++failed;
             continue;
         }
-        // Buttons and keys: down sends 1, up sends 0. POV: one event per change with the angle in dwData.
-        if (pov) SimConnect_MapInputEventToClientEvent_EX1(asHandle(handle_), kInputGroup, mapped_[i].c_str(), id);
-        else SimConnect_MapInputEventToClientEvent_EX1(asHandle(handle_), kInputGroup, mapped_[i].c_str(), id, 1, id, 0);
+        // Keep valid mappings available even if one optional alias is rejected.
+        // Buttons and keys: down sends 1, up sends 0. POV: one event per changed angle.
+        if (pov) check(SimConnect_MapInputEventToClientEvent_EX1(h, kInputGroup, mapped_[i].c_str(), id));
+        else check(SimConnect_MapInputEventToClientEvent_EX1(h, kInputGroup, mapped_[i].c_str(), id, 1, id, 0));
     }
-    SimConnect_SetInputGroupPriority(asHandle(handle_), kInputGroup, SIMCONNECT_GROUP_PRIORITY_HIGHEST);
-    SimConnect_SetInputGroupState(asHandle(handle_), kInputGroup, SIMCONNECT_STATE_ON);
-    return true;
+    check(SimConnect_SetInputGroupPriority(h, kInputGroup, SIMCONNECT_GROUP_PRIORITY_HIGHEST));
+    check(SimConnect_SetInputGroupState(h, kInputGroup, SIMCONNECT_STATE_ON));
+    return report();
 }
 
 bool SimSession::mapTestInput(const std::string& definition) {
@@ -230,6 +246,11 @@ void SimSession::onRecv(const void* raw, unsigned long size) {
         }
         case SIMCONNECT_RECV_ID_EXCEPTION: {
             const auto* e = static_cast<const SIMCONNECT_RECV_EXCEPTION*>(raw);
+            const auto inputPacket = std::find(inputMappingPackets_.begin(), inputMappingPackets_.end(), e->dwSendID);
+            if (inputPacket != inputMappingPackets_.end()) {
+                staged_.push_back(backend_event::InputMappingStatus{false, mapped_.size(), 1, e->dwException});
+                inputMappingPackets_.erase(inputPacket); // Log each rejected registration only once.
+            }
             for (const auto packet : mouseMappingPackets_) if (packet == e->dwSendID) {
                 SimConnect_SetInputGroupState(asHandle(handle_), kMouseInputGroup, SIMCONNECT_STATE_OFF);
                 SimConnect_SetInputGroupState(asHandle(handle_), kMouseAxesGroup, SIMCONNECT_STATE_OFF);
@@ -286,8 +307,8 @@ void SimSession::onRecv(const void* raw, unsigned long size) {
         }
         case SIMCONNECT_RECV_ID_SIMOBJECT_DATA: {
             const auto* d = static_cast<const SIMCONNECT_RECV_SIMOBJECT_DATA*>(data);
-            if(d->dwRequestID==kReqPosition && d->dwDefineCount==3 && data->dwSize>=offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA,dwData)+3*sizeof(double)){
-                double v[3];std::memcpy(v,&d->dwData,sizeof(v));staged_.push_back(backend_event::AircraftPosition{v[0],v[1],v[2]});
+            if(d->dwRequestID==kReqPosition && d->dwDefineCount==4 && data->dwSize>=offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA,dwData)+4*sizeof(double)){
+                double v[4];std::memcpy(v,&d->dwData,sizeof(v));staged_.push_back(backend_event::AircraftPosition{v[0],v[1],v[2],v[3]});
             }
             if (d->dwRequestID == kReqMotion && d->dwDefineCount == 7 && data->dwSize >= offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA, dwData) + 7 * sizeof(double)) {
                 double v[7]; std::memcpy(v, &d->dwData, sizeof(v));

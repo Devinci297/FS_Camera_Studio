@@ -3,6 +3,12 @@
 #include "fscs/profiles/json_util.hpp"
 
 #include <cstdio>
+#include <cerrno>
+#if !defined(_WIN32)
+#include <dirent.h>
+#include <sys/stat.h>
+#endif
+#include <algorithm>
 
 namespace fscs::host {
 
@@ -19,13 +25,46 @@ bool writeLocal(const std::string& path, const std::string& bytes) {
 
 // Local persistent \work files, never streamed package assets. Asobo supports libc IO here.
 // Close before invoking the callback: the repository may immediately read a written slot back.
+void WasmStorage::listImportFiles(std::function<void(std::vector<std::string>, std::string)> done) {
+#if defined(_WIN32)
+    // Native unit-test builds have no simulator VFS. Module tests provide an explicit FakeStorage folder.
+    done({}, "The simulator import folder is only available inside MSFS.");
+#else
+    // fd_readdir is supported by MSFS 2024. Never enumerate outside our own persistent work directory.
+    const char* folder = "/work/imports";
+    if (mkdir(folder, 0777) != 0 && errno != EEXIST) {
+        done({}, "Could not create the imports folder. Create it at the displayed location, then Refresh.");
+        return;
+    }
+    DIR* dir = opendir(folder);
+    if (!dir) {
+        done({}, "The simulator could not list the imports folder. Check the folder and refresh.");
+        return;
+    }
+    std::vector<std::string> names;
+    std::string error;
+    errno = 0;
+    while (auto* entry = readdir(dir)) {
+        const std::string name = entry->d_name;
+        if (profiles::validProfileImportFilename(name)) names.push_back(name);
+        if (names.size() >= 1000) { error = "Showing the first 1,000 profile files. Remove unused files to see more."; break; }
+        errno = 0;
+    }
+    if (errno != 0 && error.empty()) error = "The simulator could not finish reading the imports folder. Refresh to try again.";
+    closedir(dir);
+    std::sort(names.begin(), names.end());
+    done(std::move(names), std::move(error));
+#endif
+}
+
 void WasmStorage::writeFile(const std::string& path, std::string bytes, std::function<void(bool, std::string)> done) {
-    // Publish readable aircraft files with each store save. The checksummed two-slot store remains the recovery
-    // authority across profiles, settings and bindings; the individual files can also be imported as profile codes.
+    // The repository prepares only affected aircraft/airport mirrors. Never parse the
+    // full library and rewrite every profile during the simulator's frame callback.
     const bool store = path == "\\work\\fscs-store-a.json" || path == "\\work\\fscs-store-b.json";
     if (store) {
-        const auto envelope = js::parse(bytes);
-        for (const auto& [profilePath, profileBytes] : profiles::aircraftProfileFiles(envelope)) {
+        auto exports = std::move(profileExports_);
+        profileExports_.clear();
+        for (const auto& [profilePath, profileBytes] : exports) {
             if (!writeLocal(profilePath, profileBytes)) {
                 done(false, "The simulator could not write the aircraft's profile file.");
                 return;

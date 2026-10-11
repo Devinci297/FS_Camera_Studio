@@ -1,4 +1,4 @@
-FS CAMERA STUDIO - TESTER BUILD
+FS CAMERA STUDIO - VERSION 0.2.0
 Microsoft Flight Simulator 2024 | Windows 11 x64
 
 INSTALL
@@ -23,7 +23,7 @@ FIRST FLIGHT
 - Select a camera, then View in sim / Enable camera.
 - Camera directions are configured automatically. No axis calibration is required.
 - Hold right mouse and drag in the simulator scene to look around.
-- W/S moves forward/back along the view, A/D sideways, Q down, E up.
+- W/S moves forward/back along the view, A/D sideways, Q up, E down.
 - Shift moves faster. Mouse wheel zooms. Fine/Normal/Coarse changes precision.
 - Ctrl+S saves the adjusted active view and all pending changes. Bindings are
   editable in the Bindings tab; existing conflicting assignments are preserved.
@@ -41,13 +41,15 @@ aircraft profile.
 
 Airport views can be repositioned with the editor or movement bindings. Track
 lets you choose fixed direction, aircraft heading, or heading and pitch. Auto
-switch on the mini toolbar chooses the nearest camera while airport control is
-active. Manual movement, right-drag or selecting another camera stops it.
+switch on the mini toolbar chooses the nearest camera while camera control is
+active. Manual movement and right-drag pause it briefly; the global toggle
+remains enabled across cameras. Release camera pauses switching.
 The mini toolbar also has Save; longer camera lists and toolbars scroll.
 
 HEAD TRACKING
-Use Head tracking to turn the MSFS TrackIR-compatible channel on/off for each
-camera, or use the simulator setting in Behavior > Head-tracking options.
+Head tracking is global and OFF by default. Use its button to enable the MSFS
+TrackIR-compatible channel for all cameras and profiles. Aircraft tracking is
+also global and defaults to heading + pitch; cockpit views never track aircraft.
 Assign Toggle head tracking in Bindings if desired. The add-on does not include
 tracking hardware/drivers and does not control VR or independent camera tools.
 Physical hardware behavior still needs tester verification.
@@ -103,3 +105,13 @@ Send the developer:
 Review logs before sharing; paths may contain your Windows username.
 
 No profiles, credentials or data from the developer's computer are bundled.
+
+VERSION 0.2
+- Main and mini background opacity have independent sliders in Settings.
+- Main editor always displays icons and labels. Mini display affects categories.
+- Hold adjustment buttons to repeat; release or loss of focus stops movement.
+- Library + > External motion views adds Orbit, Fly-by and Walkaround views.
+- Profile import: copy the displayed folder path into Explorer, add JSON files,
+  then Refresh, select a file and Import. Pasting profile code is also supported.
+- Successful saves request a native confirmation chime. Settings > Test sound
+  checks the simulator UI sound route; spoken WAV is browser-only.

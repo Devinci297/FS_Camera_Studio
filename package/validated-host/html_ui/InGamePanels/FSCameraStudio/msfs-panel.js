@@ -72,8 +72,8 @@
           top = Math.min(top, dock.getBoundingClientRect().top);
         }
         if (!dialog.hidden) {
-          const bounds = dialog.getBoundingClientRect();
-          left = bounds.left; right = bounds.right; top = bounds.top; bottom = bounds.bottom;
+          const bounds = (dialog.classList.contains("mc-tracking-shade") ? dialog.querySelector(".mc-dialog") : dialog).getBoundingClientRect();
+          left = Math.min(left,bounds.left); right = Math.max(right,bounds.right); top = Math.min(top,bounds.top); bottom = Math.max(bottom,bounds.bottom);
         }
         if (editor.dataset.mouseLook === 'true') {
           left = 0; right = window.innerWidth; top = Math.max(96, window.innerHeight * .12); bottom = window.innerHeight;
@@ -113,9 +113,24 @@
     root.fscsUpdateMiniRect();
   }
 
+  // common.js enables a native blurred scene behind each Coherent view. CSS cannot
+  // remove that compositor layer; disable it on this panel view before applying rgba.
+  let clearBackgroundReady = false;
+  function clearNativeBackground(force) {
+    if (clearBackgroundReady && !force) return;
+    if (typeof root.SetBlurredBackground !== 'function') return;
+    root.SetBlurredBackground(false);
+    clearBackgroundReady = true;
+  }
+
   function hostReady() {
     const panel = document.querySelector('ingame-ui');
     if (!panel) return;
+    clearNativeBackground(false);
+    if (!panel.fscsClearBackgroundBound) {
+      panel.addEventListener('panelActive', () => clearNativeBackground(true));
+      panel.fscsClearBackgroundBound = true;
+    }
     // The dataStorageReady event can precede asynchronous template attachment. Re-deliver it once the stock
     // host is connected and storage is ready, so its drag/resize setup cannot be missed.
     if (panel.headerElement && !panel.dragDropHandler && typeof root.GetDataStorage === 'function' && root.GetDataStorage()) {

@@ -1,0 +1,605 @@
+{
+  "format": "fs-camera-studio-profile",
+  "profile": {
+    "aircraftMatch": {
+      "strategy": "aircraftPath",
+      "modelKey": "asobo_c152",
+      "displayName": "Cessna 152",
+      "variantKey": null,
+      "confirmed": false
+    },
+    "calibration": {
+      "adapterContract": "pending-qualification",
+      "anchor": {
+        "correctionMetersFRD": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "correctionRotationXYZW": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "kind": "sdkPilotEyepoint",
+        "seedDefinitionName": null
+      },
+      "frameContract": "FRD-camera-to-anchor-xyzw-v1",
+      "simulatorBuild": null
+    },
+    "cameras": [
+      {
+        "categoryId": "aef477b5-bbce-50d1-984d-055030932d1f",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": true,
+        "id": "8fa47a0b-8fcc-5b88-bb51-82bbf9820036",
+        "interaction": true,
+        "levelHorizon": false,
+        "mode": "aircraftCockpit",
+        "name": "Pilot - normal",
+        "icon": "view-cockpit",
+        "orientationCameraToAnchorXYZW": [
+          -0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "positionMetersFRD": [
+          0,
+          0,
+          0
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 1.0821041362364843
+        },
+        "requiredCapabilities": [
+          "cockpitPose",
+          "interaction",
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 0.55,
+          "kind": "smoothstep3"
+        },
+        "viewId": 1,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "aef477b5-bbce-50d1-984d-055030932d1f",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": true,
+        "id": "84d41a2a-077c-5d32-a277-0ad764cd7300",
+        "interaction": true,
+        "levelHorizon": false,
+        "mode": "aircraftCockpit",
+        "name": "Pilot - landing",
+        "icon": "view-cockpit",
+        "orientationCameraToAnchorXYZW": [
+          0.0,
+          -0.026176948307873153,
+          0.0,
+          0.9996573249755573
+        ],
+        "positionMetersFRD": [
+          0,
+          0,
+          0
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 0.9075712110370514
+        },
+        "requiredCapabilities": [
+          "cockpitPose",
+          "interaction",
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 0.55,
+          "kind": "smoothstep3"
+        },
+        "viewId": 2,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "aef477b5-bbce-50d1-984d-055030932d1f",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": false,
+        "id": "cc7e664b-638e-53d8-bd50-c367881bf9a3",
+        "interaction": true,
+        "levelHorizon": false,
+        "mode": "aircraftCockpit",
+        "name": "Pilot - wide",
+        "icon": "view-cockpit",
+        "orientationCameraToAnchorXYZW": [
+          0.0,
+          -0.0697564737441253,
+          0.0,
+          0.9975640502598242
+        ],
+        "positionMetersFRD": [
+          0,
+          0,
+          0
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 1.3962634015954636
+        },
+        "requiredCapabilities": [
+          "cockpitPose",
+          "interaction",
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 0.55,
+          "kind": "smoothstep3"
+        },
+        "viewId": 3,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "aef477b5-bbce-50d1-984d-055030932d1f",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": false,
+        "id": "ff608a19-97f2-5987-86df-710ef4dad367",
+        "interaction": true,
+        "levelHorizon": false,
+        "mode": "aircraftCockpit",
+        "name": "Left window",
+        "icon": "view-window",
+        "orientationCameraToAnchorXYZW": [
+          0.0,
+          0.0,
+          -0.6087614290087207,
+          0.7933533402912352
+        ],
+        "positionMetersFRD": [
+          0,
+          0,
+          0
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 1.0821041362364843
+        },
+        "requiredCapabilities": [
+          "cockpitPose",
+          "interaction",
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 0.55,
+          "kind": "smoothstep3"
+        },
+        "viewId": 4,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "aef477b5-bbce-50d1-984d-055030932d1f",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": false,
+        "id": "42056cb1-fbbf-5c14-9f6c-08b4514eac70",
+        "interaction": true,
+        "levelHorizon": false,
+        "mode": "aircraftCockpit",
+        "name": "Right cockpit",
+        "icon": "view-cockpit",
+        "orientationCameraToAnchorXYZW": [
+          0.023436679747723427,
+          -0.03678821817552305,
+          0.536788218175523,
+          0.8425887240367153
+        ],
+        "positionMetersFRD": [
+          0,
+          0,
+          0
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 1.2566370614359172
+        },
+        "requiredCapabilities": [
+          "cockpitPose",
+          "interaction",
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 0.55,
+          "kind": "smoothstep3"
+        },
+        "viewId": 5,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "734a1218-64e8-5cfe-8602-4d8ffa7d8a15",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": true,
+        "id": "ef357d7d-8feb-5b26-8714-cd68ad9c824a",
+        "interaction": true,
+        "levelHorizon": false,
+        "mode": "aircraftCockpit",
+        "name": "Flight instruments",
+        "icon": "view-instrument",
+        "orientationCameraToAnchorXYZW": [
+          0.0,
+          -0.21643961393810288,
+          0.0,
+          0.9762960071199334
+        ],
+        "positionMetersFRD": [
+          0,
+          0,
+          0
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 0.7853981633974483
+        },
+        "requiredCapabilities": [
+          "cockpitPose",
+          "interaction",
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 0.55,
+          "kind": "smoothstep3"
+        },
+        "viewId": 6,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "734a1218-64e8-5cfe-8602-4d8ffa7d8a15",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": false,
+        "id": "d83eaa8d-a049-5590-ba16-59ef47d9e99a",
+        "interaction": true,
+        "levelHorizon": false,
+        "mode": "aircraftCockpit",
+        "name": "Radios and navigation",
+        "icon": "view-instrument",
+        "orientationCameraToAnchorXYZW": [
+          0.04684610648167502,
+          -0.21130913087034972,
+          0.21130913087034972,
+          0.953153893518325
+        ],
+        "positionMetersFRD": [
+          0,
+          0,
+          0
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 0.8377580409572782
+        },
+        "requiredCapabilities": [
+          "cockpitPose",
+          "interaction",
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 0.55,
+          "kind": "smoothstep3"
+        },
+        "viewId": 7,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "734a1218-64e8-5cfe-8602-4d8ffa7d8a15",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": false,
+        "id": "97ba820c-6d5c-54df-8033-6e46a3271424",
+        "interaction": true,
+        "levelHorizon": false,
+        "mode": "aircraftCockpit",
+        "name": "Lower controls",
+        "icon": "view-controls",
+        "orientationCameraToAnchorXYZW": [
+          0.07338689100003824,
+          -0.4161977407267834,
+          0.15737869562426265,
+          0.8925389352890299
+        ],
+        "positionMetersFRD": [
+          0,
+          0,
+          0
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 1.0122909661567112
+        },
+        "requiredCapabilities": [
+          "cockpitPose",
+          "interaction",
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 0.55,
+          "kind": "smoothstep3"
+        },
+        "viewId": 8,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "230078e3-9c35-54ee-9f1f-ff3bfc767c46",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": true,
+        "id": "0c05d683-e0ac-5d8f-be64-1a8ac9325644",
+        "interaction": false,
+        "levelHorizon": false,
+        "mode": "aircraftExterior",
+        "name": "Front left quarter",
+        "icon": "view-front",
+        "orientationCameraToAnchorXYZW": [
+          0.1354353545238968,
+          -0.05609916066860638,
+          0.9138986023286501,
+          0.3785491957183428
+        ],
+        "positionMetersFRD": [
+          7,
+          -7,
+          -3
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 0.9599310885968813
+        },
+        "requiredCapabilities": [
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 1.2,
+          "kind": "smoothstep3"
+        },
+        "viewId": 9,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "230078e3-9c35-54ee-9f1f-ff3bfc767c46",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": false,
+        "id": "de7a9676-aa1e-5ee1-b6f5-c56d0611f4a0",
+        "interaction": false,
+        "levelHorizon": false,
+        "mode": "aircraftExterior",
+        "name": "Left wing",
+        "icon": "view-wing",
+        "orientationCameraToAnchorXYZW": [
+          0.06967661786618205,
+          -0.06967661786618205,
+          0.7036655234717203,
+          0.7036655234717203
+        ],
+        "positionMetersFRD": [
+          0,
+          -10,
+          -2
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 0.9599310885968813
+        },
+        "requiredCapabilities": [
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 1.2,
+          "kind": "smoothstep3"
+        },
+        "viewId": 10,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "230078e3-9c35-54ee-9f1f-ff3bfc767c46",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": false,
+        "id": "d5f30eae-eb25-50b1-9dd4-a7dadb0858e0",
+        "interaction": false,
+        "levelHorizon": false,
+        "mode": "aircraftExterior",
+        "name": "Right wing",
+        "icon": "view-wing",
+        "orientationCameraToAnchorXYZW": [
+          -0.06967661786618205,
+          -0.06967661786618205,
+          -0.7036655234717203,
+          0.7036655234717203
+        ],
+        "positionMetersFRD": [
+          0,
+          10,
+          -2
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 0.9599310885968813
+        },
+        "requiredCapabilities": [
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 1.2,
+          "kind": "smoothstep3"
+        },
+        "viewId": 11,
+        "aircraftTracking": "off"
+      },
+      {
+        "categoryId": "230078e3-9c35-54ee-9f1f-ff3bfc767c46",
+        "effects": {
+          "enabled": false
+        },
+        "favorite": false,
+        "id": "13e44980-686c-575c-b403-877f4568de28",
+        "interaction": false,
+        "levelHorizon": false,
+        "mode": "aircraftExterior",
+        "name": "Tail chase",
+        "icon": "view-tail",
+        "orientationCameraToAnchorXYZW": [
+          0.0,
+          -0.12218326369570447,
+          0.0,
+          0.992507556682903
+        ],
+        "positionMetersFRD": [
+          -12,
+          0,
+          -3
+        ],
+        "projection": {
+          "axis": "adapterDefined",
+          "kind": "simulatorFovRadians",
+          "value": 0.9599310885968813
+        },
+        "requiredCapabilities": [
+          "fov"
+        ],
+        "seedDefinitionName": null,
+        "temporaryLookPolicy": "resetOnRecall",
+        "trackingPolicy": "nativeIfQualified",
+        "transition": {
+          "delaySeconds": 0.0,
+          "durationSeconds": 1.2,
+          "kind": "smoothstep3"
+        },
+        "viewId": 12,
+        "aircraftTracking": "off"
+      }
+    ],
+    "categories": [
+      {
+        "id": "aef477b5-bbce-50d1-984d-055030932d1f",
+        "name": "Cockpit",
+        "icon": "view-cockpit",
+        "color": "#75baff",
+        "cameraIds": [
+          "8fa47a0b-8fcc-5b88-bb51-82bbf9820036",
+          "84d41a2a-077c-5d32-a277-0ad764cd7300",
+          "cc7e664b-638e-53d8-bd50-c367881bf9a3",
+          "ff608a19-97f2-5987-86df-710ef4dad367",
+          "42056cb1-fbbf-5c14-9f6c-08b4514eac70"
+        ],
+        "defaultCameraId": "8fa47a0b-8fcc-5b88-bb51-82bbf9820036"
+      },
+      {
+        "id": "734a1218-64e8-5cfe-8602-4d8ffa7d8a15",
+        "name": "Instruments",
+        "icon": "view-instrument",
+        "color": "#f5a56b",
+        "cameraIds": [
+          "ef357d7d-8feb-5b26-8714-cd68ad9c824a",
+          "d83eaa8d-a049-5590-ba16-59ef47d9e99a",
+          "97ba820c-6d5c-54df-8033-6e46a3271424"
+        ],
+        "defaultCameraId": "ef357d7d-8feb-5b26-8714-cd68ad9c824a"
+      },
+      {
+        "id": "230078e3-9c35-54ee-9f1f-ff3bfc767c46",
+        "name": "External preview",
+        "icon": "plane",
+        "color": "#b99ae3",
+        "cameraIds": [
+          "0c05d683-e0ac-5d8f-be64-1a8ac9325644",
+          "de7a9676-aa1e-5ee1-b6f5-c56d0611f4a0",
+          "d5f30eae-eb25-50b1-9dd4-a7dadb0858e0",
+          "13e44980-686c-575c-b403-877f4568de28"
+        ],
+        "defaultCameraId": "0c05d683-e0ac-5d8f-be64-1a8ac9325644"
+      }
+    ],
+    "defaultCameraId": "8fa47a0b-8fcc-5b88-bb51-82bbf9820036",
+    "name": "Cessna 152 - Import test starter",
+    "profileId": "fc50ee17-7e08-53da-ba02-227086728a4b",
+    "requiredSchemaFeatures": [],
+    "revision": 0,
+    "schemaVersion": 2,
+    "sequences": [],
+    "starterNotes": "Cockpit views use the loaded aircraft pilot eyepoint. Exterior views are approximate datum-relative previews. Adjust framing for your installed C152 and save; this is not calibrated model geometry."
+  },
+  "version": 2,
+  "workingCopy": false
+}

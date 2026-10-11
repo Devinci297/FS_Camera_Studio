@@ -100,7 +100,7 @@ has focus) and stored as MSFS input definition strings; controller inputs are ch
 plus a button/hat number and confirmed with a live down/up test. Inputs are mapped in-module through
 `SimConnect_MapInputEventToClientEvent_EX1`, so they work with the editor closed (flight loaded only).
 
-Movement defaults are stored and editable: W/S forward/back, A/D left/right, Q/E down/up, Shift faster movement.
+Movement defaults are stored and editable: W/S forward/back, A/D left/right, Q/E up/down, Shift faster movement.
 `movementDefaultsVersion: 1` records the one-time migration of the previous invisible runtime defaults. Missing
 defaults are added only if neither the action nor the input is occupied. Clearing a migrated assignment stays
 cleared across save/reload; runtime mapping never supplies hidden fallbacks.

@@ -68,6 +68,8 @@ struct HostSettings {
     double mouseSensitivity = 1.0;
     double mouseSmoothingMs = 55.0;
     bool mouseLookEnabled = true;
+    bool globalHeadTrackingEnabled = false;
+    std::string globalAircraftTracking = "both";
     bool mouseInvertY = false;
     double moveSpeedMetersPerSec = 0.5;
     double movementPrecisionScale = 1.0;

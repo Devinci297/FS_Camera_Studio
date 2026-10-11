@@ -97,3 +97,32 @@ ingame-ui#FSCSMini .mc-mini-region, ingame-ui#FSCSMini .mc-dialog-shade:not([hid
 ingame-ui#FSCSMini, ingame-ui#FSCSMini #mc-sim { pointer-events: none !important; }
 ingame-ui#FSCSMini .mc-mini-region,
 ingame-ui#FSCSMini .mc-dialog-shade:not([hidden]) { pointer-events: auto; }
+
+/* Keep the stock host frame from painting a second backdrop around the dock. */
+ingame-ui#FSCSMini, ingame-ui#FSCSMini .ingameUiWrapper, ingame-ui#FSCSMini .ingameUiContent,
+ingame-ui#FSCSMini::before, ingame-ui#FSCSMini::after,
+ingame-ui#FSCSMini .ingameUiWrapper::before, ingame-ui#FSCSMini .ingameUiWrapper::after {
+ background:transparent !important; border:0 !important; box-shadow:none !important; backdrop-filter:none !important;
+}
+
+/* Stock ingame-ui themes can paint gradients/pseudo layers after the frame is initialized.
+   Clear every frame layer; only #mc-mini-panel owns the user-selected background alpha. */
+html.surface-mini, body.surface-mini,
+ingame-ui#FSCSMini #mc-sim, ingame-ui#FSCSMini .mc-stage,
+ingame-ui#FSCSMini .mc-mini-region,
+ingame-ui#FSCSMini .ingameUiContent::before, ingame-ui#FSCSMini .ingameUiContent::after,
+ingame-ui#FSCSMini #mc-sim::before, ingame-ui#FSCSMini #mc-sim::after {
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Main editor opacity also needs a transparent simulator frame behind its one backdrop. */
+html.surface-main, body.surface-main,
+ingame-ui#FSCSMain, ingame-ui#FSCSMain #mc-sim, ingame-ui#FSCSMain .mc-stage,
+ingame-ui#FSCSMain .ingameUiWrapper, ingame-ui#FSCSMain .ingameUiContent,
+ingame-ui#FSCSMain::before, ingame-ui#FSCSMain::after,
+ingame-ui#FSCSMain .ingameUiWrapper::before, ingame-ui#FSCSMain .ingameUiWrapper::after,
+ingame-ui#FSCSMain .ingameUiContent::before, ingame-ui#FSCSMain .ingameUiContent::after {
+  background:transparent !important; box-shadow:none !important; backdrop-filter:none !important;
+}

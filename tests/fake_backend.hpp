@@ -111,6 +111,8 @@ public:
     bool deferred = false;
     std::vector<std::function<void()>> queue;
     int writes = 0;
+    std::map<std::string, std::string> preparedExports;
+    void prepareProfileExports(std::map<std::string, std::string> files) override { preparedExports = std::move(files); }
 
     void writeFile(const std::string& path, std::string bytes, std::function<void(bool, std::string)> done) override {
         auto op = [this, path, bytes = std::move(bytes), done]() mutable {
@@ -139,6 +141,16 @@ public:
         };
         if (deferred) queue.push_back(op);
         else op();
+    }
+    void listImportFiles(std::function<void(std::vector<std::string>, std::string)> done) override {
+        auto op = [this, done] {
+            std::vector<std::string> names;
+            const std::string prefix = profiles::kProfileImportFolder;
+            for (const auto& [path, bytes] : files)
+                if (path.rfind(prefix, 0) == 0 && profiles::validProfileImportFilename(path.substr(prefix.size()))) names.push_back(path.substr(prefix.size()));
+            done(std::move(names), {});
+        };
+        if (deferred) queue.push_back(op); else op();
     }
     void runDeferred() {
         while (!queue.empty()) {

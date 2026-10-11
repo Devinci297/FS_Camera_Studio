@@ -5,7 +5,7 @@ profiles, organised views, precise editing, smooth transitions and shortcuts —
 mini control panel at the bottom of the screen.
 
 **Status: in-sim testing, with a new build awaiting live verification.** The module and panels have run in MSFS;
-the airport-camera test build passes 102 native tests and focused browser checks and compiles with SDK 1.7.3.
+version 0.2 passes native and packaged browser checks and compiles with SDK 1.7.3.
 Camera axes, template poses and hosting behaviour still require live qualification — see
 [`doc/qualification.md`](doc/qualification.md).
 
@@ -36,12 +36,13 @@ state held in the module, so the editor and the mini panel always agree.
   (12 cockpit, 8 exterior) the first time this template is used. It does not move the camera on load.
 * **Bindings** use the simulator's own input mapping (keyboard chords, joystick buttons, hats) and work with the
   editor closed.
-* **Axis check:** the camera API's axis signs are measured per simulator build with an in-panel check before live
-  control is enabled.
-* **Airport cameras (test build):** open **Profiles → Airport cameras**, choose a nearby airport or enter ICAOs,
+* **Camera directions:** configured automatically; users do not need to run an axis calibration.
+* **Tracking:** head tracking defaults off. Aircraft tracking defaults to heading and pitch for exterior and airport
+  views. Both preferences are global and survive camera/profile changes; cockpit views never track the aircraft.
+* **Airport cameras:** open **Camera library + → Create airport cameras**, choose a nearby airport or enter ICAOs,
   preview generated views and save the selected ones. Runway, gate/apron, tower and offset taxiway-intersection
   views use available scenery facility data. Optional airport XML supplies actual taxi-sign positions.
-  Only one nearby saved airport loads under the Airport category. See
+  Airport views are stored globally, independently of aircraft profiles. One nearby saved airport loads at a time. See
   [`the airport test guide`](doc/test-evidence/2026-10-11-airport-cameras.md) for scope and live checks.
 
 ## Build
@@ -52,32 +53,23 @@ The app bar displays the version; click it for update detection and the installe
 Close MSFS before installing an update. Airport cameras that have been generated **and saved**
 load automatically within the configured radius (25 NM by default); Auto switch is a separate viewpoint control.
 
-### Package the current tester build
+### Reproduce version 0.2.0
 
-The `0.1.1-test.20261011.4` release uses the verified package and receipt under
-`build/review/panel-polish-a320`. Its scoped staging script is
-`tools/diagnostics/stage-panel-polish.py`; the diagnostic scripts retain their
-explicit local baseline checks to prevent packaging an unverified host.
+The reviewed simulator host is frozen in `package/validated-host`, with hashes in
+`package/validated-host.json`. This preserves the native pointer routing used by the installed build.
 
 ```powershell
-python tools/build-installer.py --version 0.1.1-test.20261011.4 --package build/review/panel-polish-a320/fs-camera-studio --receipt build/review/panel-polish-a320/staged.json
-```
-
-See [release notes](doc/releases/0.1.1-test.20261011.4.md),
-[verification notes](doc/test-evidence/2026-10-11-panel-polish-a320.md), and
-[A320 starter guidance](doc/A320-starter-profile.md).
-
-### Reproduce the initial 0.1.1 tester release
-
-```powershell
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.1.1
-python tools/diagnostics/stage-release.py
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.2.0
+python tools/diagnostics/stage-v0.2.py
 python tools/build-manual.py
-python tools/build-installer.py
+python tools/build-installer.py --version 0.2.0 --package build/release/0.2.0/fs-camera-studio --receipt build/release/0.2.0/staged.json
 ```
+
+See [release notes](doc/releases/0.2.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
+and the bundled illustrated manual. Earlier tester recipes remain available in their Git tags.
 
 Install ReportLab for manual generation and obtain Inno Setup with `tools/get-installer-compiler.ps1`.
-`package/validated-host` freezes the previously working toolbar host, including compiled panel definitions;
+`package/validated-host` freezes the reviewed toolbar host, including compiled panel definitions;
 its receipt is `package/validated-host.json`. The release stage applies only the update UI and rebuilt module.
 This intentionally preserves the known-loading host while broader `ui/` host changes still need flight-loading
 qualification. Do not replace the release host wholesale with the development panel. The generated receipt,

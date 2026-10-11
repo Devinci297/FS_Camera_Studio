@@ -795,3 +795,82 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim[data-surface="mini"] .mc-dock-favorites button{min-height:22px;height:22px;padding:2px 5px}
 #mc-sim[data-surface="mini"] .mc-dock-favorites .mc-entity-label{white-space:nowrap}
 #mc-sim[data-surface="mini"] .mc-dock-favorites .mc-key{height:15px;font-size:10px}
+
+/* Camera/category actions remain small popovers from right-click and action buttons alike. */
+#mc-sim .mc-context-shade{display:block;padding:0!important;background:transparent!important;backdrop-filter:none!important;pointer-events:none!important;overflow:visible}
+#mc-sim .mc-context-shade .mc-dialog{position:fixed;margin:0;width:330px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);padding:0;border:1px solid var(--mc-line);border-radius:9px;box-shadow:0 5px 20px rgba(0,0,0,.25);pointer-events:auto}
+#mc-sim .mc-context-shade .mc-dialog-head{margin:0;padding:8px 10px;border-bottom:1px solid var(--mc-line)}
+#mc-sim .mc-context-shade .mc-dialog-head h3{font-size:14px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mc-sim .mc-context-shade .mc-dialog-head button{min-height:26px;width:26px;padding:4px}
+#mc-sim .mc-context-shade .mc-dialog-body{padding:6px 10px}
+#mc-sim .mc-context-shade .mc-action-list{gap:0}
+#mc-sim .mc-context-shade .mc-action-list button{min-height:28px;padding:5px 7px;font-size:11px;line-height:16px;margin:0}
+#mc-sim .mc-context-shade .mc-color-palette{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;padding-bottom:7px;margin-bottom:4px}
+#mc-sim .mc-context-shade .mc-color-palette button{min-width:0;min-height:24px;padding:4px;font-size:10px;line-height:12px}
+#mc-sim .mc-context-shade .mc-color-palette button:first-child{grid-column:span 2}
+#mc-sim .mc-context-shade .mc-dialog-actions{margin:0;padding:8px 10px}
+#mc-sim .mc-context-shade .mc-dialog-error{padding:0 10px;margin:0}
+#mc-sim .mc-paste-setting{display:flex;align-items:center;min-height:30px;font-size:12px}
+#mc-sim .mc-paste-setting input{width:16px;height:16px;margin:0 8px 0 0;flex:none}
+
+/* Extend the compact dock into the bottom margin for another camera row. */
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock{bottom:4px}
+
+/* Readable vector previews; compact controls keep their established size. */
+#mc-sim .mc-icon-choice > svg.mc-icon{width:32px!important;height:32px!important}
+
+#mc-sim .mc-dock svg.mc-icon{stroke-width:2.1}
+
+/* Category targets fill the dock height rather than leaving unused space below tiny rows. */
+#mc-sim[data-surface="mini"] .mc-category-grid,
+#mc-sim[data-surface="mini"][data-name-display="icons"] .mc-category-grid{grid-template-rows:16px;grid-auto-rows:44px}
+#mc-sim[data-surface="mini"] .mc-category-group-label{font-size:9px;line-height:16px}
+#mc-sim[data-surface="mini"] .mc-category-grid button{font-size:12px;line-height:15px;padding:5px 7px;border-radius:6px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name{gap:7px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name>svg.mc-icon{width:24px!important;height:24px!important;flex:0 0 24px;margin:0;stroke-width:1.9}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-label{line-height:15px;max-height:30px}
+#mc-sim[data-surface="mini"][data-name-display="icons"] .mc-category-grid .mc-entity-name{justify-content:center}
+/* Compact mouse-look options and font-independent airport controls. */
+#mc-sim .mc-mouselook-shade .mc-dialog{width:380px}
+#mc-sim .mc-mouselook-shade h4{margin:12px 0 6px;font-size:12px}
+#mc-sim .mc-look-camera{display:block;margin:4px 0 8px;color:var(--mc-accent)}
+#mc-sim .mc-look-choices{display:flex;flex-direction:column;gap:4px}
+#mc-sim .mc-look-choices button{text-align:left;justify-content:flex-start;white-space:normal}
+#mc-sim .mc-look-choices button[aria-pressed="false"] svg{visibility:hidden}
+#mc-sim .mc-look-choices button[aria-pressed="true"]{border-color:var(--mc-accent);background:rgba(99,219,195,.17)}
+#mc-sim .mc-airport-check{display:flex;align-items:center;justify-content:center;flex-shrink:0}
+#mc-sim .mc-airport-check svg{width:17px;height:17px;stroke-width:3}
+#mc-sim .mc-airport-choice[aria-checked="false"] .mc-airport-check svg{visibility:hidden}
+#mc-sim .mc-airport-choice-copy strong{display:flex;align-items:center;gap:7px}
+#mc-sim .mc-airport-choice-copy strong svg{width:22px;height:22px;flex-shrink:0}
+#mc-sim .mc-external-motion{border-bottom:1px solid var(--mc-line);padding-bottom:12px;margin-bottom:12px}
+#mc-sim .mc-external-motion:empty{display:none}
+#mc-sim .mc-external-motion label{display:flex;align-items:center;justify-content:space-between;margin:8px 0;gap:12px}
+#mc-sim .mc-external-motion input{max-width:110px}
+
+/* Independent panel background controls remain adjacent without fading labels or inputs. */
+#mc-sim .mc-opacity-settings{display:flex;gap:18px}
+#mc-sim .mc-opacity-settings>.mc-inline-field{display:flex;flex:1;min-width:0;flex-direction:column;align-items:stretch;gap:8px}
+#mc-sim .mc-opacity-settings #mc-setting-mini-opacity,#mc-sim #mc-setting-main-opacity{width:100%}
+@media(max-width:520px){#mc-sim .mc-opacity-settings{flex-direction:column;gap:0}}
+/* Main editor always retains both icon and name; display preference is mini categories only. */
+#mc-sim[data-name-display] .mc-editor .mc-entity-name>svg{display:inline-block}
+#mc-sim[data-name-display] .mc-editor .mc-entity-name>.mc-entity-label{display:inline}
+#mc-sim[data-name-display] #mc-camera-tree .mc-entity-name>svg{display:inline-block}
+#mc-sim[data-name-display] #mc-camera-tree .mc-entity-name>.mc-entity-label{display:inline}
+
+/* Walkaround stays a compact popover with only its controls intercepting input. */
+#mc-sim .mc-walkaround-shade .mc-dialog{width:360px}
+#mc-sim .mc-walkaround-shade .mc-dialog-body{padding:10px 14px}
+#mc-sim .mc-walkaround-shade h4{margin:10px 0 6px;font-size:12px}
+#mc-sim .mc-walkaround-status{font-size:11px;color:var(--mc-accent)}
+#mc-sim .mc-walkaround-timing{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0;font-size:12px}
+#mc-sim .mc-walkaround-duration{display:flex;align-items:center;gap:7px;color:var(--mc-muted)}
+#mc-sim .mc-walkaround-duration input{width:64px;min-height:32px;padding:5px 7px;text-align:center}
+#mc-sim .mc-walkaround-repeat{min-width:100px}
+#mc-sim .mc-walkaround-shade .mc-dialog-actions{gap:6px}
+
+/* Confirmation panels keep a clear outside area; the main editor still blocks background clicks. */
+#mc-sim .mc-confirm-shade .mc-dialog{width:340px}
+#mc-sim .mc-confirm-shade .mc-dialog-body{padding:10px 14px}
+#mc-sim:not([data-surface="mini"]) .mc-context-shade.mc-confirm-shade{pointer-events:auto!important}

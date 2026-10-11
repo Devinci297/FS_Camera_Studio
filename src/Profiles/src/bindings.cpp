@@ -206,21 +206,43 @@ json upgradeMovementBindings(json doc) {
         if (!used) doc["bindings"].push_back({{"action","saveViews"},{"input",{{"kind","key"},{"definition","VK_LCONTROL+S"},{"label","Ctrl + S"}}}});
         doc["saveViewsDefaultsVersion"] = 1;
     }
-    if (js::integer(doc, "movementDefaultsVersion", 0) >= 1 || !parseBindings(doc).problems.empty()) return doc;
-    for (const auto& entry : std::vector<std::pair<const char*, const char*>>{
-        {"moveForward", "W"}, {"moveBack", "S"}, {"moveLeft", "A"}, {"moveRight", "D"},
-        {"moveDown", "Q"}, {"moveUp", "E"}, {"moveFast", "VK_SHIFT"},
-        {"zoomIn", "sim:ZOOM_IN"}, {"zoomOut", "sim:ZOOM_OUT"}}) {
-        bool used = false;
-        for (const auto& b : doc["bindings"])
-            used = used || js::str(b, "action") == entry.first || js::str(js::get(b, "input"), "definition") == entry.second;
-        if (used) continue;
-        const std::string def = entry.second;
-        const bool zoom = def.compare(0, 4, "sim:") == 0;
-        const std::string label = zoom ? (def == "sim:ZOOM_IN" ? "Mouse wheel up / MSFS zoom in" : "Mouse wheel down / MSFS zoom out") : def == "VK_SHIFT" ? "Shift" : def;
-        doc["bindings"].push_back({{"action", entry.first}, {"input", {{"kind", zoom ? "simZoom" : "key"}, {"definition", def}, {"label", label}}}});
+    const auto version = js::integer(doc, "movementDefaultsVersion", 0);
+    if (version >= 2 || !parseBindings(doc).problems.empty()) return doc;
+    if (version == 1) {
+        // Only migrate the complete, unmodified stock pair. Custom bindings and deliberate removals win.
+        int up = -1, down = -1, verticalCount = 0;
+        for (std::size_t i = 0; i < doc["bindings"].size(); ++i) {
+            const auto& binding = doc["bindings"][i];
+            const auto action = js::str(binding, "action");
+            if (action != "moveUp" && action != "moveDown") continue;
+            ++verticalCount;
+            const auto& input = js::object(binding, "input");
+            if (js::str(input, "kind") != "key") continue;
+            const auto key = js::str(input, "definition");
+            if (js::str(input, "label", key) != key) continue;
+            if (action == "moveDown" && key == "Q") down = static_cast<int>(i);
+            if (action == "moveUp" && key == "E") up = static_cast<int>(i);
+        }
+        if (verticalCount == 2 && up >= 0 && down >= 0) {
+            doc["bindings"][down]["action"] = "moveUp";
+            doc["bindings"][up]["action"] = "moveDown";
+        }
+    } else {
+        for (const auto& entry : std::vector<std::pair<const char*, const char*>>{
+            {"moveForward", "W"}, {"moveBack", "S"}, {"moveLeft", "A"}, {"moveRight", "D"},
+            {"moveUp", "Q"}, {"moveDown", "E"}, {"moveFast", "VK_SHIFT"},
+            {"zoomIn", "sim:ZOOM_IN"}, {"zoomOut", "sim:ZOOM_OUT"}}) {
+            bool used = false;
+            for (const auto& b : doc["bindings"])
+                used = used || js::str(b, "action") == entry.first || js::str(js::get(b, "input"), "definition") == entry.second;
+            if (used) continue;
+            const std::string def = entry.second;
+            const bool zoom = def.compare(0, 4, "sim:") == 0;
+            const std::string label = zoom ? (def == "sim:ZOOM_IN" ? "Mouse wheel up / MSFS zoom in" : "Mouse wheel down / MSFS zoom out") : def == "VK_SHIFT" ? "Shift" : def;
+            doc["bindings"].push_back({{"action", entry.first}, {"input", {{"kind", zoom ? "simZoom" : "key"}, {"definition", def}, {"label", label}}}});
+        }
     }
-    doc["movementDefaultsVersion"] = 1;
+    doc["movementDefaultsVersion"] = 2;
     return doc;
 }
 
@@ -242,14 +264,15 @@ json defaultBindingsDocument() {
 json defaultSettingsDocument() {
     return {{"schemaVersion", kSettingsSchemaVersion},
             {"ui", {{"shortcuts", true}, {"contrast", false}, {"backups", true}, {"remember", true}, {"precision", "normal"},
-                    {"theme", "dark"}, {"reducedMotion", false}, {"miniEnabled", true}, {"miniHover", true}, {"miniPinned", false}, {"miniOpacity", 0.65}, {"nameDisplay", "both"}}},
-            {"host", {{"allowUnqualifiedAdapter", false}, {"lookSpeedDegPerSec", 60.0}, {"moveSpeedMetersPerSec", 0.5}, {"airportRadiusNm", 25.0}, {"mouseSensitivity", 1.0}, {"mouseSmoothingMs", 55.0}, {"mouseLookEnabled", true}, {"mouseInvertY", false}}}};
+                    {"theme", "dark"}, {"reducedMotion", false}, {"miniEnabled", true}, {"miniHover", true}, {"miniPinned", false}, {"miniOpacity", 0.65}, {"mainOpacity", 1.0}, {"nameDisplay", "both"}}},
+            {"host", {{"allowUnqualifiedAdapter", false}, {"lookSpeedDegPerSec", 60.0}, {"moveSpeedMetersPerSec", 0.5}, {"airportRadiusNm", 25.0}, {"mouseSensitivity", 1.0}, {"mouseSmoothingMs", 55.0}, {"mouseLookEnabled", true}, {"mouseInvertY", false}, {"globalHeadTrackingEnabled", false}, {"globalAircraftTracking", "both"}}}};
 }
 
 json normalizeSettings(const json& doc) {
     json out = defaultSettingsDocument();
     const json& ui = js::object(doc, "ui");
-    out["ui"]["miniOpacity"] = std::clamp(js::num(ui, "miniOpacity", 0.65), 0.15, 1.0);
+    out["ui"]["miniOpacity"] = std::clamp(js::num(ui, "miniOpacity", 0.65), 0.0, 1.0);
+    out["ui"]["mainOpacity"] = std::clamp(js::num(ui, "mainOpacity", 1.0), 0.0, 1.0);
     const auto display = js::str(ui, "nameDisplay", "both");
     out["ui"]["nameDisplay"] = display == "icons" || display == "labels" ? display : "both";
     for (const char* k : {"shortcuts", "contrast", "backups", "remember", "reducedMotion", "miniEnabled", "miniHover", "miniPinned"})
@@ -261,7 +284,8 @@ json normalizeSettings(const json& doc) {
     const HostSettings h = parseHostSettings(doc);
     out["host"] = {{"allowUnqualifiedAdapter", h.allowUnqualifiedAdapter}, {"lookSpeedDegPerSec", h.lookSpeedDegPerSec},
                    {"moveSpeedMetersPerSec", h.moveSpeedMetersPerSec}, {"airportRadiusNm", h.airportRadiusNm}, {"mouseSensitivity", h.mouseSensitivity},
-                   {"mouseSmoothingMs", h.mouseSmoothingMs}, {"mouseLookEnabled", h.mouseLookEnabled}, {"mouseInvertY", h.mouseInvertY}};
+                   {"mouseSmoothingMs", h.mouseSmoothingMs}, {"mouseLookEnabled", h.mouseLookEnabled}, {"mouseInvertY", h.mouseInvertY},
+                   {"globalHeadTrackingEnabled", h.globalHeadTrackingEnabled}, {"globalAircraftTracking", h.globalAircraftTracking}};
     return out;
 }
 
@@ -273,6 +297,9 @@ HostSettings parseHostSettings(const json& doc) {
     s.mouseSensitivity = std::clamp(js::num(host, "mouseSensitivity", 1.0), 0.1, 4.0);
     s.mouseSmoothingMs = std::clamp(js::num(host, "mouseSmoothingMs", 55.0), 0.0, 250.0);
     s.mouseLookEnabled = js::boolean(host, "mouseLookEnabled", true);
+    s.globalHeadTrackingEnabled = js::boolean(host, "globalHeadTrackingEnabled", false);
+    const auto aircraftTracking = js::str(host,"globalAircraftTracking","both");
+    s.globalAircraftTracking = aircraftTracking=="off" || aircraftTracking=="heading" ? aircraftTracking : "both";
     s.mouseInvertY = js::boolean(host, "mouseInvertY", false);
     s.lookSpeedDegPerSec = std::clamp(js::num(host, "lookSpeedDegPerSec", 60.0), 5.0, 360.0);
     s.moveSpeedMetersPerSec = std::clamp(js::num(host, "moveSpeedMetersPerSec", 0.5), 0.05, 20.0);

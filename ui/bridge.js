@@ -206,7 +206,7 @@
   const MODE_CAPS = {
     aircraftCockpit: { available: true, reason: null },
     aircraftExterior: { available: true, reason: 'Preview - exterior views keep cockpit sound in the current simulator build.' },
-    orbit: { available: false, reason: NOT_AVAILABLE }, flyby: { available: false, reason: NOT_AVAILABLE },
+    orbit: { available: true, reason: null }, flyby: { available: true, reason: null },
     airport: { available: false, reason: NOT_AVAILABLE }, free: { available: false, reason: NOT_AVAILABLE },
   };
   const MOTION_ACTIONS = new Set(['ActivateCamera', 'EnableCamera', 'BeginPeek', 'CycleCamera', 'NextCategory', 'ReturnToPilot', 'CaptureView', 'SeedFromDefinition', 'BakeTemporaryLook']);
@@ -285,10 +285,10 @@
     list.push({ action: 'lookRight', input: ctrlAlt('VK_RIGHT', 'Right arrow') });
     list.push({ action: 'lookUp', input: ctrlAlt('VK_UP', 'Up arrow') });
     list.push({ action: 'lookDown', input: ctrlAlt('VK_DOWN', 'Down arrow') });
-    [['moveForward','W'],['moveBack','S'],['moveLeft','A'],['moveRight','D'],['moveDown','Q'],['moveUp','E'],['moveFast','VK_SHIFT']].forEach(entry => list.push({action:entry[0],input:{kind:'key',definition:entry[1],label:entry[1]==='VK_SHIFT'?'Shift':entry[1]}}));
+    [['moveForward','W'],['moveBack','S'],['moveLeft','A'],['moveRight','D'],['moveUp','Q'],['moveDown','E'],['moveFast','VK_SHIFT']].forEach(entry => list.push({action:entry[0],input:{kind:'key',definition:entry[1],label:entry[1]==='VK_SHIFT'?'Shift':entry[1]}}));
     [['zoomIn','sim:ZOOM_IN','Mouse wheel up / MSFS zoom in'],['zoomOut','sim:ZOOM_OUT','Mouse wheel down / MSFS zoom out']].forEach(entry => list.push({action:entry[0],input:{kind:'simZoom',definition:entry[1],label:entry[2]}}));
     list.push({action:'saveViews',input:{kind:'key',definition:'VK_LCONTROL+S',label:'Ctrl + S'}});
-    return { schemaVersion: 2, movementDefaultsVersion: 1, saveViewsDefaultsVersion:1, bindings: list };
+    return { schemaVersion: 2, movementDefaultsVersion: 2, saveViewsDefaultsVersion:1, bindings: list };
   }
 
   function validateProfile(p) {
@@ -630,6 +630,8 @@
         case 'CycleCamera': return cycle(env, payload.delta >= 0 ? 1 : -1);
         case 'NextCategory': return nextCategory(env);
         case 'ReturnToPilot': return activate(env, m.working.profile.defaultCameraId);
+        case 'StartWalkaround': event('WalkaroundChanged',Object.assign({running:true},payload)); return ack(env,'Accepted');
+        case 'StopWalkaround': event('WalkaroundChanged',{running:false,categoryId:null,intervalSeconds:5,loop:true}); return ack(env,'Completed');
         case 'RecenterLook': m.look = NEUTRAL_LOOK(); event('TemporaryLookChanged', m.look); return ack(env, 'Completed');
         case 'MouseLookDelta': {
           if (m.ownership.state !== 'Active') return ack(env, 'Rejected', 'notActive');
