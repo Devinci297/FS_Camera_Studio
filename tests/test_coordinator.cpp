@@ -414,3 +414,13 @@ TEST_CASE("input: POV angles map to directions with diagonals and centring") {
     CHECK(povDirections(0xFFFFFFFFu).empty());
     CHECK(povDirections(35000).count(fscs::profiles::PovDirection::Up) == 1);
 }
+
+TEST_CASE("coordinator: an aircraft title that arrives before the aircraft is kept (seen in-sim)") {
+    Rig r;
+    r.c.tick(r.t);
+    r.deliver(be::Connected{"1.8.16.0"});
+    r.deliver(be::AircraftTitle{"Cessna Skyhawk G1000 Asobo"});
+    r.deliver(be::AircraftLoaded{"SimObjects/Airplanes/Asobo_C172sp_G1000/aircraft.cfg"});
+    CHECK_EQ(r.c.aircraft().title, std::string("Cessna Skyhawk G1000 Asobo"));
+    CHECK_EQ(r.c.aircraft().modelKey, std::string("asobo_c172sp_g1000"));
+}

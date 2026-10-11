@@ -1,5 +1,5 @@
 /*
- * FS Camera Studio — in-sim panel application (doc/protocol.md v2).
+ * FS Camera Studio - in-sim panel application (doc/protocol.md v2).
  *
  * The camera module owns the working draft; this page is a mirror. It renders from `Snapshot`, applies
  * `DraftChanged.ops`, and sends edits as coalesced `UpdateDraft` ops. Save = `CommitChanges`, Revert =
@@ -16,7 +16,7 @@
   const icon = window.FSCIcons.icon;
   const root = document.getElementById('mc-sim');
 
-  /* ───────────── Surface ───────────── */
+  /* ------------- Surface ------------- */
   // Packaged panel pages set window.FSCS_SURFACE (toolbar URLs may drop query strings); browsers use ?surface=.
   const forcedSurface = typeof window.FSCS_SURFACE === 'string' && /^(main|mini)$/.test(window.FSCS_SURFACE) ? window.FSCS_SURFACE : null;
   const surfaceMatch = /[?&]surface=(main|mini)\b/.exec(window.location.search || '');
@@ -42,7 +42,7 @@
   document.addEventListener('focusin', reportTextFocus, true);
   document.addEventListener('focusout', () => setTimeout(reportTextFocus, 0), true);
 
-  /* ───────────── DOM helpers (Coherent GT safe) ───────────── */
+  /* ------------- DOM helpers (Coherent GT safe) ------------- */
   const $ = id => document.getElementById(id);
   const $$ = (selector, scope) => Array.prototype.slice.call((scope || root).querySelectorAll(selector));
   const clone = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
@@ -90,24 +90,24 @@
   function matchesFocusVisible(el) { try { return el.matches(':focus-visible'); } catch (error) { return true; } }
   const reducedMotion = () => Boolean(S.working && S.working.settings.ui.reducedMotion) || Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-  /* ───────────── Constants ───────────── */
-  const NOT_AVAILABLE = 'Not available in this version — saved with the profile but cannot be activated.';
+  /* ------------- Constants ------------- */
+  const NOT_AVAILABLE = 'Not available in this version - saved with the profile but cannot be activated.';
   const EXTERIOR_NOTE = 'Exterior views keep cockpit sound in the current simulator build.';
-  const START_TEXT = 'Starting Camera Studio…';
-  const START_FAILED_TEXT = "Camera Studio's camera module did not start — reload the panel or restart the flight.";
+  const START_TEXT = 'Starting Camera Studio...';
+  const START_FAILED_TEXT = "Camera Studio's camera module did not start - reload the panel or restart the flight.";
   const STATUS_TEXT = {
-    Observing: 'Simulator in control', Acquiring: 'Taking camera control…', Active: 'Camera active',
+    Observing: 'Simulator in control', Acquiring: 'Taking camera control...', Active: 'Camera active',
     SimulatorSuspended: 'Paused by the simulator', OtherClient: 'Another add-on has control',
-    UserDisabled: 'Camera control by add-ons is disabled in the simulator', Releasing: 'Returning camera to the simulator…',
-    Faulted: "Camera stopped after an error — use the simulator's camera controls, then Enable",
+    UserDisabled: 'Camera control by add-ons is disabled in the simulator', Releasing: 'Returning camera to the simulator...',
+    Faulted: "Camera stopped after an error - use the simulator's camera controls, then Enable",
   };
   const MODE_TEXT = {
-    aircraftCockpit: { reference: 'Aircraft relative · meters', blurb: 'An interior view, ready to fine-tune.' },
-    aircraftExterior: { reference: 'Aircraft relative · meters', blurb: 'Your aircraft from another perspective.' },
-    orbit: { reference: 'Aircraft relative · meters', blurb: 'A moving view around your aircraft.' },
-    flyby: { reference: 'Aircraft relative · meters', blurb: 'A fixed perspective as the aircraft passes.' },
-    airport: { reference: 'Airport local · meters', blurb: 'A view anchored around the airport.' },
-    free: { reference: 'Scene origin · meters', blurb: 'Position this view freely.' },
+    aircraftCockpit: { reference: 'Aircraft relative - meters', blurb: 'An interior view, ready to fine-tune.' },
+    aircraftExterior: { reference: 'Aircraft relative - meters', blurb: 'Your aircraft from another perspective.' },
+    orbit: { reference: 'Aircraft relative - meters', blurb: 'A moving view around your aircraft.' },
+    flyby: { reference: 'Aircraft relative - meters', blurb: 'A fixed perspective as the aircraft passes.' },
+    airport: { reference: 'Airport local - meters', blurb: 'A view anchored around the airport.' },
+    free: { reference: 'Scene origin - meters', blurb: 'Position this view freely.' },
   };
   const REASONS = {
     staleEpoch: 'The flight changed. Try again.', staleBoot: 'Camera Studio restarted. Try again.', staleDraft: 'The editor was refreshed. Try again.',
@@ -115,9 +115,14 @@
     noActiveCamera: 'No camera is active yet.', unsavedChanges: 'This profile has unsaved camera changes.', commitPending: 'Wait for the current save to finish.',
     profileInUse: 'You cannot delete the profile that is open.', unknownProfile: 'That profile no longer exists.', noAircraft: 'Load a flight first.',
     unknownRevision: 'That backup is no longer available.', notConnected: START_TEXT, timeout: 'Camera Studio did not answer in time. Try again.',
-    notCurrentPeek: null, qualificationNotStarted: 'The axis check is not running. Start it again from Settings.', unknownAxis: 'Camera Studio does not know that axis.',
+    notCurrentPeek: null, notAllowed: 'Camera control is not allowed right now.', qualificationNotStarted: 'The axis check is not running. Start it again from Settings.', unknownAxis: 'Camera Studio does not know that axis.',
   };
-  const reasonText = reason => (reason && Object.prototype.hasOwnProperty.call(REASONS, reason) ? REASONS[reason] : (reason || 'Camera Studio could not do that.'));
+  const reasonText = reason => {
+    if (!reason) return 'Camera Studio could not do that.';
+    if (Object.prototype.hasOwnProperty.call(REASONS, reason)) return REASONS[reason];
+    if (/s/.test(reason)) return reason; // the module's own plain-language sentence
+    return 'Camera Studio could not do that (' + reason + ').';
+  };
   const PRECISION = { fine: [0.001, 0.1], normal: [0.01, 1], coarse: [0.1, 5] };
   const UI_FOV = [30, 110];
   const DEFAULT_FOV_RAD = 1.0821;
@@ -136,7 +141,7 @@
   COMMANDS.concat(MANUAL).forEach(entry => { ACTION_NAMES[entry[0]] = entry[1]; });
   const actionName = (action, viewId) => (action === 'selectView' ? 'Select view ID ' + viewId : action === 'peekView' ? 'Peek at view ID ' + viewId : (ACTION_NAMES[action] || action));
 
-  /* ───────────── State (mirror of the module) ───────────── */
+  /* ------------- State (mirror of the module) ------------- */
   const S = {
     snapshot: false, failedStart: false,
     session: 'Initializing', aircraft: null,
@@ -164,10 +169,13 @@
   const dirtyFlags = () => (S.working ? S.working.dirty || {} : {});
   const isDirty = () => Boolean(dirtyFlags().profile || dirtyFlags().settings || dirtyFlags().bindings) || localPending();
   const hasCommitted = id => Boolean(S.working && S.working.hasCommittedVersion && S.working.hasCommittedVersion[id]);
+  /** AircraftChanged may carry title: null with a valid modelKey; the aircraft is loaded whenever modelKey is set. */
+  const aircraftLoaded = () => Boolean(S.aircraft && S.aircraft.modelKey);
+  const aircraftName = () => (S.aircraft ? (S.aircraft.title || S.aircraft.modelKey || '') : '');
   const engaged = () => S.ownership.state === 'Active' || S.ownership.state === 'Acquiring';
   const isLive = id => Boolean(id) && S.ownership.state === 'Active' && S.active.cameraId === id && (!S.active.profileId || !P() || S.active.profileId === P().profileId);
 
-  /* ───────────── Draft ops (mirror + coalesced UpdateDraft) ───────────── */
+  /* ------------- Draft ops (mirror + coalesced UpdateDraft) ------------- */
   function applyOpsLocal(ops) {
     const w = S.working;
     ops.forEach(op => {
@@ -259,7 +267,7 @@
     });
   }
 
-  /* ───────────── Snapshot & events ───────────── */
+  /* ------------- Snapshot & events ------------- */
   function applySnapshot(p) {
     const firstSnapshot = !S.snapshot;
     S.snapshot = true;
@@ -346,7 +354,7 @@
     DefinitionsListed() { /* not used by the editor yet */ },
     ControllersListed(p) { if (S.assign) { S.assign.controllers = p.controllers || []; renderAssignControllers(); } },
     InputTest: onInputTest,
-    BindingTriggered(p) { if (S.page === 'bindings') setBindingResult('Triggered “' + actionName(p.action, p.viewId) + '”' + (p.result === 'recalled' ? ' — the view was recalled.' : '.')); },
+    BindingTriggered(p) { if (S.page === 'bindings') setBindingResult('Triggered "' + actionName(p.action, p.viewId) + '"' + (p.result === 'recalled' ? ' - the view was recalled.' : '.')); },
     SurfaceRequest: onSurfaceRequest,
     FaultRaised(p) { S.fault = p; announce(p.message || 'The camera stopped after an error.', 'error'); render(); },
   };
@@ -355,13 +363,14 @@
     if (ack.status === 'Rejected' && ack.reason === 'staleBoot') bridge.send('RequestSnapshot', {});
   });
 
-  /* ───────────── Status & gating ───────────── */
+  /* ------------- Status & gating ------------- */
   function statusText() {
     if (!S.snapshot) return S.failedStart ? START_FAILED_TEXT : START_TEXT;
     if (S.ownership.state === 'Faulted' || S.session === 'Faulted') return STATUS_TEXT.Faulted;
     if (S.session === 'Suspended') return STATUS_TEXT.SimulatorSuspended;
     if (S.session !== 'Ready') return START_TEXT;
-    if (!S.aircraft || !S.aircraft.title) return 'Load a flight to use your cameras';
+    if (!S.caps.canActivate && S.caps.blockReason && !engaged()) return S.caps.blockReason;
+    if (!aircraftLoaded()) return 'Load a flight to use your cameras';
     if (S.ownership.state === 'Observing' && S.userReleased) return 'Camera released';
     return STATUS_TEXT[S.ownership.state] || S.ownership.state;
   }
@@ -389,7 +398,7 @@
   }
   const levelHorizonAvailable = () => Boolean((S.caps.features && S.caps.features.levelHorizon) || S.caps.levelHorizon === true);
 
-  /* ───────────── Toast ───────────── */
+  /* ------------- Toast ------------- */
   let toastTimer = 0;
   function announce(message, tone) {
     if (!message) return;
@@ -403,7 +412,7 @@
   }
   const toast = announce;
 
-  /* ───────────── Mini dock presentation (mockup §4.5 behaviour) ───────────── */
+  /* ------------- Mini dock presentation (mockup sec. 4.5 behaviour) ------------- */
   // Mini surface presentation: hover (handle + reveal, default) | always (fixed dock) | off (note only).
   let miniMode = 'hover';
   if (IS_MINI) root.dataset.miniMode = miniMode;
@@ -483,7 +492,7 @@
     if (clearance > 16) root.style.setProperty('--mc-mini-clearance', Math.ceil(clearance) + 'px');
   }
 
-  /* ───────────── Dialogs ───────────── */
+  /* ------------- Dialogs ------------- */
   let dialogOpener = null, dialogOnClose = null;
   const dialogOpen = () => !$('mc-dialog-shade').hidden;
   function fitDialog() {
@@ -577,17 +586,17 @@
       dialogActions(choices.map(c => [c[0], () => { done(c[1]); closeDialog(); }, c[2]]));
     });
   }
-  function codeDialog(title, intro, code, extra) {
+  function codeDialog(title, intro, code, extra, selectLabel) {
     const body = openDialog(title);
     const input = make('textarea');
     input.readOnly = true;
     input.setAttribute('aria-label', title);
     input.value = code;
     add(body, make('p', intro), extra || null, input);
-    dialogActions([['Close', () => closeDialog()], ['Select profile code', () => { input.focus(); input.select(); announce('Profile code selected. Use your copy command.'); }, 'mc-primary']]);
+    dialogActions([['Close', () => closeDialog()], [selectLabel || 'Select profile code', () => { input.focus(); input.select(); announce((selectLabel ? 'Text' : 'Profile code') + ' selected. Use your copy command.'); }, 'mc-primary']]);
   }
 
-  /* ───────────── Navigation ───────────── */
+  /* ------------- Navigation ------------- */
   function setPage(page) {
     S.page = page;
     root.dataset.page = page;
@@ -612,7 +621,7 @@
     });
   }
 
-  /* ───────────── Selection & activation ───────────── */
+  /* ------------- Selection & activation ------------- */
   function selectCamera(id, options) {
     const target = camIn(id);
     if (!target) return;
@@ -627,6 +636,14 @@
     $('mc-motion-marker').style.left = '0%';
     render();
     if (!(options && options.local)) whenIdle().then(() => bridge.send('SelectCamera', { cameraId: id }));
+  }
+  /** Clicking a camera in the library recalls it (design sec. 4.4/sec. 6.2); unavailable views are still selected for editing. */
+  function recallFromLibrary(id) {
+    const cam = camIn(id);
+    if (!cam) return;
+    if (cameraBlockReason(cam)) { selectCamera(id); return; }
+    selectCamera(id, { local: true });
+    command('ActivateCamera', { cameraId: id });
   }
   function activateCamera(id) {
     const cam = camIn(id);
@@ -647,7 +664,7 @@
     command('CycleCamera', { delta: delta > 0 ? 1 : -1 });
   }
 
-  /* ───────────── Camera library ───────────── */
+  /* ------------- Camera library ------------- */
   function setFavorite(view) {
     if (readOnly()) return;
     view.favorite = !view.favorite;
@@ -695,7 +712,7 @@
     const row = make('div', undefined, 'mc-camera-row');
     const sel = current();
     row.setAttribute('data-current', String(Boolean(sel) && view.id === sel.id));
-    const choose = button(view.name, () => selectCamera(view.id), 'mc-camera-select');
+    const choose = button(view.name, () => recallFromLibrary(view.id), 'mc-camera-select');
     choose.setAttribute('data-focus-key', 'cam:' + view.id);
     choose.setAttribute('aria-pressed', String(Boolean(sel) && view.id === sel.id));
     let label = view.name;
@@ -729,7 +746,7 @@
     return row;
   }
 
-  /* ───────────── Inspector ───────────── */
+  /* ------------- Inspector ------------- */
   function renderDetails() {
     const view = current();
     const hasProfile = Boolean(view);
@@ -750,7 +767,7 @@
     $('mc-camera-path').textContent = (group ? group.name : '') + (view.viewId ? ' / VIEW ' + pad2(view.viewId) : ' / CAMERA');
     let description = view.id === P().defaultCameraId ? 'Your default view for this profile.' : modeText.blurb;
     if (!availability.available) description = availability.reason || NOT_AVAILABLE;
-    else if (!hasCommitted(view.id)) description += ' New camera — unsaved.';
+    else if (!hasCommitted(view.id)) description += ' New camera - unsaved.';
     $('mc-camera-description').textContent = description;
     $('mc-favorite').setAttribute('aria-pressed', String(Boolean(view.favorite)));
     $('mc-favorite').setAttribute('aria-label', (view.favorite ? 'Remove camera from' : 'Add camera to') + ' quick access');
@@ -763,8 +780,8 @@
     const deg = M.radToDeg(view.projection.value);
     $('mc-fov-number').min = String(range[0]); $('mc-fov-number').max = String(range[1]);
     $('mc-fov-range').min = String(range[0]); $('mc-fov-range').max = String(range[1]);
-    $('mc-fov-min-label').textContent = range[0] + '° · close';
-    $('mc-fov-max-label').textContent = range[1] + '° · wide';
+    $('mc-fov-min-label').textContent = range[0] + ' deg - close';
+    $('mc-fov-max-label').textContent = range[1] + ' deg - wide';
     if (document.activeElement !== $('mc-fov-number')) $('mc-fov-number').value = fmtFov(deg);
     $('mc-fov-range').value = String(M.clamp(deg, range[0], range[1]));
     $$('[data-fov]').forEach(control => {
@@ -828,8 +845,8 @@
     $('mc-center-look').disabled = ro;
     $('mc-bake-look').disabled = ro || !live;
     $('mc-bake-look').title = live ? 'Write the current in-sim view, including mouse look, into this camera' : 'Show this camera in the sim first.';
-    $('mc-capture-view').disabled = ro || !S.snapshot || !S.aircraft || !S.aircraft.title;
-    $('mc-capture-view').title = 'Read the simulator’s current view and review it before using it';
+    $('mc-capture-view').disabled = ro || !S.snapshot || !aircraftLoaded();
+    $('mc-capture-view').title = "Read the simulator's current view and review it before using it";
   }
 
   /* Pose fields */
@@ -913,7 +930,7 @@
     $$('[data-precision]').forEach(control => control.setAttribute('aria-pressed', String(control.getAttribute('data-precision') === value)));
     const factors = PRECISION[value];
     $('mc-position-step').textContent = 'Step ' + factors[0].toFixed(3) + ' m';
-    $('mc-angle-step').textContent = 'Step ' + factors[1].toFixed(1) + '°';
+    $('mc-angle-step').textContent = 'Step ' + factors[1].toFixed(1) + ' deg';
   }
   function setFov(value) {
     const view = current();
@@ -1030,7 +1047,7 @@
       ['Move up', 'arrow-up', () => moveCamera(-1), index === 0],
       ['Move down', 'arrow-down', () => moveCamera(1), index === group.cameraIds.length - 1],
       ['Move to category', 'folder-input', moveCameraCategory, P().categories.length === 1],
-      ['Delete camera', 'trash-2', () => confirmDialog('Delete camera?', 'Remove “' + view.name + '” from this profile?', () => {
+      ['Delete camera', 'trash-2', () => confirmDialog('Delete camera?', 'Remove "' + view.name + '" from this profile?', () => {
         group.cameraIds = group.cameraIds.filter(id => id !== view.id);
         P().cameras = P().cameras.filter(c => c.id !== view.id);
         const ops = [{ op: 'removeCamera', cameraId: view.id }, { op: 'setCategories', categories: P().categories }];
@@ -1055,7 +1072,7 @@
       ['Move category down', 'arrow-down', () => moveCategory(group, 1), list.indexOf(group) === list.length - 1],
       ['Rename category', 'pencil', () => namedDialog('Rename category', group.name, name => { group.name = name; saveCategories(); render(); })],
       ['Add category', 'folder-plus', addCategory],
-      ['Delete category', 'trash-2', () => confirmDialog('Delete category?', 'Remove “' + group.name + '” and its ' + group.cameraIds.length + ' cameras?', () => {
+      ['Delete category', 'trash-2', () => confirmDialog('Delete category?', 'Remove "' + group.name + '" and its ' + group.cameraIds.length + ' cameras?', () => {
         const removed = group.cameraIds.slice();
         P().categories = P().categories.filter(g => g.id !== group.id);
         P().cameras = P().cameras.filter(c => removed.indexOf(c.id) < 0);
@@ -1113,7 +1130,7 @@
     const view = camIn(pending.cameraId);
     if (!view) return;
     const body = openDialog('Use the captured view?');
-    body.appendChild(make('p', 'Values read from the simulator for “' + view.name + '”. Nothing changes until you choose Use these values, and nothing is saved until you choose Save changes.'));
+    body.appendChild(make('p', 'Values read from the simulator for "' + view.name + '". Nothing changes until you choose Use these values, and nothing is saved until you choose Save changes.'));
     if (!p.qualified) {
       const warn = make('p', undefined, 'mc-warn');
       add(warn, make('strong', 'Not qualified: '), p.message || 'View capture is not qualified for this simulator build. The values may be inaccurate.');
@@ -1123,9 +1140,9 @@
     const hpb = Array.isArray(p.orientationCameraToAnchorXYZW) ? M.hpbFromQuat(p.orientationCameraToAnchorXYZW) : null;
     const kv = make('dl', undefined, 'mc-kv');
     const row = (k, v) => add(kv, make('dt', k), make('dd', v));
-    if (ui) row('X · Y · Z', fmt(ui.x, 3) + ' · ' + fmt(ui.y, 3) + ' · ' + fmt(ui.z, 3) + ' m');
-    if (hpb) row('Pitch · Heading · Roll', fmt(hpb.pitch, 1) + '° · ' + fmt(hpb.heading, 1) + '° · ' + fmt(hpb.bank, 1) + '°');
-    if (isFinite(p.fovRad)) row('Field of view', fmtFov(M.radToDeg(p.fovRad)) + '° sim FOV');
+    if (ui) row('X | Y | Z', fmt(ui.x, 3) + ' | ' + fmt(ui.y, 3) + ' | ' + fmt(ui.z, 3) + ' m');
+    if (hpb) row('Pitch | Heading | Roll', fmt(hpb.pitch, 1) + ' | ' + fmt(hpb.heading, 1) + ' | ' + fmt(hpb.bank, 1) + ' deg');
+    if (isFinite(p.fovRad)) row('Field of view', fmtFov(M.radToDeg(p.fovRad)) + ' deg sim FOV');
     row('Qualified', p.qualified ? 'Yes' : 'No');
     body.appendChild(kv);
     dialogActions([['Cancel', () => closeDialog()], ['Use these values', () => {
@@ -1138,20 +1155,20 @@
       S.angleCache = null;
       saveCamera(target);
       renderDetails();
-      announce('Captured view applied to “' + target.name + '”. Save changes to keep it.');
+      announce('Captured view applied to "' + target.name + '". Save changes to keep it.');
     }, 'mc-primary']]);
   }
 
-  /* ───────────── Dock ───────────── */
+  /* ------------- Dock ------------- */
   function dockCamera() { return (S.ownership.state === 'Active' && camIn(S.active.cameraId)) || current(); }
   function renderDock() {
     const dock = $('mc-mini-panel');
     keepFocus(dock, () => {
       const shown = dockCamera();
       const group = shown ? categoryOf(shown.id) : null;
-      $('mc-dock-current').textContent = shown ? shown.name : '—';
+      $('mc-dock-current').textContent = shown ? shown.name : '-';
       $('mc-dock-category').textContent = group ? group.name : (S.snapshot ? 'No camera' : 'Camera Studio');
-      $('mc-flight-name').textContent = shown ? shown.name : '—';
+      $('mc-flight-name').textContent = shown ? shown.name : '-';
       const blocked = controlBlockReason();
       ['mc-prev', 'mc-next'].forEach(id => { $(id).disabled = Boolean(blocked); $(id).title = blocked || ''; });
       $('mc-quick-picker').disabled = !P();
@@ -1223,12 +1240,13 @@
     else if (p.op === 'toggle') { if (root.dataset.mode === 'edit') enterFlightMode(); else openEditor(); }
   }
 
-  /* ───────────── Header / status / save bar ───────────── */
+  /* ------------- Header / status / save bar ------------- */
   function updateActiveState() {
     const on = engaged();
     root.dataset.enabled = String(S.ownership.state === 'Active');
     const text = statusText();
     $('mc-control-state').textContent = text;
+    $('mc-control-state').title = text;
     $('mc-flight-state').textContent = text;
     $('mc-fault-details').hidden = !(S.ownership.state === 'Faulted' && S.fault);
     const blocked = on ? null : controlBlockReason();
@@ -1245,7 +1263,7 @@
     const saving = Boolean(S.pendingCommit);
     $('mc-save-state').setAttribute('data-dirty', String(dirty && !saving));
     setIcon($('mc-save-state'), dirty && !saving ? 'alert-triangle' : 'check');
-    $('mc-save-label').textContent = saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'All changes saved';
+    $('mc-save-label').textContent = saving ? 'Saving...' : dirty ? 'Unsaved changes' : 'All changes saved';
     $('mc-revert').disabled = !dirty || saving;
     $('mc-save').disabled = !dirty || saving || !S.snapshot;
     const exportButton = $('mc-export-profile');
@@ -1256,10 +1274,16 @@
     keepFocus(host, () => {
       empty(host);
       if (!S.snapshot) return;
-      if (S.session === 'Ready' && S.aircraft && S.aircraft.title && !S.caps.canActivate && S.caps.blockReason) {
-        host.appendChild(banner('alert-triangle', [make('strong', 'Camera control unavailable: '), S.caps.blockReason]));
+      if (S.session === 'Ready' && aircraftLoaded() && !S.caps.canActivate && S.caps.blockReason) {
+        const actions = [];
+        if (!IS_MINI && S.caps.adapterQualified === false && !S.caps.allowUnqualifiedAdapter) {
+          const run = button('Run axis check', () => { setPage('settings'); runAxisCheck(); }, 'mc-secondary');
+          run.setAttribute('data-focus-key', 'banner-axis');
+          actions.push(run);
+        }
+        host.appendChild(banner('alert-triangle', [make('strong', 'Camera control unavailable: '), S.caps.blockReason], actions));
       } else if (S.caps.canActivate && S.caps.adapterQualified === false && S.caps.allowUnqualifiedAdapter) {
-        host.appendChild(banner('alert-triangle', ['Live control is running before axis qualification — for testing only.']));
+        host.appendChild(banner('alert-triangle', ['Live control is running before axis qualification - for testing only.']));
       }
       if (readOnly()) host.appendChild(banner('info', ['This profile needs a newer version of Camera Studio. It opens read-only and cannot be activated.'], [], true));
       const a = S.aircraft;
@@ -1269,15 +1293,15 @@
         dismiss.setAttribute('data-focus-key', 'banner-x');
         const match = a.matchProfileId ? S.profiles.filter(p => p.profileId === a.matchProfileId)[0] : null;
         if (match) {
-          const open = button('Open “' + match.name + '”', () => openProfile(match.profileId), 'mc-secondary');
+          const open = button('Open "' + match.name + '"', () => openProfile(match.profileId), 'mc-secondary');
           open.setAttribute('data-focus-key', 'banner-open');
-          host.appendChild(banner('plane', ['“' + match.name + '” is the camera profile for ', make('strong', a.title), '.'], [open, dismiss], true));
+          host.appendChild(banner('plane', ['"' + match.name + '" is the camera profile for ', make('strong', aircraftName()), '.'], [open, dismiss], true));
         } else if (!a.matchProfileId) {
           const create = button('Create profile for this aircraft', createProfileForAircraft, 'mc-secondary');
           const use = button('Use current profile for this aircraft', useCurrentForAircraft, 'mc-secondary');
           create.setAttribute('data-focus-key', 'banner-create');
           use.setAttribute('data-focus-key', 'banner-use');
-          host.appendChild(banner('plane', [make('strong', 'No camera profile for ' + a.title)], [create, use, dismiss]));
+          host.appendChild(banner('plane', [make('strong', 'No camera profile for ' + aircraftName())], [create, use, dismiss]));
         }
       }
     });
@@ -1293,7 +1317,7 @@
   }
   function render() {
     const d = P();
-    $('mc-profile-label').textContent = d ? (d.aircraftMatch && d.aircraftMatch.displayName ? d.aircraftMatch.displayName : 'No aircraft') + ' · ' + d.name : statusText();
+    $('mc-profile-label').textContent = d ? (d.aircraftMatch && d.aircraftMatch.displayName ? d.aircraftMatch.displayName : 'No aircraft') + ' - ' + d.name : statusText();
     setIcon($('mc-profile-picker'), d && d.aircraftMatch && d.aircraftMatch.strategy === 'none' ? 'map-pin' : 'plane');
     renderTree();
     renderDetails();
@@ -1303,7 +1327,7 @@
     renderBanners();
   }
 
-  /* ───────────── Save / revert ───────────── */
+  /* ------------- Save / revert ------------- */
   function saveChanges() {
     if (S.pendingCommit) return Promise.resolve(false);
     return whenIdle().then(() => {
@@ -1327,7 +1351,7 @@
             updateSavedState();
             return true;
           }
-          announce(done.message || 'Your changes could not be saved. They are still here — try again.', 'error');
+          announce(done.message || 'Your changes could not be saved. They are still here - try again.', 'error');
           updateSavedState();
           return false;
         });
@@ -1344,7 +1368,7 @@
     });
   }
 
-  /* ───────────── Bindings ───────────── */
+  /* ------------- Bindings ------------- */
   const bindingsList = () => (S.working ? S.working.bindings.bindings : []);
   const findBinding = (action, viewId) => bindingsList().filter(b => b.action === action && (viewId ? b.viewId === viewId : !b.viewId))[0] || null;
   const sameInput = (a, b) => Boolean(a && b) && a.definition === b.definition && (a.pov || null) === (b.pov || null);
@@ -1360,7 +1384,7 @@
     const camFor = n => cameras().filter(c => c.viewId === n)[0];
     return [
       ['Camera views', unique(used.concat(bound('selectView'))).map(n => ({ action: 'selectView', viewId: n, name: 'Select view ID ' + n, detail: camFor(n) ? camFor(n).name : 'No camera uses this view ID' }))],
-      ['Peek · hold to look, release to return', unique(used.concat(bound('peekView'))).map(n => ({ action: 'peekView', viewId: n, peek: true, name: 'Peek at ' + (camFor(n) ? camFor(n).name : 'view ID ' + n), detail: 'View ID ' + n + ' · hold to look · release to return' }))],
+      ['Peek - hold to look, release to return', unique(used.concat(bound('peekView'))).map(n => ({ action: 'peekView', viewId: n, peek: true, name: 'Peek at ' + (camFor(n) ? camFor(n).name : 'view ID ' + n), detail: 'View ID ' + n + ' - hold to look - release to return' }))],
       ['Camera commands', COMMANDS.map(c => ({ action: c[0], viewId: 0, name: c[1], detail: c[2] }))],
     ];
   }
@@ -1379,7 +1403,7 @@
       details.appendChild(make('summary', 'Manual look & move'));
       const inner = make('div');
       const host = S.working ? S.working.settings.host : { lookSpeedDegPerSec: 60, moveSpeedMetersPerSec: 0.5 };
-      inner.appendChild(make('p', 'Hold to look or move the active camera. Speeds come from Settings (' + host.lookSpeedDegPerSec + '°/s, ' + host.moveSpeedMetersPerSec + ' m/s).', 'mc-note'));
+      inner.appendChild(make('p', 'Hold to look or move the active camera. Speeds come from Settings (' + host.lookSpeedDegPerSec + 'deg/s, ' + host.moveSpeedMetersPerSec + ' m/s).', 'mc-note'));
       MANUAL.forEach(entry => inner.appendChild(bindingRow({ action: entry[0], viewId: 0, name: entry[1], detail: entry[0].indexOf('zoom') === 0 ? 'Changes the field of view' : entry[0].indexOf('look') === 0 ? 'Temporary look' : 'Temporary position offset' })));
       details.appendChild(inner);
       list.appendChild(details);
@@ -1406,7 +1430,7 @@
       S.working.bindings.bindings = bindingsList().filter(b => b !== binding);
       saveBindings();
       renderBindings();
-      setBindingResult('Cleared “' + spec.name + '”. Save changes to keep it.');
+      setBindingResult('Cleared "' + spec.name + '". Save changes to keep it.');
     });
     clear.setAttribute('data-focus-key', 'clear:' + key);
     clear.setAttribute('aria-label', 'Clear ' + spec.name);
@@ -1425,7 +1449,7 @@
     whenIdle().then(() => bridge.request('TestBinding', { binding: clone(binding) })).then(ack => {
       if (ack.status === 'Rejected' || ack.status === 'TimedOut') { setBindingResult(reasonText(ack.reason), 'warn'); return; }
       const r = ack.result || {};
-      setBindingResult(r.message || (r.recalled ? '“' + name + '” sent — the view was recalled.' : '“' + name + '” sent to the simulator.'), r.dispatched === false ? 'warn' : '');
+      setBindingResult(r.message || (r.recalled ? '"' + name + '" sent - the view was recalled.' : '"' + name + '" sent to the simulator.'), r.dispatched === false ? 'warn' : '');
     });
   }
   function endPeek() {
@@ -1466,7 +1490,7 @@
     control.addEventListener('keyup', event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); stop(); } });
   }
 
-  /* Key capture → MSFS input definition (SimConnect_MapInputEventToClientEvent_EX1 format) */
+  /* Key capture > MSFS input definition (SimConnect_MapInputEventToClientEvent_EX1 format) */
   const MODIFIERS = {
     ControlLeft: ['VK_LCONTROL', 'Ctrl', 0], ControlRight: ['VK_RCONTROL', 'Right Ctrl', 0],
     AltLeft: ['VK_LMENU', 'Alt', 1], AltRight: ['VK_RMENU', 'Right Alt', 1],
@@ -1507,7 +1531,7 @@
     const body = openDialog('Assign ' + spec.name, () => { S.assign = null; });
     S.assign = { spec, staged: null, held: {}, controllers: null, tested: { down: false, up: false } };
     body.appendChild(make('p', 'Press a key combination now. Esc cancels. Up to two modifier keys (Ctrl, Alt, Shift) plus one key.'));
-    const capture = make('div', existing ? existing.input.label : 'Waiting for a key…', 'mc-binding-input');
+    const capture = make('div', existing ? existing.input.label : 'Waiting for a key...', 'mc-binding-input');
     capture.tabIndex = 0;
     capture.id = 'mc-assign-capture';
     capture.setAttribute('role', 'textbox');
@@ -1521,14 +1545,14 @@
     body.appendChild(make('div', 'Or use a controller', 'mc-section-label'));
     const controllerHost = make('div');
     controllerHost.id = 'mc-assign-controller';
-    controllerHost.appendChild(make('p', 'Looking for controllers…'));
+    controllerHost.appendChild(make('p', 'Looking for controllers...'));
     body.appendChild(controllerHost);
     capture.addEventListener('keydown', event => {
       if (event.key === 'Escape' || event.key === 'Tab') return;
       event.preventDefault();
       event.stopPropagation();
       const result = keyCapture(event, S.assign.held);
-      if (result.pending) { capture.textContent = Object.keys(S.assign.held).filter(c => S.assign.held[c]).map(c => MODIFIERS[c][1]).join(' + ') + ' + …'; return; }
+      if (result.pending) { capture.textContent = Object.keys(S.assign.held).filter(c => S.assign.held[c]).map(c => MODIFIERS[c][1]).join(' + ') + ' + ...'; return; }
       if (result.error) { dialogError(result.error); S.assign.held = {}; return; }
       stageInput(result.input, result.note);
       S.assign.held = {};
@@ -1548,7 +1572,7 @@
     noteEl.hidden = !note;
     noteEl.textContent = note || '';
     const conflict = bindingsList().filter(b => sameInput(b.input, input) && !(b.action === a.spec.action && (b.viewId || 0) === (a.spec.viewId || 0)))[0];
-    dialogError(conflict ? input.label + ' is already assigned to “' + actionName(conflict.action, conflict.viewId) + '”. Clear it there first.' : '');
+    dialogError(conflict ? input.label + ' is already assigned to "' + actionName(conflict.action, conflict.viewId) + '". Clear it there first.' : '');
     a.conflict = Boolean(conflict);
     updateAssignButton();
   }
@@ -1588,13 +1612,13 @@
       let input;
       if (kind.value === 'button') {
         const n = Math.max(1, Math.min(128, Math.round(Number(numberField.input.value) || 1)));
-        input = { kind: 'joystick', deviceId: c.deviceId, deviceName: c.name, definition: 'joystick:' + c.deviceId + ':button:' + (n - 1), label: c.name + ' · Button ' + n };
+        input = { kind: 'joystick', deviceId: c.deviceId, deviceName: c.name, definition: 'joystick:' + c.deviceId + ':button:' + (n - 1), label: c.name + ' - Button ' + n };
       } else {
-        input = { kind: 'joystick', deviceId: c.deviceId, deviceName: c.name, definition: 'joystick:' + c.deviceId + ':POV:0', pov: dir.value, label: c.name + ' · Hat ' + dir.value };
+        input = { kind: 'joystick', deviceId: c.deviceId, deviceName: c.name, definition: 'joystick:' + c.deviceId + ':POV:0', pov: dir.value, label: c.name + ' - Hat ' + dir.value };
       }
       a.tested = { down: false, up: false };
       stageInput(input, null);
-      status.textContent = 'Waiting for ' + input.label + '… use the control now.';
+      status.textContent = 'Waiting for ' + input.label + '... use the control now.';
       bridge.send('TestInput', { input: clone(input) });
     }, 'mc-secondary');
     const sync = () => { numberField.label.hidden = kind.value !== 'button'; dirLabel.hidden = kind.value === 'button'; };
@@ -1607,7 +1631,7 @@
     if (!a || !a.staged || a.staged.definition !== p.definition) return;
     a.tested[p.phase === 'down' ? 'down' : 'up'] = true;
     const status = $('mc-assign-test');
-    if (status) status.textContent = p.phase === 'down' ? 'Pressed…' : (a.tested.down ? 'Pressed and released — this input works.' : 'Released.');
+    if (status) status.textContent = p.phase === 'down' ? 'Pressed...' : (a.tested.down ? 'Pressed and released - this input works.' : 'Released.');
     updateAssignButton();
   }
   function applyAssign() {
@@ -1623,10 +1647,10 @@
     closeDialog();
     saveBindings();
     renderBindings();
-    setBindingResult('Assigned ' + label + ' to “' + a.spec.name + '”. Save changes to keep it.');
+    setBindingResult('Assigned ' + label + ' to "' + a.spec.name + '". Save changes to keep it.');
   }
 
-  /* ───────────── Profiles ───────────── */
+  /* ------------- Profiles ------------- */
   function renderProfiles() {
     const card = empty($('mc-aircraft-card'));
     const a = S.aircraft;
@@ -1634,13 +1658,13 @@
     const mark = make('span', undefined, 'mc-profile-icon');
     mark.appendChild(icon('plane'));
     const info = make('div', undefined, 'mc-profile-text');
-    if (!a || !a.title) {
+    if (!aircraftLoaded()) {
       add(info, make('strong', 'No aircraft loaded'), make('small', 'Load a flight to use your cameras.'));
       add(entry, mark, info);
     } else {
       const isMatch = P() && a.matchProfileId === P().profileId;
       const other = a.matchProfileId && !isMatch ? S.profiles.filter(p => p.profileId === a.matchProfileId)[0] : null;
-      add(info, make('strong', 'Current aircraft · ' + a.title), make('small', isMatch ? (a.matchReason || 'Matched') + ' · ' + P().name : other ? '“' + other.name + '” is the profile for this aircraft' : 'No camera profile for this aircraft yet'));
+      add(info, make('strong', 'Current aircraft - ' + aircraftName()), make('small', isMatch ? (a.matchReason || 'Matched') + ' - ' + P().name : other ? '"' + other.name + '" is the profile for this aircraft' : 'No camera profile for this aircraft yet'));
       add(entry, mark, info);
       const actions = make('div', undefined, 'mc-row-actions');
       if (other) actions.appendChild(button('Open', () => openProfile(other.profileId), 'mc-secondary'));
@@ -1663,7 +1687,7 @@
         if (a && a.matchProfileId === profile.profileId) title.appendChild(make('span', 'This aircraft', 'mc-pill mc-accent'));
         if (profile.readOnly) title.appendChild(make('span', 'Read-only', 'mc-pill'));
         const count = isCurrent ? P().cameras.length : profile.cameraCount;
-        add(text, title, make('small', (profile.displayName || 'No aircraft') + ' · ' + count + ' cameras' + (isCurrent && dirtyFlags().profile ? ' · unsaved changes' : '')));
+        add(text, title, make('small', (profile.displayName || 'No aircraft') + ' - ' + count + ' cameras' + (isCurrent && dirtyFlags().profile ? ' - unsaved changes' : '')));
         add(row, pm, text);
         const actions = make('div', undefined, 'mc-row-actions');
         if (isCurrent) {
@@ -1677,7 +1701,7 @@
           const open = button('Open', () => openProfile(profile.profileId), 'mc-secondary');
           open.setAttribute('data-focus-key', 'open:' + profile.profileId);
           open.setAttribute('aria-label', 'Open ' + profile.name);
-          const del = button('', () => confirmDialog('Delete profile?', 'Delete “' + profile.name + '” and its backups? This cannot be undone.', () => {
+          const del = button('', () => confirmDialog('Delete profile?', 'Delete "' + profile.name + '" and its backups? This cannot be undone.', () => {
             bridge.request('DeleteProfile', { profileId: profile.profileId }).then(ack => announce(ack.status === 'Completed' ? 'Deleted ' + profile.name + '.' : reasonText(ack.reason), ack.status === 'Completed' ? 'ok' : 'warn'));
           }), 'mc-icon-button mc-quiet', 'trash-2');
           del.setAttribute('aria-label', 'Delete ' + profile.name);
@@ -1723,20 +1747,20 @@
     namedDialog('Save as new profile', (P().name + ' copy').slice(0, 60), name => createProfile({ name, forAircraft: false, copyOf: P().profileId }, 'Created ' + name + '.'), 'Create profile');
   }
   function newProfile() {
-    namedDialog('New profile', S.aircraft && S.aircraft.title ? S.aircraft.title : 'My cameras', name => {
+    namedDialog('New profile', aircraftLoaded() ? aircraftName() : 'My cameras', name => {
       guardUnsaved('continuing').then(choice => { if (choice) createProfile({ name, forAircraft: Boolean(S.aircraft && S.aircraft.modelKey), copyOf: null }, 'Created ' + name + '.'); });
     }, 'Create profile');
   }
   function createProfileForAircraft() {
     const a = S.aircraft;
     if (!a || !a.modelKey) return;
-    guardUnsaved('continuing').then(choice => { if (choice) createProfile({ name: a.title || 'My cameras', forAircraft: true, copyOf: null }, 'Created a camera profile for ' + a.title + '.'); });
+    guardUnsaved('continuing').then(choice => { if (choice) createProfile({ name: aircraftName() || 'My cameras', forAircraft: true, copyOf: null }, 'Created a camera profile for ' + aircraftName() + '.'); });
   }
   function useCurrentForAircraft() {
     if (!P() || !S.aircraft) return;
-    const name = P().name, title = S.aircraft.title;
+    const name = P().name, title = aircraftName();
     bridge.request('BindProfileToAircraft', { profileId: P().profileId }).then(ack => {
-      announce(ack.status === 'Completed' ? '“' + name + '” now opens for ' + title + '.' : reasonText(ack.reason), ack.status === 'Completed' ? 'ok' : 'warn');
+      announce(ack.status === 'Completed' ? '"' + name + '" now opens for ' + title + '.' : reasonText(ack.reason), ack.status === 'Completed' ? 'ok' : 'warn');
     });
   }
   function importProfile() {
@@ -1764,10 +1788,10 @@
   function showImportReport(result) {
     const report = result.report || {};
     const body = openDialog('Profile imported');
-    body.appendChild(make('p', '“' + (report.name || 'The profile') + '” was added as a copy with new camera IDs.'));
+    body.appendChild(make('p', '"' + (report.name || 'The profile') + '" was added as a copy with new camera IDs.'));
     const kv = make('dl', undefined, 'mc-kv');
     const am = report.aircraftMatch || {};
-    add(kv, make('dt', 'Aircraft'), make('dd', (am.matches ? 'Matches the loaded aircraft' : 'Not the loaded aircraft') + (am.displayName ? ' · ' + am.displayName : '')));
+    add(kv, make('dt', 'Aircraft'), make('dd', (am.matches ? 'Matches the loaded aircraft' : 'Not the loaded aircraft') + (am.displayName ? ' - ' + am.displayName : '')));
     add(kv, make('dt', 'Cameras'), make('dd', String(report.cameraCount || 0)));
     body.appendChild(kv);
     const unsupported = report.unsupported || [];
@@ -1813,7 +1837,7 @@
     });
   }
 
-  /* ───────────── Settings ───────────── */
+  /* ------------- Settings ------------- */
   function applySettings() {
     if (!S.working) return;
     const ui = S.working.settings.ui;
@@ -1825,7 +1849,7 @@
     if (IS_MINI) applyMiniMode(ui.miniEnabled === false ? 'off' : ui.miniHover !== false ? 'hover' : 'always');
     if (Boolean(ui.miniPinned) !== miniPinned) setMiniPinned(Boolean(ui.miniPinned), false);
   }
-  /** Mini surface (design §4.4/§4.5): handle + hover reveal, fixed dock, or a short note when turned off. */
+  /** Mini surface (design sec. 4.4/sec. 4.5): handle + hover reveal, fixed dock, or a short note when turned off. */
   function applyMiniMode(mode) {
     if (mode === miniMode) return;
     miniMode = mode;
@@ -1858,12 +1882,12 @@
     if (document.activeElement !== $('mc-setting-look-speed')) $('mc-setting-look-speed').value = String(host.lookSpeedDegPerSec);
     if (document.activeElement !== $('mc-setting-move-speed')) $('mc-setting-move-speed').value = String(host.moveSpeedMetersPerSec);
     $('mc-qual-state').textContent = qualificationText();
-    $('mc-qual-run').disabled = !S.snapshot || !S.aircraft || !S.aircraft.title || Boolean(Q);
-    $('mc-qual-run').title = S.aircraft && S.aircraft.title ? '' : 'Load a flight first.';
+    $('mc-qual-run').disabled = !S.snapshot || !aircraftLoaded() || Boolean(Q);
+    $('mc-qual-run').title = aircraftLoaded() ? '' : 'Load a flight first.';
   }
   function settingChanged() { saveSettings(); applySettings(); renderSettings(); }
 
-  /* ───────────── Simulator axis check (QualificationStart / Probe / Restore / Record / End) ───────────── */
+  /* ------------- Simulator axis check (QualificationStart / Probe / Restore / Record / End) ------------- */
   const AXIS_NAMES = { forward: 'Forward', right: 'Right', up: 'Up', pitch: 'Pitch', heading: 'Heading', bank: 'Roll' };
   const DEFAULT_AXES = ['forward', 'right', 'up', 'pitch', 'heading', 'bank'];
   let Q = null;
@@ -1901,7 +1925,7 @@
   }
   function startAxisCheck() {
     const q = Q;
-    wizardStep('Simulator axis check', [make('p', 'Taking camera control…')], [['Cancel', () => closeDialog()]]);
+    wizardStep('Simulator axis check', [make('p', 'Taking camera control...')], [['Cancel', () => closeDialog()]]);
     bridge.request('QualificationStart', {}).then(ack => {
       if (Q !== q) return null;
       if (ack.status !== 'Completed') { dialogError(reasonText(ack.reason)); return null; }
@@ -1923,14 +1947,14 @@
         });
     });
   }
-  function stepTitle(q, label) { return 'Step ' + (q.index + 1) + ' of ' + (q.axes.length + 1) + ' · ' + label; }
+  function stepTitle(q, label) { return 'Step ' + (q.index + 1) + ' of ' + (q.axes.length + 1) + ' - ' + label; }
   function probeStep() {
     const q = Q;
     if (!q) return;
     if (q.index >= q.axes.length) { recallStep(); return; }
     const axis = q.axes[q.index];
     const title = stepTitle(q, AXIS_NAMES[axis] || axis);
-    wizardStep(title, [make('p', 'Moving the view…')], [['Cancel', () => closeDialog()]]);
+    wizardStep(title, [make('p', 'Moving the view...')], [['Cancel', () => closeDialog()]]);
     bridge.request('QualificationProbe', { axis }).then(ack => {
       if (Q !== q) return;
       if (ack.status !== 'Completed') {
@@ -1949,14 +1973,14 @@
   function answerProbe(axis, value) {
     const q = Q;
     q.answers[axis] = value;
-    wizardStep(stepTitle(q, AXIS_NAMES[axis] || axis), [make('p', 'Returning the view…')], [['Cancel', () => closeDialog()]]);
+    wizardStep(stepTitle(q, AXIS_NAMES[axis] || axis), [make('p', 'Returning the view...')], [['Cancel', () => closeDialog()]]);
     bridge.request('QualificationRestore', {}).then(() => { if (Q !== q) return; q.index++; probeStep(); });
   }
   function recallStep() {
     const q = Q;
     const title = stepTitle(q, 'Recall');
     wizardStep(title, [make('p', 'Look at a landmark outside or on the panel, then press Recall.')], [['Cancel', () => closeDialog()], ['Recall', () => {
-      wizardStep(title, [make('p', 'Recalling the camera…')], [['Cancel', () => closeDialog()]]);
+      wizardStep(title, [make('p', 'Recalling the camera...')], [['Cancel', () => closeDialog()]]);
       command('ActivateCamera', { cameraId: q.cameraId })
         .then(() => waitFor(() => Q !== q || (S.ownership.state === 'Active' && !S.active.transitioning), 6000))
         .then(() => {
@@ -1968,7 +1992,7 @@
   function recordQualification(recall) {
     const q = Q;
     q.recall = recall;
-    wizardStep('Recording the result', [make('p', 'Saving the axis check for this simulator build…')], []);
+    wizardStep('Recording the result', [make('p', 'Saving the axis check for this simulator build...')], []);
     bridge.request('QualificationRecord', { answers: q.answers, recall, notes: '' }).then(ack => {
       if (Q !== q) return null;
       if (ack.status === 'Completed') { showQualificationResult(q, ack.result || {}, null); return null; }
@@ -1988,7 +2012,7 @@
     const nodes = [];
     if (error) nodes.push(make('p', error, 'mc-warn'));
     else if (g01 && g03) {
-      nodes.push(make('p', 'Axis mapping recorded — live control is enabled for this simulator build.'));
+      nodes.push(make('p', 'Axis mapping recorded - live control is enabled for this simulator build.'));
       if (reversed.length) nodes.push(make('p', 'Corrected automatically: ' + names(reversed) + ' moved the opposite way and was flipped.'));
     } else {
       nodes.push(make('p', 'The axis check did not pass:', 'mc-warn'));
@@ -1996,13 +2020,13 @@
       failedAxes.forEach(a => ul.appendChild(make('li', (AXIS_NAMES[a] || a) + ' moved some other way.')));
       if (!g03) ul.appendChild(make('li', 'Recall did not return the view to the same place.'));
       nodes.push(ul);
-      nodes.push(make('p', 'Live control stays off for this simulator build unless you allow it in Settings → Simulator.'));
+      nodes.push(make('p', 'Live control stays off for this simulator build unless you allow it in Settings > Simulator.'));
     }
     wizardStep('Axis check result', nodes, [['Close', () => closeDialog(), 'mc-primary']]);
     renderSettings();
   }
 
-  /* ───────────── Wiring ───────────── */
+  /* ------------- Wiring ------------- */
   function wire() {
     buildAxes();
     for (let value = 0; value <= 20; value++) { const option = make('option', value ? String(value) : 'Unassigned'); option.value = String(value); $('mc-view-id').appendChild(option); }
@@ -2094,7 +2118,7 @@
       settingChanged();
     }));
     $('mc-qual-run').addEventListener('click', runAxisCheck);
-    $('mc-diagnostics').addEventListener('click', () => bridge.request('GetDiagnostics', {}).then(ack => codeDialog('Diagnostics', 'Technical details for support. Nothing is sent anywhere.', (ack.result && ack.result.text) || reasonText(ack.reason))));
+    $('mc-diagnostics').addEventListener('click', () => bridge.request('GetDiagnostics', {}).then(ack => codeDialog('Diagnostics', 'Technical details for support. Nothing is sent anywhere.', (ack.result && ack.result.text) || reasonText(ack.reason), null, 'Select text')));
     $('mc-new-profile').addEventListener('click', saveAsProfile);
     $('mc-create-profile').addEventListener('click', newProfile);
     $('mc-import-profile').addEventListener('click', importProfile);
@@ -2119,7 +2143,7 @@
       if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.key === 's' || event.key === 'S') && !dialogOpen() && !IS_MINI) { event.preventDefault(); saveChanges(); }
     });
 
-    // Mini dock reveal: pointer, focus, tap and pin are independent reasons to stay open (design §4.5).
+    // Mini dock reveal: pointer, focus, tap and pin are independent reasons to stay open (design sec. 4.5).
     {
       const region = $('mc-mini-region');
       onPointer(region, 'pointerenter', event => { if (pointerType(event) === 'touch' || !miniHover() || !miniEnabled()) return; miniHovered = true; revealMini(); });

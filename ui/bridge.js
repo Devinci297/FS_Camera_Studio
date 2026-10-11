@@ -1,21 +1,21 @@
 /*
- * FS Camera Studio — panel ⇄ camera module bridge (doc/protocol.md v2 §3–§6).
+ * FS Camera Studio - panel <-> camera module bridge (doc/protocol.md v2 sec. 3-sec. 6).
  *
  * The UI runs as MSFS 2024 in-game toolbar panels (Coherent GT). Its only peer is the Camera Studio WASM module:
- *   panel → module   listener.callWasm("FSCS_UI_TO_HOST", jsonText)
- *   module → panel   listener.on("FSCS_HOST_TO_UI", jsonText)
+ *   panel > module   listener.callWasm("FSCS_UI_TO_HOST", jsonText)
+ *   module > panel   listener.on("FSCS_HOST_TO_UI", jsonText)
  * Messages longer than 4000 characters travel as { part, of, msgId, chunk } frames in both directions.
  *
  * Demo mode: when RegisterCommBusListener is undefined (plain browser) an in-memory module that follows
  * protocol v2 is used, so the preview exercises the real message flow. Nothing touches disk or network.
  *
- * API — FSCBridge.create({ surface }):
+ * API - FSCBridge.create({ surface }):
  *   bridge.mode / surface / uiInstanceId
- *   bridge.context                     { moduleBootId, sessionEpoch, draftRevision } — echoed in envelopes
+ *   bridge.context                     { moduleBootId, sessionEpoch, draftRevision } - echoed in envelopes
  *   bridge.on('event' | 'ack', fn)
  *   bridge.start()                     Hello (retried every 2 s until a Snapshot), then RenewLease every 2 s
- *   bridge.send(action, payload)       → requestId
- *   bridge.request(action, payload)    → Promise<ack>
+ *   bridge.send(action, payload)       > requestId
+ *   bridge.request(action, payload)    > Promise<ack>
  *   bridge.demo                        demo controls (demo mode only)
  */
 (function (root) {
@@ -32,7 +32,7 @@
   const ACK_TIMEOUT_MS = 15000;
   const randomHex = n => { let s = ''; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 16).toString(16); return s; };
 
-  /* ───────────── Chunking (§3) ───────────── */
+  /* ------------- Chunking (sec. 3) ------------- */
   function encodeFrames(message, msgId) {
     const text = JSON.stringify(message);
     if (text.length <= CHUNK_TRIGGER) return [text];
@@ -81,7 +81,7 @@
     }
   }
 
-  /* ───────────── Transports ───────────── */
+  /* ------------- Transports ------------- */
   /** The only place that knows about the MSFS CommBus. */
   class CommBusTransport {
     constructor() { this.listener = null; this.handlers = []; this.isOpen = false; }
@@ -115,7 +115,7 @@
     onMessage(cb) { this.handlers.push(cb); }
   }
 
-  /* ───────────── Bridge ───────────── */
+  /* ------------- Bridge ------------- */
   function create(options) {
     const surface = (options && options.surface) || 'main';
     const transport = CommBusTransport.available() ? new CommBusTransport() : new DemoTransport();
@@ -190,15 +190,15 @@
     };
   }
 
-  /* ───────────────────────────── Demo camera module (protocol v2) ───────────────────────────── */
+  /* ----------------------------- Demo camera module (protocol v2) ----------------------------- */
 
   const FRAME_CONTRACT = 'FRD-camera-to-anchor-xyzw-v1';
   const C172 = { title: 'C172 Skyhawk', modelKey: 'asobo-c172sp-classic' };
   const MODE_FROM_TYPE = { cockpit: 'aircraftCockpit', external: 'aircraftExterior', orbit: 'orbit', flyby: 'flyby', airport: 'airport', free: 'free' };
-  const NOT_AVAILABLE = 'Not available in this version — saved with the profile but cannot be activated.';
+  const NOT_AVAILABLE = 'Not available in this version - saved with the profile but cannot be activated.';
   const MODE_CAPS = {
     aircraftCockpit: { available: true, reason: null },
-    aircraftExterior: { available: true, reason: 'Preview — exterior views keep cockpit sound in the current simulator build.' },
+    aircraftExterior: { available: true, reason: 'Preview - exterior views keep cockpit sound in the current simulator build.' },
     orbit: { available: false, reason: NOT_AVAILABLE }, flyby: { available: false, reason: NOT_AVAILABLE },
     airport: { available: false, reason: NOT_AVAILABLE }, free: { available: false, reason: NOT_AVAILABLE },
   };
@@ -284,7 +284,7 @@
   function validateProfile(p) {
     if (!p || p.schemaVersion !== 2) return 'This profile uses an unknown format.';
     const nameOk = n => typeof n === 'string' && n.trim().length >= 1 && n.length <= 60;
-    if (!nameOk(p.name)) return 'Profile names need 1–60 characters.';
+    if (!nameOk(p.name)) return 'Profile names need 1-60 characters.';
     if (!Array.isArray(p.categories) || !Array.isArray(p.cameras)) return 'The profile is incomplete.';
     if (p.cameras.length > 500) return 'A profile can hold up to 500 cameras.';
     if (p.categories.length > 100) return 'A profile can hold up to 100 categories.';
@@ -292,20 +292,20 @@
     for (const category of p.categories) {
       if (ids.has(category.id)) return 'Two items share the same ID.';
       ids.add(category.id);
-      if (!nameOk(category.name)) return 'Category names need 1–60 characters.';
+      if (!nameOk(category.name)) return 'Category names need 1-60 characters.';
       for (const id of category.cameraIds) { if (seen.has(id)) return 'A camera appears in two categories.'; seen.set(id, category.id); }
     }
     for (const c of p.cameras) {
       if (ids.has(c.id)) return 'Two items share the same ID.';
       ids.add(c.id);
-      if (!nameOk(c.name)) return 'Camera names need 1–60 characters.';
-      if (seen.get(c.id) !== c.categoryId) return '“' + c.name + '” is not listed in its category.';
+      if (!nameOk(c.name)) return 'Camera names need 1-60 characters.';
+      if (seen.get(c.id) !== c.categoryId) return '"' + c.name + '" is not listed in its category.';
       const values = c.positionMetersFRD.concat(c.orientationCameraToAnchorXYZW, [c.projection.value]);
-      if (!values.every(Number.isFinite)) return '“' + c.name + '” has an invalid number.';
-      if (c.positionMetersFRD.some(v => Math.abs(v) > 10000)) return '“' + c.name + '” is more than 10 km away.';
-      if (c.projection.value < 0.1 || c.projection.value > 2.8) return '“' + c.name + '” has a field of view outside the supported range.';
+      if (!values.every(Number.isFinite)) return '"' + c.name + '" has an invalid number.';
+      if (c.positionMetersFRD.some(v => Math.abs(v) > 10000)) return '"' + c.name + '" is more than 10 km away.';
+      if (c.projection.value < 0.1 || c.projection.value > 2.8) return '"' + c.name + '" has a field of view outside the supported range.';
       const n = Math.hypot.apply(null, c.orientationCameraToAnchorXYZW);
-      if (!(n > 0) || Math.abs(n - 1) > 1e-3) return '“' + c.name + '” has an invalid orientation.';
+      if (!(n > 0) || Math.abs(n - 1) > 1e-3) return '"' + c.name + '" has an invalid orientation.';
       if (c.viewId) { if (views.has(c.viewId)) return 'View ID ' + c.viewId + ' is used twice.'; views.add(c.viewId); }
     }
     if (seen.size !== p.cameras.length) return 'A category lists a camera that does not exist.';
@@ -321,7 +321,7 @@
     profile.defaultCameraId = remap(profile.defaultCameraId);
     return profile;
   }
-  /** Schema 1 → 2 migration (§2.1). */
+  /** Schema 1 > 2 migration (sec. 2.1). */
   function migrate(input) {
     const p = clone(input);
     if (p && p.schemaVersion === 1) {
@@ -430,7 +430,7 @@
       if (m.forcedBlock) blockReason = m.forcedBlock;
       else if (m.session !== 'Ready') blockReason = 'Camera Studio is not ready yet.';
       else if (!m.aircraft || !m.aircraft.modelKey) blockReason = 'Load a flight to use your cameras.';
-      else if (!m.qualified && !allow && !m.qualification) blockReason = 'This simulator build has not passed the axis check yet. Run it from Settings → Simulator.';
+      else if (!m.qualified && !allow && !m.qualification) blockReason = 'This simulator build has not passed the axis check yet. Run it from Settings > Simulator.';
       return { adapterQualified: m.qualified, adapterContract: 'camera-api-v1', captureQualified: m.captureQualified, allowUnqualifiedAdapter: allow, canActivate: !blockReason, blockReason, simVersion: m.simVersion, fovRangeDeg: [20, 120], levelHorizon: false, modes: clone(MODE_CAPS) };
     }
     function summaries() {
@@ -563,7 +563,7 @@
         case 'selectView': case 'peekView':
           if (!camera) message = 'Command sent, but no camera uses view ID ' + binding.viewId + '.';
           else if (!caps.canActivate) message = blocked(caps.blockReason);
-          else if (!activatable(camera)) message = blocked('“' + camera.name + '” cannot be activated in this version.');
+          else if (!activatable(camera)) message = blocked('"' + camera.name + '" cannot be activated in this version.');
           else { recalled = true; message = 'Recalled ' + camera.name + '.'; activate(internal(env, 'dispatch'), camera.id); }
           break;
         case 'releaseCamera': release(null); message = 'Camera released.'; break;
@@ -578,7 +578,7 @@
           event('SurfaceRequest', { target: action === 'toggleEditor' ? 'main' : 'mini', op: 'toggle' });
           break;
         case 'recenterLook': m.look = NEUTRAL_LOOK(); event('TemporaryLookChanged', m.look); break;
-        default: message = m.ownership.state === 'Active' ? 'Command sent — the camera moved briefly.' : 'Command sent. Take camera control to see it move.';
+        default: message = m.ownership.state === 'Active' ? 'Command sent - the camera moved briefly.' : 'Command sent. Take camera control to see it move.';
       }
       event('BindingTriggered', { action, viewId: (binding && binding.viewId) || null, result: recalled ? 'recalled' : 'dispatched' });
       ack(env, 'Completed', null, { dispatched: true, recalled, message });
@@ -757,8 +757,8 @@
           if (problem) return ack(env, 'Rejected', problem);
           const imported = remapIds(candidate);
           const unsupported = [];
-          imported.cameras.forEach(c => { if (c.effects && c.effects.enabled) { c.effects = { enabled: false }; unsupported.push('Camera effects on “' + c.name + '” were turned off — effects are not supported yet.'); } });
-          imported.cameras.forEach(c => { if (MODE_CAPS[c.mode] && !MODE_CAPS[c.mode].available) unsupported.push('“' + c.name + '” is kept but cannot be activated in this version.'); });
+          imported.cameras.forEach(c => { if (c.effects && c.effects.enabled) { c.effects = { enabled: false }; unsupported.push('Camera effects on "' + c.name + '" were turned off - effects are not supported yet.'); } });
+          imported.cameras.forEach(c => { if (MODE_CAPS[c.mode] && !MODE_CAPS[c.mode].available) unsupported.push('"' + c.name + '" is kept but cannot be activated in this version.'); });
           if (imported.sequences && imported.sequences.length) unsupported.push(imported.sequences.length + ' camera sequence(s) are kept for the cinematic extension.');
           addRepo(imported, 1);
           ack(env, 'Completed', null, { profileId: imported.profileId, report: {
@@ -813,9 +813,9 @@
             forward: 'The view moves about 30 cm forward, toward the instrument panel.',
             right: 'The view moves about 30 cm to the right.',
             up: 'The view moves about 30 cm up, toward the roof.',
-            pitch: 'The view tilts about 15° up.',
-            heading: 'The view turns about 15° to the right.',
-            bank: 'The view rolls about 15° to the right (the right side goes down).',
+            pitch: 'The view tilts about 15 deg up.',
+            heading: 'The view turns about 15 deg to the right.',
+            bank: 'The view rolls about 15 deg to the right (the right side goes down).',
           }[payload.axis];
           if (!expect) return ack(env, 'Rejected', 'unknownAxis');
           return ack(env, 'Completed', null, { axis: payload.axis, expect });
@@ -852,7 +852,7 @@
       setCanActivate(on, reason) { m.forcedBlock = on ? null : (reason || 'Camera control is turned off for testing.'); event('CapabilitiesChanged', capabilities()); },
       setQualified(on) { m.qualified = Boolean(on); event('CapabilitiesChanged', capabilities()); },
       loadAircraft(title, modelKey) {
-        m.aircraft = title ? { title, modelKey } : null;
+        m.aircraft = (title || modelKey) ? { title: title || null, modelKey: modelKey || null } : null;
         if (m.ownership.state !== 'Observing') release(null, 'aircraftChanged');
         const match = matchFor(m.aircraft);
         if (match.matchProfileId && match.matchProfileId !== m.working.profile.profileId && !dirty().profile) {

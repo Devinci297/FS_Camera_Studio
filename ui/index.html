@@ -11,8 +11,8 @@
 <!--
   One page, three surfaces (chosen by app.js from ?surface=):
     (none)  browser preview: mock simulator chrome + editor + hover mini dock, as in the approved mockup
-    main    MSFS toolbar panel "Camera Studio" — the editor card (Compact/X switch to fly mode)
-    mini    MSFS toolbar panel "Camera Studio Mini" — only the dock
+    main    MSFS toolbar panel "Camera Studio" - the editor card (Compact/X switch to fly mode)
+    mini    MSFS toolbar panel "Camera Studio Mini" - only the dock
 -->
 <body class="surface-demo">
 <div id="mc-sim" class="demo" data-surface="demo" data-theme="dark" data-mode="fly" data-page="cameras" data-browser-open="false" data-enabled="false" data-mini-open="false" data-mini-pinned="false">
@@ -26,7 +26,7 @@
       <header class="mc-panel-head">
         <span class="mc-brand-icon"><i data-icon="aperture"></i></span>
         <div class="mc-brand"><h2>Camera Studio</h2><p>In-sim camera control</p></div>
-        <button type="button" class="mc-profile-button" id="mc-profile-picker"><i data-icon="plane"></i><span id="mc-profile-label">Starting Camera Studio…</span><i data-icon="chevron-down"></i></button>
+        <button type="button" class="mc-profile-button" id="mc-profile-picker"><i data-icon="plane"></i><span id="mc-profile-label">Starting Camera Studio...</span><i data-icon="chevron-down"></i></button>
         <button type="button" class="mc-compact-button" id="mc-compact"><i data-icon="panel-bottom"></i><span>Compact</span></button>
         <button type="button" class="mc-icon-button mc-quiet" id="mc-hide" aria-label="Hide editor and keep quick access"><i data-icon="x"></i></button>
       </header>
@@ -35,11 +35,11 @@
         <button type="button" role="tab" id="mc-nav-bindings" data-page="bindings" aria-selected="false" aria-controls="mc-page-bindings"><i data-icon="keyboard"></i>Bindings</button>
         <button type="button" role="tab" id="mc-nav-profiles" data-page="profiles" aria-selected="false" aria-controls="mc-page-profiles"><i data-icon="folder-open"></i>Profiles</button>
         <button type="button" role="tab" id="mc-nav-settings" data-page="settings" aria-selected="false" aria-controls="mc-page-settings"><i data-icon="settings-2"></i>Settings</button>
-        <span class="mc-status"><span class="mc-status-dot"></span><span id="mc-control-state" role="status">Starting Camera Studio…</span><button type="button" id="mc-fault-details" hidden>Details</button></span>
+        <span class="mc-status"><span class="mc-status-dot"></span><span id="mc-control-state" role="status">Starting Camera Studio...</span><button type="button" id="mc-fault-details" hidden>Details</button></span>
       </nav>
       <div class="mc-banners" id="mc-banners"></div>
       <div id="mc-page-cameras" role="tabpanel" aria-labelledby="mc-nav-cameras">
-        <div class="mc-empty-page" id="mc-cameras-empty" hidden><h3>Starting Camera Studio…</h3><p id="mc-cameras-empty-text">Your cameras appear as soon as the camera module answers.</p></div>
+        <div class="mc-empty-page" id="mc-cameras-empty" hidden><h3>Starting Camera Studio...</h3><p id="mc-cameras-empty-text">Your cameras appear as soon as the camera module answers.</p></div>
         <button type="button" class="mc-mobile-browser" id="mc-browser-toggle" aria-expanded="false"><span><i data-icon="list-tree"></i>Browse cameras</span><i data-icon="chevron-down"></i></button>
         <div class="mc-camera-layout" id="mc-camera-layout">
           <aside class="mc-browser" aria-label="Camera library">
@@ -49,7 +49,7 @@
             <div class="mc-browser-bottom"><button type="button" id="mc-add-camera"><i data-icon="plus"></i>Add camera</button></div>
           </aside>
           <section class="mc-inspector" id="mc-inspector" aria-label="Selected camera settings">
-            <div class="mc-camera-heading"><div><div class="mc-eyebrow" id="mc-camera-path">COCKPIT / CAMERA</div><h3 id="mc-camera-name">—</h3><p class="mc-camera-subtitle" id="mc-camera-description"></p></div><div class="mc-camera-tools"><button type="button" id="mc-favorite" class="mc-icon-button" aria-label="Add camera to quick access" aria-pressed="false"><i data-icon="star"></i></button><button type="button" id="mc-view-in-sim" class="mc-primary mc-view-sim"><i data-icon="play"></i><span>View in sim</span></button><button type="button" id="mc-camera-menu" class="mc-icon-button mc-quiet" aria-label="Camera actions"><i data-icon="ellipsis"></i></button></div></div>
+            <div class="mc-camera-heading"><div><div class="mc-eyebrow" id="mc-camera-path">COCKPIT / CAMERA</div><h3 id="mc-camera-name">-</h3><p class="mc-camera-subtitle" id="mc-camera-description"></p></div><div class="mc-camera-tools"><button type="button" id="mc-favorite" class="mc-icon-button" aria-label="Add camera to quick access" aria-pressed="false"><i data-icon="star"></i></button><button type="button" id="mc-view-in-sim" class="mc-primary mc-view-sim"><i data-icon="play"></i><span>View in sim</span></button><button type="button" id="mc-camera-menu" class="mc-icon-button mc-quiet" aria-label="Camera actions"><i data-icon="ellipsis"></i></button></div></div>
             <div class="mc-templook" id="mc-templook" hidden><i data-icon="crosshair"></i><span>Mouse look is offsetting this view in the sim.</span><button type="button" id="mc-recenter">Recenter look</button></div>
             <div class="mc-section-tabs" role="tablist" aria-label="Camera settings">
               <button type="button" role="tab" id="mc-tab-position" data-tab="position" aria-controls="mc-detail-position" aria-selected="true">Position &amp; Lens</button>
@@ -57,24 +57,24 @@
               <button type="button" role="tab" id="mc-tab-behavior" data-tab="behavior" aria-controls="mc-detail-behavior" aria-selected="false">Behavior</button>
             </div>
             <div id="mc-detail-position" role="tabpanel" aria-labelledby="mc-tab-position">
-              <div class="mc-section-heading"><div><h4>Position</h4><span class="mc-unit-label" id="mc-reference-label">Aircraft relative · meters</span></div><div class="mc-precision" aria-label="Movement precision"><button type="button" data-precision="fine" aria-pressed="false">Fine</button><button type="button" data-precision="normal" aria-pressed="true">Normal</button><button type="button" data-precision="coarse" aria-pressed="false">Coarse</button></div></div>
+              <div class="mc-section-heading"><div><h4>Position</h4><span class="mc-unit-label" id="mc-reference-label">Aircraft relative - meters</span></div><div class="mc-precision" aria-label="Movement precision"><button type="button" data-precision="fine" aria-pressed="false">Fine</button><button type="button" data-precision="normal" aria-pressed="true">Normal</button><button type="button" data-precision="coarse" aria-pressed="false">Coarse</button></div></div>
               <div class="mc-axis-grid" id="mc-position-fields"></div>
               <div class="mc-axis-footnote" id="mc-position-step">Step 0.010 m</div>
               <div class="mc-divider"></div>
-              <div class="mc-section-heading"><h4>Orientation</h4><span class="mc-unit-label" id="mc-angle-step">Step 1.0°</span></div>
+              <div class="mc-section-heading"><h4>Orientation</h4><span class="mc-unit-label" id="mc-angle-step">Step 1.0 deg</span></div>
               <div class="mc-axis-grid" id="mc-angle-fields"></div>
               <div class="mc-divider"></div>
-              <div class="mc-lens-top"><h4 id="mc-fov-heading">Field of view · sim FOV</h4><label class="mc-value-input"><input type="number" id="mc-fov-number" min="30" max="110" step="1" value="62" aria-label="Field of view in degrees (sim FOV)"><span>deg</span></label></div>
+              <div class="mc-lens-top"><h4 id="mc-fov-heading">Field of view - sim FOV</h4><label class="mc-value-input"><input type="number" id="mc-fov-number" min="30" max="110" step="1" value="62" aria-label="Field of view in degrees (sim FOV)"><span>deg</span></label></div>
               <input type="range" id="mc-fov-range" min="30" max="110" step="1" value="62" aria-label="Field of view">
-              <div class="mc-range-labels"><span id="mc-fov-min-label">30° · close</span><span id="mc-fov-max-label">110° · wide</span></div>
+              <div class="mc-range-labels"><span id="mc-fov-min-label">30 deg - close</span><span id="mc-fov-max-label">110 deg - wide</span></div>
               <div class="mc-lens-presets"><button type="button" data-fov="40" aria-pressed="false">Close</button><button type="button" data-fov="62" aria-pressed="true">Natural</button><button type="button" data-fov="85" aria-pressed="false">Wide</button></div>
               <div class="mc-pose-actions"><div><button type="button" id="mc-restore-pose"><i data-icon="rotate-ccw"></i>Restore saved pose</button><button type="button" id="mc-center-look"><i data-icon="crosshair"></i>Reset rotation</button></div><div><button type="button" id="mc-bake-look"><i data-icon="download"></i>Update from current view</button><button type="button" id="mc-capture-view"><i data-icon="camera"></i>Capture current view</button></div></div>
             </div>
             <div id="mc-detail-motion" role="tabpanel" aria-labelledby="mc-tab-motion" hidden>
               <div class="mc-section-heading"><div><h4>Transition style</h4><span class="mc-unit-label">How this view comes into frame</span></div></div>
               <div class="mc-select-card"><button type="button" data-transition="cut" aria-pressed="false"><i data-icon="zap"></i>Instant</button><button type="button" data-transition="smoothstep3" aria-pressed="true"><i data-icon="move-right"></i>Smooth</button><button type="button" data-transition="smoothstep5" aria-pressed="false"><i data-icon="spline"></i>Cinematic</button></div>
-              <div class="mc-form-grid"><label class="mc-field">Duration · seconds<input type="number" id="mc-duration" min="0.1" max="15" step="0.05" value="0.65"></label><label class="mc-field">Start delay · seconds<input type="number" id="mc-delay" min="0" max="30" step="0.1" value="0"></label></div>
-              <div class="mc-motion-demo"><div class="mc-motion-labels"><span>Previous view</span><span id="mc-motion-destination">—</span></div><div class="mc-motion-track"><span class="mc-motion-marker" id="mc-motion-marker"><i data-icon="camera"></i></span></div><button type="button" id="mc-preview-motion"><i data-icon="play"></i>Preview transition</button></div>
+              <div class="mc-form-grid"><label class="mc-field">Duration - seconds<input type="number" id="mc-duration" min="0.1" max="15" step="0.05" value="0.65"></label><label class="mc-field">Start delay - seconds<input type="number" id="mc-delay" min="0" max="30" step="0.1" value="0"></label></div>
+              <div class="mc-motion-demo"><div class="mc-motion-labels"><span>Previous view</span><span id="mc-motion-destination">-</span></div><div class="mc-motion-track"><span class="mc-motion-marker" id="mc-motion-marker"><i data-icon="camera"></i></span></div><button type="button" id="mc-preview-motion"><i data-icon="play"></i>Preview transition</button></div>
               <p class="mc-note">Camera sequences arrive with the cinematic extension.</p>
             </div>
             <div id="mc-detail-behavior" role="tabpanel" aria-labelledby="mc-tab-behavior" hidden>
@@ -107,7 +107,7 @@
           <label class="mc-switch-row"><span class="mc-switch-copy"><span>Show shortcut hints</span><small>Display view IDs beside cameras and quick-access buttons.</small></span><input type="checkbox" class="mc-switch" id="mc-setting-shortcuts" checked></label>
           <label class="mc-switch-row"><span class="mc-switch-copy"><span>Stronger selection highlight</span><small>Add a clear outline around the selected camera.</small></span><input type="checkbox" class="mc-switch" id="mc-setting-contrast"></label>
           <label class="mc-switch-row"><span class="mc-switch-copy"><span>Create a backup when saving</span><small>Restore an earlier camera set from Profiles.</small></span><input type="checkbox" class="mc-switch" id="mc-setting-backups" checked></label>
-          <label class="mc-inline-field"><span>Default movement precision</span><select id="mc-setting-precision"><option value="fine">Fine · 0.001 m</option><option value="normal" selected>Normal · 0.010 m</option><option value="coarse">Coarse · 0.100 m</option></select></label>
+          <label class="mc-inline-field"><span>Default movement precision</span><select id="mc-setting-precision"><option value="fine">Fine - 0.001 m</option><option value="normal" selected>Normal - 0.010 m</option><option value="coarse">Coarse - 0.100 m</option></select></label>
           <label class="mc-inline-field"><span>Appearance</span><select id="mc-setting-theme"><option value="dark" selected>Dark</option><option value="light">Light</option></select></label>
           <label class="mc-switch-row"><span class="mc-switch-copy"><span>Reduce motion</span><small>Turn off panel animations and the transition preview movement.</small></span><input type="checkbox" class="mc-switch" id="mc-setting-reduced-motion"></label>
           <div class="mc-section-label mc-spaced">While flying</div>
@@ -118,24 +118,24 @@
           <div class="mc-section-label mc-spaced">Simulator</div>
           <label class="mc-switch-row"><span class="mc-switch-copy"><span>Allow live control before axis qualification</span><small class="mc-warn">Only for testing. Run the conformance check to qualify your simulator build.</small></span><input type="checkbox" class="mc-switch" id="mc-setting-unqualified"></label>
           <div class="mc-switch-row"><span class="mc-switch-copy"><span>Simulator axis check</span><small id="mc-qual-state">Axis mapping for this simulator build: not checked yet</small></span><button type="button" class="mc-secondary" id="mc-qual-run">Run axis check</button></div>
-          <label class="mc-inline-field"><span>Look speed<small>Manual look bindings</small></span><span class="mc-unit"><input type="number" id="mc-setting-look-speed" min="5" max="360" step="5">°/s</span></label>
+          <label class="mc-inline-field"><span>Look speed<small>Manual look bindings</small></span><span class="mc-unit"><input type="number" id="mc-setting-look-speed" min="5" max="360" step="5">deg/s</span></label>
           <label class="mc-inline-field"><span>Move speed<small>Manual move bindings</small></span><span class="mc-unit"><input type="number" id="mc-setting-move-speed" min="0.05" max="10" step="0.05">m/s</span></label>
           <div class="mc-profile-actions"><button type="button" class="mc-secondary" id="mc-diagnostics"><i data-icon="info"></i>Diagnostics</button></div>
         </div>
       </section>
       <footer class="mc-savebar"><div class="mc-save-state" id="mc-save-state" data-dirty="false" aria-live="polite"><i data-icon="check"></i><span id="mc-save-label">All changes saved</span></div><button type="button" class="mc-release" id="mc-release"><i data-icon="circle-stop"></i><span>Release camera</span></button><button type="button" id="mc-revert" class="mc-quiet" disabled>Revert</button><button type="button" id="mc-save" class="mc-primary" disabled><i data-icon="check"></i>Save changes</button></footer>
     </section>
-    <div class="mc-flight-context"><small>CAMERA STUDIO · QUICK ACCESS</small><strong id="mc-flight-name">—</strong><span><span class="mc-status-dot"></span><span id="mc-flight-state">Starting Camera Studio…</span></span></div>
+    <div class="mc-flight-context"><small>CAMERA STUDIO - QUICK ACCESS</small><strong id="mc-flight-name">-</strong><span><span class="mc-status-dot"></span><span id="mc-flight-state">Starting Camera Studio...</span></span></div>
     <div class="mc-mini-off" id="mc-mini-off" role="note"><span>Mini control panel is turned off in Settings</span></div>
     <div class="mc-mini-region" id="mc-mini-region">
     <button type="button" id="mc-mini-trigger" class="mc-mini-trigger" aria-label="Show mini control panel" aria-controls="mc-mini-panel" aria-expanded="false"><span class="mc-mini-handle"><i data-icon="chevron-up"></i>Mini control panel</span></button>
     <section class="mc-dock" id="mc-mini-panel" aria-label="Mini camera control panel" aria-hidden="true">
-      <div class="mc-dock-current"><button type="button" class="mc-icon-button" id="mc-prev" aria-label="Previous camera"><i data-icon="chevron-left"></i></button><button type="button" class="mc-dock-picker" id="mc-quick-picker"><span><small id="mc-dock-category">—</small><strong id="mc-dock-current">—</strong></span><i data-icon="chevron-down"></i></button><button type="button" class="mc-icon-button" id="mc-next" aria-label="Next camera"><i data-icon="chevron-right"></i></button></div>
+      <div class="mc-dock-current"><button type="button" class="mc-icon-button" id="mc-prev" aria-label="Previous camera"><i data-icon="chevron-left"></i></button><button type="button" class="mc-dock-picker" id="mc-quick-picker"><span><small id="mc-dock-category">-</small><strong id="mc-dock-current">-</strong></span><i data-icon="chevron-down"></i></button><button type="button" class="mc-icon-button" id="mc-next" aria-label="Next camera"><i data-icon="chevron-right"></i></button></div>
       <div class="mc-dock-favorites" id="mc-dock-favorites" aria-label="Favorite camera views"></div><div class="mc-dock-tools"><button type="button" id="mc-mini-pin" aria-label="Pin mini control panel" aria-pressed="false"><i data-icon="pin"></i><span>Pin</span></button><button type="button" id="mc-expand" aria-label="Expand camera editor"><i data-icon="panel-top-open"></i><span>Edit</span></button><button type="button" id="mc-dock-release" aria-label="Release camera control"><i data-icon="circle-stop"></i><span>Release</span></button></div>
     </section>
     </div>
   </div>
-  <footer class="mc-demo-footer"><span><i data-icon="layers"></i>In-sim workspace</span><span>Interactive UI preview · not connected to MSFS</span></footer>
+  <footer class="mc-demo-footer"><span><i data-icon="layers"></i>In-sim workspace</span><span>Interactive UI preview - not connected to MSFS</span></footer>
   <div class="mc-dialog-shade" id="mc-dialog-shade" hidden><section class="mc-dialog" role="dialog" aria-modal="true" aria-labelledby="mc-dialog-title"><header class="mc-dialog-head"><h3 id="mc-dialog-title">Camera actions</h3><button type="button" id="mc-dialog-close" class="mc-icon-button" aria-label="Close dialog"><i data-icon="x"></i></button></header><div class="mc-dialog-body" id="mc-dialog-body"></div><div id="mc-dialog-error" class="mc-dialog-error" role="alert"></div><div class="mc-dialog-actions" id="mc-dialog-actions"></div></section></div>
   <div class="mc-toast" id="mc-toast" role="status" aria-live="polite" hidden><i data-icon="check-circle-2"></i><span id="mc-toast-text"></span></div>
 </div>

@@ -29,6 +29,7 @@ public:
 private:
     void setup();
     bool ensureClientEvents(std::size_t count);
+    void requestTitle();
 
     unsigned long long handle_ = 0;  // SimConnect HANDLE (an integer handle under WASM)
     std::vector<BackendEvent> staged_;

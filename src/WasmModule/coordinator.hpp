@@ -121,6 +121,7 @@ private:
     std::uint64_t epoch_ = 1;
     double nextConnectAt_ = 0, backoff_ = 1.0;
     Aircraft aircraft_;
+    std::string pendingTitle_;
     std::optional<profiles::ProfileSnapshot> profile_;
     profiles::HostSettings settings_;
     Qualification qual_;

@@ -1,5 +1,5 @@
 /*
- * FS Camera Studio — MSFS 2024 toolbar-panel workarounds.
+ * FS Camera Studio - MSFS 2024 toolbar-panel workarounds.
  * Kept in one small function so it can be tuned during in-sim testing. No-op in a normal browser.
  */
 (function (root) {

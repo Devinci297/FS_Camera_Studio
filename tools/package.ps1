@@ -26,7 +26,7 @@ if (Test-Path $project) { Remove-Item -Recurse -Force $project }
 Copy-Item -Recurse (Join-Path $root 'package') $project
 
 $definition = Join-Path $project 'PackageDefinitions\fs-camera-studio.xml'
-(Get-Content $definition -Raw).Replace('@VERSION@', $Version) | Set-Content -Encoding utf8 $definition
+[IO.File]::WriteAllText($definition, ([IO.File]::ReadAllText($definition)).Replace('@VERSION@', $Version), (New-Object Text.UTF8Encoding($false)))
 
 # Web UI
 $panelDir = Join-Path $project 'PackageSources\html_ui\InGamePanels\FSCameraStudio'
@@ -36,7 +36,10 @@ foreach ($f in 'app.css', 'app.js', 'bridge.js', 'icons.js', 'math.js', 'msfs-pa
 }
 
 # Panel pages: the shared index.html wrapped in the simulator's <ingame-ui> host, with the sim's CommBus library.
-$index = Get-Content (Join-Path $root 'ui\index.html') -Raw
+# Files are read and written as UTF-8 without BOM (Windows PowerShell's defaults would mangle non-ASCII text).
+$utf8 = New-Object Text.UTF8Encoding($false)
+$index = [IO.File]::ReadAllText((Join-Path $root 'ui\index.html'), $utf8)
+Copy-Item (Join-Path $root 'package\panel\panel-host.css') $panelDir
 $simHead = @'
 <script type="text/javascript" src="/JS/coherent.js"></script>
 <script type="text/javascript" src="/JS/common.js"></script>
@@ -50,15 +53,22 @@ $panels = @(
 )
 foreach ($p in $panels) {
     $html = $index
-    if ($html -notmatch '<div id="mc-sim"' -or $html -notmatch '<script src="math.js"></script>') {
-        throw 'ui\index.html no longer has the expected #mc-sim root and script order; update tools\package.ps1.'
+    if ($html -notmatch '<div id="mc-sim"' -or $html -notmatch '<script src="math.js"></script>' -or
+        $html -notmatch '<link rel="stylesheet" href="app.css">') {
+        throw 'ui\index.html no longer has the expected #mc-sim root, stylesheet and script order; update tools\package.ps1.'
     }
-    $html = $html.Replace('<link rel="stylesheet" href="app.css">', $simHead + '<link rel="stylesheet" href="app.css">')
-    $open = '<ingame-ui id="FSCSPanel" panel-id="' + $p.PanelId + '" title="' + $p.Title + '" class="ingameUiFrame panelInvisible" content-fit="true">'
+    # The browser preview's Content-Security-Policy would block the simulator's own scripts; the sim sandbox applies.
+    $html = [regex]::Replace($html, '<meta http-equiv="Content-Security-Policy"[^>]*>\s*', '')
+    $html = $html.Replace('<link rel="stylesheet" href="app.css">',
+        $simHead + '<link rel="stylesheet" href="app.css">' + "`n" + '<link rel="stylesheet" href="panel-host.css">')
+    $open = '<ingame-ui id="FSCSPanel" panel-id="' + $p.PanelId + '" title="' + $p.Title + '" class="ingameUiFrame panelInvisible">'
     $html = [regex]::Replace($html, '<div id="mc-sim"', ($open + "`n<div id=`"mc-sim`""), 1)
+    # The surface is set by a script file, not an inline script.
+    $surfaceJs = 'surface-' + $p.Surface + '.js'
+    [IO.File]::WriteAllText((Join-Path $panelDir $surfaceJs), "window.FSCS_SURFACE = '" + $p.Surface + "';`n", $utf8)
     $html = $html.Replace('<script src="math.js"></script>',
-        "</ingame-ui>`n<script>window.FSCS_SURFACE = '" + $p.Surface + "';</script>`n<script src=`"math.js`"></script>")
-    Set-Content -Encoding utf8 (Join-Path $panelDir $p.File) $html
+        "</ingame-ui>`n<script src=`"" + $surfaceJs + "`"></script>`n<script src=`"math.js`"></script>")
+    [IO.File]::WriteAllText((Join-Path $panelDir $p.File), $html, $utf8)
 }
 
 # WASM module

@@ -13,6 +13,7 @@
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt.lib")
 #else
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -378,12 +379,23 @@ void randomBytes(void* out, std::size_t n) {
 #if defined(_WIN32)
     BCryptGenRandom(nullptr, static_cast<PUCHAR>(out), static_cast<ULONG>(n), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
 #else
+    // In-sim getentropy() was observed to fill only the first few bytes, so it only seeds and stirs a SplitMix64
+    // stream together with the clock and a counter. IDs need uniqueness, not cryptographic strength.
+    static std::uint64_t state = 0;
+    static std::uint64_t counter = 0;
+    std::uint64_t fresh = 0;
+    getentropy(&fresh, sizeof(fresh));
+    timespec ts{};
+    clock_gettime(CLOCK_REALTIME, &ts);
+    state ^= fresh ^ (static_cast<std::uint64_t>(ts.tv_sec) * 0x9E3779B97F4A7C15ull) ^ static_cast<std::uint64_t>(ts.tv_nsec) ^
+             (++counter << 32) ^ reinterpret_cast<std::uintptr_t>(out);
     auto* p = static_cast<unsigned char*>(out);
     while (n > 0) {
-        const std::size_t chunk = n > 256 ? 256 : n;  // getentropy's documented limit
-        if (getentropy(p, chunk) != 0) break;
-        p += chunk;
-        n -= chunk;
+        std::uint64_t z = (state += 0x9E3779B97F4A7C15ull);
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        z ^= z >> 31;
+        for (int i = 0; i < 8 && n > 0; ++i, --n) *p++ = static_cast<unsigned char>(z >> (8 * i));
     }
 #endif
 }

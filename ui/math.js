@@ -1,10 +1,10 @@
 /*
- * FS Camera Studio — pose math shared by the editor UI and its tests.
+ * FS Camera Studio - pose math shared by the editor UI and its tests.
  *
- * Conventions (doc/protocol.md §1):
+ * Conventions (doc/protocol.md sec. 1):
  *  - Canonical frame FRD: x forward, y right, z down. A camera looks along local +x, its up is -z.
  *  - Orientation is a unit quaternion [x, y, z, w] rotating camera coordinates into the anchor frame,
- *    q = Rz(heading) · Ry(pitch) · Rx(bank). heading > 0 turns right, pitch > 0 looks up, bank > 0 rolls right.
+ *    q = Rz(heading) - Ry(pitch) - Rx(bank). heading > 0 turns right, pitch > 0 looks up, bank > 0 rolls right.
  *  - UI axes: X = right (FRD y), Y = up (-FRD z), Z = forward (FRD x). Meters.
  *  - Projection is stored in radians; the UI shows degrees.
  *
@@ -35,7 +35,7 @@
 
   /**
    * Build the camera-to-anchor quaternion from aerospace angles in degrees.
-   * Pitch is clamped to ±89° (the editor never produces a vertical view).
+   * Pitch is clamped to +/-89 deg (the editor never produces a vertical view).
    */
   function quatFromHpb(headingDeg, pitchDeg, bankDeg) {
     const h = degToRad(headingDeg) / 2;
@@ -54,7 +54,7 @@
 
   /**
    * Decompose a camera-to-anchor quaternion into { heading, pitch, bank } degrees.
-   * Pitch is reported within ±89° to match the editor's limits.
+   * Pitch is reported within +/-89 deg to match the editor's limits.
    */
   function hpbFromQuat(q) {
     const [x, y, z, w] = quatNormalize(q);
@@ -108,17 +108,17 @@
     return radToDeg(2 * Math.acos(clamp(dot, -1, 1)));
   }
 
-  /** FRD [forward, right, down] → UI { x: right, y: up, z: forward }. */
+  /** FRD [forward, right, down] > UI { x: right, y: up, z: forward }. */
   function uiFromFrd(frd) {
     return { x: frd[1], y: -frd[2], z: frd[0] };
   }
 
-  /** UI { x: right, y: up, z: forward } → FRD [forward, right, down]. */
+  /** UI { x: right, y: up, z: forward } > FRD [forward, right, down]. */
   function frdFromUi(ui) {
     return [ui.z, ui.x, -ui.y];
   }
 
-  /** Index into positionMetersFRD for a UI axis plus the sign that maps UI → FRD. */
+  /** Index into positionMetersFRD for a UI axis plus the sign that maps UI > FRD. */
   const UI_AXIS_TO_FRD = { x: { index: 1, sign: 1 }, y: { index: 2, sign: -1 }, z: { index: 0, sign: 1 } };
 
   function uuid() {
@@ -130,13 +130,13 @@
     else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    const hex = Array.from(bytes, b => ('0' + b.toString(16)).slice(-2)).join('');
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
   /**
-   * Transition easing (protocol v2 §2.1): cut = jump at the end, smoothstep3 (Smooth) = 3u² − 2u³,
-   * smoothstep5 (Cinematic) = 6u⁵ − 15u⁴ + 10u³.
+   * Transition easing (protocol v2 sec. 2.1): cut = jump at the end, smoothstep3 (Smooth) = 3u^2 - 2u^3,
+   * smoothstep5 (Cinematic) = 6u^5 - 15u^4 + 10u^3.
    */
   function ease(kind, u) {
     const t = clamp(u, 0, 1);
@@ -147,7 +147,7 @@
 
   const api = {
     DEG, PITCH_LIMIT_DEG, UI_AXIS_TO_FRD,
-    degToRad, radToDeg, clamp, wrapDeg,
+   degToRad, radToDeg, clamp, wrapDeg,
     quatNormalize, quatFromHpb, hpbFromQuat, quatMultiply, rotateVector, quatAngleDeg,
     uiFromFrd, frdFromUi, uuid, ease,
   };

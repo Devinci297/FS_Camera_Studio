@@ -1,7 +1,7 @@
 /*
- * FS Camera Studio — inline SVG icon set.
- * 24×24 viewBox, stroke = currentColor, stroke-width 2, round caps/joins, no fill.
- * icon(name) → <svg> element; hydrateIcons(root) replaces <i data-icon="name"> placeholders.
+ * FS Camera Studio - inline SVG icon set.
+ * 24x24 viewBox, stroke = currentColor, stroke-width 2, round caps/joins, no fill.
+ * icon(name) > <svg> element; hydrateIcons(root) replaces <i data-icon="name"> placeholders.
  * Uses only DOM Level 2 calls (setAttribute/appendChild/replaceChild) so it runs in Coherent GT.
  */
 (function (root) {

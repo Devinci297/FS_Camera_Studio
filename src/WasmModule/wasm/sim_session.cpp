@@ -13,7 +13,7 @@ namespace fscs::host {
 namespace {
 
 enum : DWORD { kEvtAircraftLoaded = 1, kEvtFlightLoaded, kEvtSim, kEvtPause, kEvtTest = 900, kEvtInputBase = 1000 };
-enum : DWORD { kReqAircraftState = 1, kReqTitle };
+enum : DWORD { kReqAircraftState = 1, kReqTitle, kReqTitleOnce };
 enum : DWORD { kDefTitle = 1 };
 enum : DWORD { kInputGroup = 1, kTestInputGroup = 2 };
 enum : DWORD { kNotifyInput = 1 };
@@ -114,6 +114,11 @@ bool SimSession::mapTestInput(const std::string& definition) {
     return true;
 }
 
+void SimSession::requestTitle() {
+    // The periodic CHANGED request may have reported the title before the aircraft was known; ask once more.
+    if (handle_) SimConnect_RequestDataOnSimObject(asHandle(handle_), kReqTitleOnce, kDefTitle, SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD_ONCE);
+}
+
 bool SimSession::enumerateControllers() { return handle_ && SUCCEEDED(SimConnect_EnumerateControllers(asHandle(handle_))); }
 
 void SimSession::onRecv(const void* raw, unsigned long) {
@@ -133,7 +138,10 @@ void SimSession::onRecv(const void* raw, unsigned long) {
             break;
         case SIMCONNECT_RECV_ID_EVENT_FILENAME: {
             const auto* f = static_cast<const SIMCONNECT_RECV_EVENT_FILENAME*>(data);
-            if (f->uEventID == kEvtAircraftLoaded) staged_.push_back(backend_event::AircraftLoaded{f->szFileName});
+            if (f->uEventID == kEvtAircraftLoaded) {
+                staged_.push_back(backend_event::AircraftLoaded{f->szFileName});
+                requestTitle();
+            }
             else if (f->uEventID == kEvtFlightLoaded) staged_.push_back(backend_event::FlightLoaded{f->szFileName});
             break;
         }
@@ -154,12 +162,15 @@ void SimSession::onRecv(const void* raw, unsigned long) {
         }
         case SIMCONNECT_RECV_ID_SYSTEM_STATE: {
             const auto* s = static_cast<const SIMCONNECT_RECV_SYSTEM_STATE*>(data);
-            if (s->dwRequestID == kReqAircraftState && s->szString[0]) staged_.push_back(backend_event::AircraftLoaded{s->szString});
+            if (s->dwRequestID == kReqAircraftState && s->szString[0]) {
+                staged_.push_back(backend_event::AircraftLoaded{s->szString});
+                requestTitle();
+            }
             break;
         }
         case SIMCONNECT_RECV_ID_SIMOBJECT_DATA: {
             const auto* d = static_cast<const SIMCONNECT_RECV_SIMOBJECT_DATA*>(data);
-            if (d->dwRequestID == kReqTitle) {
+            if (d->dwRequestID == kReqTitle || d->dwRequestID == kReqTitleOnce) {
                 const char* title = reinterpret_cast<const char*>(&d->dwData);
                 staged_.push_back(backend_event::AircraftTitle{std::string(title, strnlen(title, 256))});
             }

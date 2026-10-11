@@ -632,7 +632,9 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                 Aircraft a = aircraftFromPath(e.aircraftPath);
                 if (a.aircraftPath == aircraft_.aircraftPath && a.modelKey == aircraft_.modelKey) return;
                 const bool modelChanged = a.modelKey != aircraft_.modelKey;
-                a.title = modelChanged ? std::string() : aircraft_.title;
+                // The title can arrive before the aircraft-loaded notification; keep it rather than drop it.
+                a.title = !pendingTitle_.empty() ? pendingTitle_ : modelChanged ? std::string() : aircraft_.title;
+                pendingTitle_.clear();
                 aircraft_ = a;
                 if (modelChanged) profile_.reset();
                 invalidateSession("The aircraft changed.", now);
@@ -641,7 +643,11 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                                           {"livery", aircraft_.title.empty() ? json(nullptr) : json(aircraft_.title)}});
                 emitCapabilities();
             } else if constexpr (std::is_same_v<T, backend_event::AircraftTitle>) {
-                if (e.title == aircraft_.title || !aircraft_.known()) return;
+                if (!aircraft_.known()) {
+                    pendingTitle_ = e.title;
+                    return;
+                }
+                if (e.title == aircraft_.title) return;
                 aircraft_.title = e.title;  // a livery change keeps the model, so the profile stays compatible
                 emit_("AircraftChanged", {{"title", aircraft_.title}, {"aircraftPath", aircraft_.aircraftPath},
                                           {"modelKey", aircraft_.modelKey}, {"livery", aircraft_.title}});
