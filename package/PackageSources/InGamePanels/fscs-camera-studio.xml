@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full editor (design 2.0 §4.1). Size/position attributes are percentages of the screen; MSFS 2024 may ignore
+     them (qualification gate H01). -->
+<SimBase.Document Type="InGamePanels" version="1,0">
+    <Filename>fscs-camera-studio.spb</Filename>
+    <InGamePanels.InGamePanelDefinition id="PANEL_FSCS_CAMERA_STUDIO" Name="Camera Studio"
+        url="html_ui/InGamePanels/FSCameraStudio/main.html" resizeDirections="Both"
+        minWidth="40" minHeight="45" defaultWidth="56" defaultHeight="70" defaultTop="12" defaultRight="22"
+        icon="ICON_TOOLBAR_FSCS_CAMERA_STUDIO" buttonVisible="true">
+    </InGamePanels.InGamePanelDefinition>
+</SimBase.Document>

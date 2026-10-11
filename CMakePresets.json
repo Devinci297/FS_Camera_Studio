@@ -1,0 +1,15 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "tests",
+      "displayName": "Native tests (Windows x64 MSVC)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "binaryDir": "${sourceDir}/build/tests"
+    }
+  ],
+  "buildPresets": [ { "name": "tests", "configurePreset": "tests", "configuration": "Debug" } ],
+  "testPresets": [ { "name": "tests", "configurePreset": "tests", "configuration": "Debug", "output": { "outputOnFailure": true } } ]
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MSFS 2024 project file for fspackagetool. tools/package.ps1 stages a copy under build/project/ and builds it. -->
+<Project Version="2" Name="fs-camera-studio" FolderName="Packages" MetadataFolderName="PackagesMetadata">
+    <OutputDirectory>.</OutputDirectory>
+    <TemporaryOutputDirectory>_PackageInt</TemporaryOutputDirectory>
+    <Packages>
+        <Package>PackageDefinitions\fs-camera-studio.xml</Package>
+    </Packages>
+</Project>

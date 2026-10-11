@@ -1,0 +1,13 @@
+# Build output
+/build/
+/out/
+/dist/
+
+# Local design material (kept on disk, not published)
+/Docs/
+
+# Local machine configuration
+CMakeUserPresets.json
+.vs/
+.vscode/
+*.user
