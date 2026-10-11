@@ -14,6 +14,20 @@ Geo world(Geo a, core::Vec3 v) { return {a.lat+v.x/R/core::kDegToRad,std::remain
 double distanceNm(Geo a, Geo b) { auto d=local(a,b); return std::hypot(d.x,d.y)/1852.0; }
 bool validCode(const std::string& s) { return s.size()>=3&&s.size()<=8&&std::all_of(s.begin(),s.end(),[](char c){return (c>='A'&&c<='Z')||(c>='0'&&c<='9');}); }
 std::string stableId(const std::string& key) { char s[37]; auto a=js::crc32(key), b=js::crc32("fscs-airport:"+key); std::snprintf(s,sizeof(s),"%08x-%04x-5%03x-a%03x-%08x%04x",a,b&65535,(b>>16)&4095,a&4095,b,(a>>16)&65535); return s; }
+json parkingIdentity(int type, std::uint32_t number, int name, int suffix) {
+ const bool gate=(type>=8&&type<=10)||type==15||name==10||(name>=12&&name<=37);
+ const char* names[]={"","Parking","North parking","Northeast parking","East parking","Southeast parking","South parking","Southwest parking","West parking","Northwest parking","Gate","Dock"};
+ std::string label;
+ if(name>=12&&name<=37)label="Gate "+std::string(1,char('A'+name-12));
+ else if(name>0&&name<12)label=std::string(names[name])+" ";
+ else label=gate?"Gate ":type==11?"Dock ":type==12?"Fuel parking ":"Parking ";
+ label+=std::to_string(number);
+ if(suffix>=12&&suffix<=37)label+=char('A'+suffix-12);
+ else if(suffix>0&&suffix<12)label+=" "+std::string(names[suffix]);
+ auto key=std::to_string(name)+":"+std::to_string(number);
+ if(suffix!=0)key+=":"+std::to_string(suffix); // keep IDs stable for unsuffixed saved stands
+ return {{"name",label},{"key",key},{"gate",gate},{"type",type},{"number",number},{"nameCode",name},{"suffixCode",suffix}};
+}
 json generate(const json& f,const json& o,std::vector<std::string>& notes) {
  const auto code=js::str(f,"icao"); const auto origin=geo(f);
  if(!validCode(code)||!origin.valid()) {notes.push_back("Airport location is missing or invalid.");return nullptr;}

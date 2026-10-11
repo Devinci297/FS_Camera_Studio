@@ -23,7 +23,7 @@ def start(title,subtitle):
  c.setFillColor(colors.HexColor('#67dbc5'));c.setFont('Helvetica-Bold',10);c.drawString(38,H-29,'FS CAMERA STUDIO  /  MSFS 2024')
  c.setFillColor(colors.white);c.setFont('Helvetica-Bold',24);c.drawString(38,H-62,title)
  c.setFont('Helvetica',10);c.drawString(38,H-83,subtitle)
- c.setFillColor(GRAY);c.setFont('Helvetica',8);c.drawString(38,23,'Tester build 0.1.1-test.20261011.1  |  11 October 2026');c.drawRightString(W-38,23,str(page))
+ c.setFillColor(GRAY);c.setFont('Helvetica',8);c.drawString(38,23,'Tester build 0.1.1-test.20261011.2  |  11 October 2026');c.drawRightString(W-38,23,str(page))
  c.bookmarkPage('page'+str(page));c.addOutlineEntry(title,'page'+str(page),0)
  y=H-126
 def text(value,caption=False):
@@ -60,7 +60,7 @@ text('Hold the right mouse button over the simulator scene and drag. Move with W
 heading('4  Return to normal simulator control')
 text('<b>Compact</b> closes the editor and keeps quick access available. <b>Release camera</b> hands camera control back to MSFS. Closing the editor alone keeps the custom camera active.')
 heading('First-flight checks')
-text('Confirm that cockpit switches remain clickable, the MSFS top toolbar appears on hover, and right-drag stays smooth. If control needs qualification, use Settings > Run axis check while parked. Airport world views and physical head-tracking devices still need in-sim testing on your configuration.')
+text('Confirm that cockpit switches remain clickable, the MSFS top toolbar appears on hover, and right-drag stays smooth. Camera directions are configured automatically; no axis calibration is required. Airport world views and physical head-tracking devices still need in-sim testing on your configuration.')
 end()
 
 start('Edit a camera','Cameras > Position & Lens')

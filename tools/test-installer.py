@@ -3,6 +3,7 @@
 Requires Windows, MSFS closed, and no existing installer-managed FS Camera Studio.
 Never changes the real Community package or MSFS profile storage.
 """
+import argparse
 import hashlib
 import json
 import os
@@ -14,8 +15,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.1.1-test.20261011.1'
-HARNESS = '--test-harness' in sys.argv
+parser = argparse.ArgumentParser()
+parser.add_argument('--version', default='0.1.1-test.20261011.2')
+parser.add_argument('--live-receipt', default='build/review/airport-tracking-fix/installed.json')
+parser.add_argument('--test-harness', action='store_true')
+args = parser.parse_args()
+VERSION = args.version
+HARNESS = args.test_harness
 SETUP = ROOT / (f'build/installer-harness/{VERSION}/FS-Camera-Studio-{VERSION}-Setup.exe' if HARNESS else f'dist/{VERSION}/FS-Camera-Studio-{VERSION}-Setup.exe')
 INFO = json.loads((SETUP.parent / 'BUILD-INFO.json').read_text(encoding='utf-8'))
 CONTROL = Path(os.environ['LOCALAPPDATA']) / 'FS Camera Studio'
@@ -29,7 +35,7 @@ def inventory(path):
 
 
 baseline = inventory(live_package)
-assert baseline == json.loads((ROOT/'build/review/airport-controls-20261011/installed.json').read_text(encoding='utf-8'))['files']
+assert baseline == json.loads((ROOT/args.live_receipt).read_text(encoding='utf-8'))['files']
 test = ROOT / 'build/installer-tests' / str(uuid.uuid4())
 community = test / 'Packages/Community'
 community.mkdir(parents=True)

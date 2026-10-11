@@ -36,3 +36,16 @@ TEST_CASE("airports: invalid geometry and empty selected features produce no cam
  CHECK(ap::generate(airportFixture(),{{"runways",false},{"parking",false},{"taxi",false},{"tower",false}},notes).is_null());
  CHECK(!notes.empty());
 }
+TEST_CASE("airports: scenery stand names preserve direction letters suffixes and distinct cameras") {
+ CHECK(ap::parkingIdentity(9,12,12,0)["name"]==json("Gate A12"));
+ CHECK(ap::parkingIdentity(9,12,10,13)["name"]==json("Gate 12B"));
+ CHECK(ap::parkingIdentity(3,5,3,0)["name"]==json("Northeast parking 5"));
+ CHECK(ap::parkingIdentity(11,2,11,0)["name"]==json("Dock 2"));
+ CHECK(ap::parkingIdentity(3,9,12,0)["gate"]==json(true));
+ CHECK(ap::parkingIdentity(9,12,12,0)["key"]==json("12:12"));
+ auto f=airportFixture();f["parking"]=json::array();
+ for(int suffix:{0,12,13}) {auto p=ap::parkingIdentity(9,12,10,suffix);p.update({{"north",100},{"east",100},{"heading",180}});f["parking"].push_back(p);}
+ std::vector<std::string> notes;auto p=ap::generate(f,{{"runways",false},{"taxi",false},{"tower",false}},notes);
+ CHECK_EQ(p["cameras"].size(),std::size_t{3});CHECK_EQ(p["categories"][0]["name"],json("Gates"));
+ CHECK(p["cameras"][0]["id"]!=p["cameras"][1]["id"]);CHECK(p["cameras"][1]["id"]!=p["cameras"][2]["id"]);
+}

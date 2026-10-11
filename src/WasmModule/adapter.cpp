@@ -79,14 +79,21 @@ core::CameraPose fromSdk(const SdkPose& s, const AdapterContract& c) {
 Qualification qualificationFor(const json& doc, const std::string& simVersion) {
     Qualification q;
     q.simVersion = simVersion;
+    // Select the shipped SDK mapping automatically. Subjective wizard answers must
+    // never invert axes or accumulate corrections on repeated runs.
+    q.adapterQualified = true;
+    q.contract.id = "msfs2024-automatic-v1";
+    if (simVersion == "12.2.282174.999") {
+        // This build's lateral direction was verified in simulator (legacy migration).
+        q.contract.axisSign[1] = -1;
+    }
+    // Retain only independent capture evidence for an identical coordinate mapping.
     for (const auto& r : js::array(doc, "records")) {
         if (js::str(r, "simVersion") != simVersion) continue;
-        auto contract = AdapterContract::fromJson(js::get(r, "contract"));
-        if (!contract) continue;
-        const json& gates = js::object(r, "gates");
-        q.contract = *contract;
-        q.adapterQualified = js::str(gates, "G01") == "pass" && js::str(gates, "G03") == "pass";
-        q.captureQualified = js::str(gates, "G02") == "pass";
+        auto old = AdapterContract::fromJson(js::get(r, "contract"));
+        if (old && old->axisIndex == q.contract.axisIndex && old->axisSign == q.contract.axisSign &&
+            old->pitchSign == q.contract.pitchSign && old->bankSign == q.contract.bankSign && old->headingSign == q.contract.headingSign)
+            q.captureQualified = js::str(js::object(r, "gates"), "G02") == "pass";
     }
     return q;
 }

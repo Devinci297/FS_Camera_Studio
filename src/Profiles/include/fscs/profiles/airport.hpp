@@ -9,6 +9,7 @@ Geo world(Geo origin, core::Vec3 ned);
 double distanceNm(Geo a, Geo b);
 bool validCode(const std::string& code);
 std::string stableId(const std::string& key);
+json parkingIdentity(int type, std::uint32_t number, int name, int suffix);
 // Facility document is adapter-neutral, in degrees/meters. Missing features remain missing.
 json generate(const json& facility, const json& options, std::vector<std::string>& notes);
 json merge(const json& saved, const json& generated, bool replaceGenerated);

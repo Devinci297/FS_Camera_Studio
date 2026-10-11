@@ -261,3 +261,11 @@ TEST_CASE("effects: stationary aircraft is still and touchdown does not trigger 
     for (int i=0;i<100;++i) fx.tick(.02,motion,settings,true);
     CHECK_NEAR(fx.offset().length(),0.,1e-9);
 }
+TEST_CASE("adapter: automatic mapping ignores accumulated visual wizard corrections") {
+    fscs::host::AdapterContract wrong;wrong.pitchSign=1;wrong.headingSign=-1;wrong.axisSign={-1,1,1};
+    const nlohmann::json saved={{"records",nlohmann::json::array({{{"simVersion","12.2.282174.999"},{"contract",wrong.toJson()},{"gates",{{"G01","pass"},{"G03","pass"},{"G02","pass"}}}}})}};
+    const auto q=fscs::host::qualificationFor(saved,"12.2.282174.999");
+    CHECK(q.adapterQualified);CHECK(!q.captureQualified);
+    CHECK_NEAR(q.contract.axisSign[0],1,1e-9);CHECK_NEAR(q.contract.axisSign[1],-1,1e-9);CHECK_NEAR(q.contract.axisSign[2],-1,1e-9);
+    CHECK_NEAR(q.contract.pitchSign,-1,1e-9);CHECK_NEAR(q.contract.headingSign,1,1e-9);
+}

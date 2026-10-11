@@ -58,6 +58,7 @@ bool WasmCamera::tryConnect() {
 }
 
 void WasmCamera::disconnect() {
+    submitted_.reset();
     if (!subscribed_) return;
     fsCameraUnsubscribeToStatusUpdate();
     subscribed_ = false;
@@ -77,7 +78,7 @@ bool WasmCamera::requestStatus() {
     return true;
 }
 
-bool WasmCamera::acquire(const std::string& clientId) { return fsCameraAcquire(clientId.c_str()); }
+bool WasmCamera::acquire(const std::string& clientId) { submitted_.reset(); return fsCameraAcquire(clientId.c_str()); }
 
 std::optional<bool> WasmCamera::headTracking() {
     if (!subscribed_) return std::nullopt;
@@ -95,6 +96,7 @@ bool WasmCamera::setHeadTracking(bool enabled) {
 }
 
 bool WasmCamera::release(const std::string& definitionName) {
+    submitted_.reset();
     interactionKnown_ = false;
     // An empty definition returns to the previously used native camera (verified per build in qualification).
     return fsCameraRelease(definitionName.c_str());
@@ -109,8 +111,21 @@ bool WasmCamera::submitPose(const SdkPose& p) {
     d.rotationReferential = toFs(p.referential);
     d.rotationReferentialObjectId = kUserObject;
     d.fov = p.fovRad;
-    // Explicit rotation only; the TARGETED mask is never combined with these submissions.
-    return fsCameraSet(&d, FS_CAMERA_DATA_MASK_ALL_ROTATION);
+    int mask = FS_CAMERA_DATA_MASK_ALL_ROTATION;
+    if (p.trackUserAircraft) {
+        // A native target follows the user aircraft between telemetry samples.
+        // Position remains fixed in WORLD; only the target uses SIMOBJECT.
+        d.rotationReferential = FS_POSITION_REFERENTIAL_SIMOBJECT;
+        d.targetedPosition = {0, 0, 0};
+        mask = FS_CAMERA_DATA_MASK_ALL_TARGETED;
+    }
+    // Do not repeatedly relocate a stationary world camera for look/zoom edits.
+    if (p.referential == Referential::World && submitted_ && submitted_->referential == p.referential &&
+        p.x == submitted_->x && p.y == submitted_->y && p.z == submitted_->z)
+        mask &= ~FS_CAMERA_DATA_MASK_POSITION;
+    if (!fsCameraSet(&d, mask)) return false;
+    submitted_ = p;
+    return true;
 }
 
 bool WasmCamera::setFlag(CameraFlag flag, bool enabled) {

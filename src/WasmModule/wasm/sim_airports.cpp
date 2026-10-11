@@ -14,7 +14,7 @@ constexpr DWORD kAirportDef=70,kAirportIdentityDef=71,kNearby=80;
 struct AirportData {double lat,lon,alt;char name[64];double towerLat,towerLon,towerAlt;};
 struct AirportIdentityData {char icao[8];double lat,lon;};
 struct RunwayData {double lat,lon,alt;float heading,length,width;int primary,primaryDesignator,secondary,secondaryDesignator;};
-struct ParkingData {int type,number,name;float heading,radius,east,north;};
+struct ParkingData {int type;std::uint32_t number;int name,suffix;float heading,radius,east,north;};
 struct PointData {float east,north;};
 struct PathData {int type,start,end;float width;};
 #pragma pack(pop)
@@ -46,7 +46,7 @@ bool SimSession::requestAirport(const std::string& code,std::uint32_t id){
  if(!airportDefinitionReady_){
   const char* fields[]={"OPEN AIRPORT","LATITUDE","LONGITUDE","ALTITUDE","NAME64","TOWER_LATITUDE","TOWER_LONGITUDE","TOWER_ALTITUDE",
     "OPEN RUNWAY","LATITUDE","LONGITUDE","ALTITUDE","HEADING","LENGTH","WIDTH","PRIMARY_NUMBER","PRIMARY_DESIGNATOR","SECONDARY_NUMBER","SECONDARY_DESIGNATOR","CLOSE RUNWAY",
-    "OPEN TAXI_PARKING","TYPE","NUMBER","NAME","HEADING","RADIUS","BIAS_X","BIAS_Z","CLOSE TAXI_PARKING",
+    "OPEN TAXI_PARKING","TYPE","NUMBER","NAME","SUFFIX","HEADING","RADIUS","BIAS_X","BIAS_Z","CLOSE TAXI_PARKING",
     "OPEN TAXI_POINT","BIAS_X","BIAS_Z","CLOSE TAXI_POINT",
     "OPEN TAXI_PATH","TYPE","START","END","WIDTH","CLOSE TAXI_PATH","CLOSE AIRPORT"};
   for(auto field:fields)if(FAILED(SimConnect_AddToFacilityDefinition(h,kAirportDef,field)))return false;
@@ -82,8 +82,9 @@ bool SimSession::onAirportRecv(const void* raw,unsigned long size){
  const auto* bytes=reinterpret_cast<const char*>(raw)+offsetof(SIMCONNECT_RECV_FACILITY_DATA,Data);
  if(d->Type==SIMCONNECT_FACILITY_DATA_AIRPORT && count>=sizeof(AirportData)){AirportData a;std::memcpy(&a,bytes,sizeof(a));f.update({{"lat",a.lat},{"lon",a.lon},{"altitude",a.alt},{"name",std::string(a.name,strnlen(a.name,64))},{"tower",{{"lat",a.towerLat},{"lon",a.towerLon},{"altitude",a.towerAlt}}}});}
  else if(d->Type==SIMCONNECT_FACILITY_DATA_RUNWAY && count>=sizeof(RunwayData)&&f["runways"].size()<100){RunwayData r;std::memcpy(&r,bytes,sizeof(r));f["runways"].push_back({{"lat",r.lat},{"lon",r.lon},{"altitude",r.alt},{"heading",r.heading},{"length",r.length},{"width",r.width},{"primary",runwayName(r.primary,r.primaryDesignator)},{"secondary",runwayName(r.secondary,r.secondaryDesignator)}});}
- else if(d->Type==SIMCONNECT_FACILITY_DATA_TAXI_PARKING && count>=sizeof(ParkingData)&&f["parking"].size()<3000){ParkingData p;std::memcpy(&p,bytes,sizeof(p));bool gate=(p.type>=8&&p.type<=10)||p.type==15;std::string prefix=gate?"Gate ":"Parking ";if(p.name>=12&&p.name<=37)prefix+=char('A'+p.name-12);
-  f["parking"].push_back({{"type",p.type},{"name",prefix+std::to_string(p.number)},{"key",std::to_string(p.name)+":"+std::to_string(p.number)},{"gate",gate},{"heading",p.heading},{"radius",p.radius},{"east",p.east},{"north",p.north}});}
+ else if(d->Type==SIMCONNECT_FACILITY_DATA_TAXI_PARKING && count>=sizeof(ParkingData)&&f["parking"].size()<3000){ParkingData p;std::memcpy(&p,bytes,sizeof(p));
+  if(p.type!=0&&p.type!=13){auto stand=profiles::airport::parkingIdentity(p.type,p.number,p.name,p.suffix);
+   stand.update({{"heading",p.heading},{"radius",p.radius},{"east",p.east},{"north",p.north}});f["parking"].push_back(stand);}}
  else if(d->Type==SIMCONNECT_FACILITY_DATA_TAXI_POINT && count>=sizeof(PointData)&&d->ItemIndex<10000){PointData p;std::memcpy(&p,bytes,sizeof(p));while(f["points"].size()<=d->ItemIndex)f["points"].push_back(nullptr);f["points"][d->ItemIndex]={{"east",p.east},{"north",p.north}};}
  else if(d->Type==SIMCONNECT_FACILITY_DATA_TAXI_PATH && count>=sizeof(PathData)&&f["paths"].size()<20000){PathData p;std::memcpy(&p,bytes,sizeof(p));f["paths"].push_back({{"type",p.type},{"start",p.start},{"end",p.end},{"width",p.width}});}
  return true;

@@ -5,8 +5,17 @@ const assert=require('node:assert/strict');const path=require('node:path');
  const page=await browser.newPage({viewport:{width:1100,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto('file:///'+path.resolve(process.argv[2]||'ui/index.html').replaceAll('\\','/')+'?surface=main');
  await page.waitForFunction(()=>window.FSCApp.state.snapshot);
+ await page.locator('#mc-nav-settings').click();
+ assert.equal(await page.locator('#mc-qual-run').isVisible(),false,'manual axis wizard is removed');
+ assert.equal(await page.locator('#mc-setting-unqualified').isVisible(),false);
+ assert.match(await page.locator('#mc-qual-state').innerText(),/automatically/);
+ await page.locator('#mc-nav-cameras').click();
  const xml='<FSData><Airport ident="KAAA" name="Test airport" lat="40" lon="-90" alt="100M"><Runway lat="40" lon="-90" alt="100M" heading="90" length="2000M" width="40M" number="09" designator="LEFT"/><TaxiwaySign lat="40.001" lon="-90" heading="45" label="A / B"/><TaxiwayParking type="GATE_SMALL" name="GATE_A" number="1" lat="40.002" lon="-90" heading="90"/><TaxiwayParking name="Missing location" number="2"/><TaxiwayPoint index="0" lat="40" lon="-90"/><TaxiwayPoint index="1" lat="40.001" lon="-90"/><TaxiwayPath type="TAXI" start="0" end="1" width="20M"/></Airport></FSData>';
  const parsed=await page.evaluate(text=>FSCApp.parseAirportXml(text),xml);
+ assert.equal(parsed.parking[0].name,'Gate A1');assert.equal(parsed.parking[0].key,'12:1');
+ const suffixXml=xml.replace('name="GATE_A" number="1"','name="GATE" number="12" suffix="GATE_B"');
+ const suffixParsed=await page.evaluate(text=>FSCApp.parseAirportXml(text),suffixXml);
+ assert.equal(suffixParsed.parking[0].name,'Gate 12B');assert.equal(suffixParsed.parking[0].key,'10:12:13');
  assert.equal(parsed.icao,'KAAA');assert.equal(parsed.runways[0].primary,'09L');assert.equal(parsed.runways[0].secondary,'27R');assert.equal(parsed.signs.length,1);assert.equal(parsed.parking[0].gate,true);assert.equal(parsed.parking[1].north,NaN);
  await page.evaluate(()=>{
    const app=FSCApp,S=app.state;window.airportCalls=[];const original=app.bridge.request;

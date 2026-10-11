@@ -452,71 +452,9 @@ void ModuleApp::handle(const Command& c, double now) {
         return reply(c, AckStatus::Completed, {}, {{"text", text}});
     }
 
-    // In-panel axis check (gates G01 and G03) ------------------------------------------------------------------
-    if (a == "QualificationStart") {
-        coord_.setQualificationSession(true, now);
-        return reply(c, AckStatus::Completed, {}, {{"simVersion", coord_.simVersion()},
-                                                  {"contract", coord_.qualificationState().contract.toJson()},
-                                                  {"axes", {"forward", "right", "up", "pitch", "heading", "bank"}}});
-    }
-    if (a == "QualificationProbe" || a == "QualificationRestore") {
-        const auto* prof = coord_.profile();
-        const auto* cam = prof ? prof->camera(coord_.activeCameraId()) : nullptr;
-        if (!cam) return reply(c, AckStatus::Rejected, "Show a cockpit view in the simulator first.");
-        core::CameraPose pose = cam->pose;
-        std::string expect = "The view returned to the saved position.";
-        if (a == "QualificationProbe") {
-            const std::string axis = js::str(p, "axis");
-            core::Pbh pbh = pose.orientation.toPbh();
-            if (axis == "forward") { pose.positionFRD.x += 0.3; expect = "The view should move about 30 cm forward."; }
-            else if (axis == "right") { pose.positionFRD.y += 0.3; expect = "The view should move about 30 cm to the right."; }
-            else if (axis == "up") { pose.positionFRD.z -= 0.3; expect = "The view should move about 30 cm up."; }
-            else if (axis == "pitch") { pbh.pitchDeg += 15; expect = "The view should tilt 15 degrees up."; }
-            else if (axis == "heading") { pbh.headingDeg += 15; expect = "The view should turn 15 degrees to the right."; }
-            else if (axis == "bank") { pbh.bankDeg += 15; expect = "The view should roll 15 degrees clockwise (right side down)."; }
-            else return reply(c, AckStatus::Rejected, "Unknown axis.");
-            pose.orientation = core::Quat::fromPbh(pbh);
-        }
-        if (!coord_.previewPose(pose)) return reply(c, AckStatus::Rejected, "Camera Studio must have camera control to run the check.");
-        return reply(c, AckStatus::Completed, {}, {{"expect", expect}});
-    }
-    if (a == "QualificationRecord") {
-        const json& ans = js::object(p, "answers");
-        AdapterContract contract = coord_.qualificationState().contract;
-        bool wrong = false, complete = true;
-        auto apply = [&](const char* key, double& sign) {
-            const std::string v = js::str(ans, key);
-            if (v == "reversed") sign = -sign;
-            else if (v == "wrong") wrong = true;
-            else if (v != "correct") complete = false;
-        };
-        apply("forward", contract.axisSign[0]);
-        apply("right", contract.axisSign[1]);
-        apply("up", contract.axisSign[2]);
-        apply("pitch", contract.pitchSign);
-        apply("heading", contract.headingSign);
-        apply("bank", contract.bankSign);
-        if (!complete) return reply(c, AckStatus::Rejected, "Answer every step before recording.");
-        contract.id = "msfs2024-wasm-measured-v2-" + coord_.simVersion();
-        const bool g01 = !wrong && contract.valid();
-        const bool g03 = js::str(p, "recall") == "pass";
-        json nav = navigation();
-        json records = json::array();
-        for (const auto& r : js::array(js::object(nav, "qualification"), "records"))
-            if (js::str(r, "simVersion") != coord_.simVersion()) records.push_back(r);
-        records.push_back({{"simVersion", coord_.simVersion()},
-                           {"moduleVersion", appVersion_},
-                           {"contract", contract.toJson()},
-                           {"gates", {{"G01", g01 ? "pass" : "fail"}, {"G03", g03 ? "pass" : "fail"}, {"G02", "untested"}}},
-                           {"notes", js::str(p, "notes").substr(0, 500)}});
-        nav["qualification"] = {{"records", records}};
-        CommitRequest req;
-        req.navigation = nav;
-        req.requestId = c.uiInstanceId + ":" + c.requestId;
-        reply(c, AckStatus::Pending, {}, {{"G01", g01 ? "pass" : "fail"}, {"G03", g03 ? "pass" : "fail"}});
-        commit(std::move(req), {c.requestId, "qualification", working_.draftRevision, {{"g01", g01}, {"g03", g03}}, {}}, now);
-        return;
-    }
+    // Old panel versions cannot run visual probes or overwrite the automatic mapping.
+    if (a == "QualificationStart" || a == "QualificationProbe" || a == "QualificationRestore" || a == "QualificationRecord")
+        return reply(c, AckStatus::Rejected, "Camera directions are configured automatically. Update the panel to remove the old axis check.");
     if (a == "QualificationEnd") {
         coord_.setQualificationSession(false, now);
         return reply(c, AckStatus::Completed);

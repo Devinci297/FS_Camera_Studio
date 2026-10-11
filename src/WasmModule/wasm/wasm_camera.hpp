@@ -34,6 +34,7 @@ public:
 
 private:
     bool subscribed_ = false;
+    std::optional<SdkPose> submitted_;
     bool interactionKnown_ = false, interactionOn_ = false;
     std::vector<BackendEvent> staged_;
 };

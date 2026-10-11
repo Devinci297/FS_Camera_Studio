@@ -96,8 +96,8 @@ TEST_CASE("module: creating a profile for the loaded aircraft opens it and match
     CHECK_EQ(js::str(m.ackFor(id), "status"), std::string("Pending"));
     CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{1});
     CHECK(m.app.workingProfile().is_object());
-    CHECK(m.app.coordinator().canActivate() == false);  // adapter not qualified by default
-    CHECK(m.app.coordinator().blockReason().find("axis check") != std::string::npos);
+    CHECK(m.app.coordinator().canActivate());  // automatic mapping requires no wizard
+    CHECK(m.app.coordinator().blockReason().empty());
 }
 
 TEST_CASE("module: drafts are module-owned, mirrored to every surface, and saved as one transaction") {
@@ -289,30 +289,15 @@ TEST_CASE("module: text focus in a panel suppresses bindings except Release Came
     CHECK(m.app.coordinator().ownership() == Ownership::Observing);  // the view-1 key was ignored
 }
 
-TEST_CASE("module: the in-panel axis check qualifies the build and corrects a reversed sign") {
-    ModuleRig m;
-    m.flight();
-    m.panel("CreateProfile", {{"name", "Cams"}, {"forAircraft", true}});
-    CHECK(!m.app.coordinator().canActivate());  // unqualified build
-    m.panel("QualificationStart");
+TEST_CASE("module: camera directions are automatic and stale panels cannot flip them") {
+    ModuleRig m;m.flight();m.panel("CreateProfile", {{"name", "Cams"}, {"forAircraft", true}});
     CHECK(m.app.coordinator().canActivate());
-    const std::string pilot = js::str(m.app.workingProfile(), "defaultCameraId");
-    m.panel("ActivateCamera", {{"cameraId", pilot}});
-    m.app.onEvent(be::CameraStatus{SdkAvailability::Acquired, false}, m.t);
-    m.frame();
-    m.drain();
-    const auto probe = m.panel("QualificationProbe", {{"axis", "forward"}});
-    CHECK_EQ(js::str(m.ackFor(probe), "status"), std::string("Completed"));
-    m.frame();
-    CHECK_NEAR(m.camera.submitted.back().z, 0.3, 1e-9);  // default contract: forward -> SDK z
-    const double pitchSignBefore = m.app.coordinator().qualificationState().contract.pitchSign;
-    m.panel("QualificationRecord", {{"answers", {{"forward", "correct"}, {"right", "correct"}, {"up", "correct"},
-                                                 {"pitch", "reversed"}, {"heading", "correct"}, {"bank", "correct"}}},
-                                    {"recall", "pass"}});
-    m.panel("QualificationEnd");
-    CHECK(m.app.coordinator().qualificationState().adapterQualified);
-    CHECK_NEAR(m.app.coordinator().qualificationState().contract.pitchSign, -pitchSignBefore, 1e-12);
-    CHECK(m.app.coordinator().canActivate());
+    const auto before=m.app.coordinator().qualificationState().contract.toJson();
+    for(const char* action:{"QualificationStart","QualificationProbe","QualificationRestore","QualificationRecord"}) {
+        const auto id=m.panel(action,{{"axis","forward"},{"answers",{{"pitch","reversed"}}}});
+        CHECK_EQ(js::str(m.ackFor(id),"status"),std::string("Rejected"));
+        CHECK(m.app.coordinator().qualificationState().contract.toJson()==before);
+    }
 }
 
 TEST_CASE("module: C172 complete profile installs once, opens by default and never acquires the camera") {

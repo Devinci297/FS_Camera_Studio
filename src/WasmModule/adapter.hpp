@@ -21,6 +21,7 @@ struct SdkPose {
     double pitchDeg = 0, bankDeg = 0, headingDeg = 0;
     double fovRad = 1.0;
     Referential referential = Referential::Eyepoint;
+    bool trackUserAircraft = false;
 };
 
 struct AdapterContract {

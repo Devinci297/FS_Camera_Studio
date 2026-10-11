@@ -158,10 +158,12 @@ bool SimSession::ensureZoomEvents() {
     if (zoomRegistered_) return true;
     // Observe the simulator's zoom commands, without masking cockpit controls or capturing the screen.
     // The wheel must be assigned to MSFS zoom; these are NOT raw wheel mappings.
-    const char* names[] = {"ZOOM_IN", "ZOOM_OUT", "ZOOM_PLUS", "ZOOM_MINUS"};
-    for (DWORD i = 0; i < 4; ++i) {
-        if (FAILED(SimConnect_MapClientEventToSimEvent(asHandle(handle_), kEvtZoomIn + i, names[i]))) return false;
-        if (FAILED(SimConnect_AddClientEventToNotificationGroup(asHandle(handle_), kNotifyInput, kEvtZoomIn + i, FALSE))) return false;
+    // ZOOM_OUT is the SDK alias for PLUS and ZOOM_IN for MINUS (despite their names).
+    // Subscribe once per canonical event: aliases must not cancel or double a wheel step.
+    const char* names[] = {"ZOOM_PLUS", "ZOOM_MINUS"};
+    for (DWORD i = 0; i < 2; ++i) {
+        if (FAILED(SimConnect_MapClientEventToSimEvent(asHandle(handle_), kEvtZoomPlus + i, names[i]))) return false;
+        if (FAILED(SimConnect_AddClientEventToNotificationGroup(asHandle(handle_), kNotifyInput, kEvtZoomPlus + i, FALSE))) return false;
     }
     zoomRegistered_ = true;
     return true;

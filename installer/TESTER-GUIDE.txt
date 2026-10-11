@@ -21,8 +21,7 @@ Do not disable antivirus or Windows protection settings.
 FIRST FLIGHT
 - Use a familiar aircraft and a parked flight for the first check.
 - Select a camera, then View in sim / Enable camera.
-- If camera control needs qualification, open Settings and run the axis check
-  while safely parked. Report its result rather than guessing axis directions.
+- Camera directions are configured automatically. No axis calibration is required.
 - Hold right mouse and drag in the simulator scene to look around.
 - W/S moves forward/back along the view, A/D sideways, Q down, E up.
 - Shift moves faster. Mouse wheel zooms. Fine/Normal/Coarse changes precision.

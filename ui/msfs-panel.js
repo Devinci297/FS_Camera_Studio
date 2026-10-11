@@ -72,7 +72,7 @@
           top = Math.min(top, dock.getBoundingClientRect().top);
         }
         if (!dialog.hidden) {
-          const bounds = (dialog.classList.contains("mc-context-shade") ? dialog.querySelector(".mc-dialog") : dialog).getBoundingClientRect();
+          const bounds = (dialog.classList.contains("mc-context-shade") || dialog.classList.contains("mc-tracking-shade") ? dialog.querySelector(".mc-dialog") : dialog).getBoundingClientRect();
           left = Math.min(left,bounds.left); right = Math.max(right,bounds.right); top = Math.min(top,bounds.top); bottom = Math.max(bottom,bounds.bottom);
         }
       }

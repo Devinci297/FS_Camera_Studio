@@ -35,7 +35,7 @@ bool nearlyEqual(const SdkPose& a, const SdkPose& b) {
     constexpr double e = 1e-6;
     // Latitude/longitude are degrees: 1e-6 would swallow roughly 11 cm of manual movement.
     const double horizontal = a.referential == Referential::World ? 1e-11 : e;
-    return a.referential == b.referential && std::abs(a.x - b.x) < horizontal && std::abs(a.y - b.y) < horizontal && std::abs(a.z - b.z) < e &&
+    return a.trackUserAircraft == b.trackUserAircraft && a.referential == b.referential && std::abs(a.x - b.x) < horizontal && std::abs(a.y - b.y) < horizontal && std::abs(a.z - b.z) < e &&
            std::abs(a.pitchDeg - b.pitchDeg) < e && std::abs(a.bankDeg - b.bankDeg) < e &&
            std::abs(a.headingDeg - b.headingDeg) < e && std::abs(a.fovRad - b.fovRad) < e;
 }
@@ -926,11 +926,14 @@ void Coordinator::submit() {
     const auto s = engine_.sample();
     SdkPose sdk = toSdk(effects_.apply(s.pose), qual_.contract, referentialFor(*cam));
     if(cam->mode==profiles::CameraMode::Airport){
+        sdk.trackUserAircraft = cam->aircraftTracking == "both" && !mouseHeld_;
         auto w=profiles::airport::world({cam->originLat,cam->originLon,cam->originAltitude},s.pose.positionFRD);
         sdk.x=w.lat;sdk.y=w.lon;sdk.z=w.altitude;
         // World PBH uses local geographic north, not the aircraft's measured translational basis.
         auto p=s.pose.orientation.toPbh();
-        if(cam->aircraftTracking!="off" && lastTick_-targetAt_<1.0 && targetAt_>=0 && !mouseHeld_) {
+        // Keep the last known target through pauses/telemetry gaps instead of snapping
+        // back to the saved direction. Flight changes invalidate targetAt_.
+        if(cam->aircraftTracking!="off" && targetAt_>=0 && !mouseHeld_) {
             auto d=profiles::airport::local({w.lat,w.lon,w.altitude},{targetLat_,targetLon_,targetAltitude_});
             const double horizontal=std::hypot(d.x,d.y);
             if(d.finite() && horizontal>.5) {

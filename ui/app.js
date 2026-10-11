@@ -608,6 +608,7 @@
     root.style.minHeight = Math.ceil(height) + 'px';
   }
   function openDialog(title, onClose) {
+    $('mc-dialog-shade').classList.remove('mc-tracking-shade');
     $('mc-dialog-shade').classList.remove('mc-context-shade', 'mc-airport-shade');
     const panel = $('mc-dialog-shade').querySelector('.mc-dialog'); panel.style.left = ''; panel.style.top = '';
     if (dialogOpen()) closeDialog(true);
@@ -1589,11 +1590,24 @@
     dialogActions([['Close',()=>closeDialog()]]);
   }
   function aircraftTrackingOptions(view) {
-    if(!view)return;const body=openDialog('Aircraft tracking · '+view.name);
-    body.appendChild(make('p','The camera stays at its airport position. Choose how it follows your aircraft. Right-drag temporarily overrides tracking.','mc-note'));
-    [['off','Fixed direction'],['heading','Track heading only'],['both','Track heading and pitch']].forEach(([value,label])=>{
-      const b=button(label,()=>{view.aircraftTracking=value;saveCamera(view);closeDialog();render();},'mc-secondary');b.setAttribute('aria-pressed',String((view.aircraftTracking||'off')===value));body.appendChild(b);
+    if(!view)return;const body=openDialog('Aircraft tracking');
+    const shade=$('mc-dialog-shade');shade.classList.add('mc-tracking-shade');
+    body.appendChild(make('p',view.name,'mc-tracking-camera'));
+    body.appendChild(make('p','Keep this airport position and choose where to look. Right-drag temporarily overrides tracking.','mc-note'));
+    [['off','Fixed direction','Keep the saved view direction.'],['heading','Track heading only','Follow left and right; keep the saved pitch.'],['both','Track heading and pitch','Keep your aircraft in the center of the view.']].forEach(([value,label,detail])=>{
+      const b=button(label,()=>{view.aircraftTracking=value;saveCamera(view);closeDialog();render();},'mc-secondary mc-tracking-choice');
+      b.setAttribute('aria-label',label);b.setAttribute('aria-pressed',String((view.aircraftTracking||'off')===value));
+      b.appendChild(make('small',detail));body.appendChild(b);
     });dialogActions([['Close',()=>closeDialog()]]);
+    if(IS_MINI) {
+      revealMini();
+      const place=()=>{if(shade.hidden||!shade.classList.contains('mc-tracking-shade'))return;
+        const menu=shade.querySelector('.mc-dialog'),dock=$('mc-mini-panel').getBoundingClientRect();
+        menu.style.left=Math.max(8,Math.min(innerWidth-menu.offsetWidth-8,dock.right-menu.offsetWidth))+'px';
+        menu.style.top=Math.max(8,dock.top-menu.offsetHeight-8)+'px';
+        if(window.fscsUpdateMiniRect)window.fscsUpdateMiniRect();
+      };nextFrame(place);
+    }
   }
   async function saveAdjustedViews() {
     if(!S.snapshot||S.pendingCommit)return;
@@ -1797,14 +1811,7 @@
       if (!S.snapshot) return;
       if (S.session === 'Ready' && aircraftLoaded() && !S.caps.canActivate && S.caps.blockReason) {
         const actions = [];
-        if (!IS_MINI && S.caps.adapterQualified === false && !S.caps.allowUnqualifiedAdapter) {
-          const run = button('Run axis check', () => { setPage('settings'); runAxisCheck(); }, 'mc-secondary');
-          run.setAttribute('data-focus-key', 'banner-axis');
-          actions.push(run);
-        }
         host.appendChild(banner('alert-triangle', [make('strong', 'Camera control unavailable: '), S.caps.blockReason], actions));
-      } else if (S.caps.canActivate && S.caps.adapterQualified === false && S.caps.allowUnqualifiedAdapter) {
-        host.appendChild(banner('alert-triangle', ['Live control is running before axis qualification - for testing only.']));
       }
       if (readOnly()) host.appendChild(banner('info', ['This profile needs a newer version of Camera Studio. It opens read-only and cannot be activated.'], [], true));
       const a = S.aircraft;
@@ -2336,7 +2343,17 @@
     if(!/^[A-Z0-9]{3,8}$/.test(f.icao)||!isFinite(f.lat)||!isFinite(f.lon)||!isFinite(f.altitude))throw new Error('Airport needs ident, lat, lon and alt.');
     const local=e=>({east:num(e,'biasX',(num(e,'lon',NaN)-f.lon)*Math.PI/180*6378137*Math.cos(f.lat*Math.PI/180)),north:num(e,'biasZ',(num(e,'lat',NaN)-f.lat)*Math.PI/180*6378137)});
     a.querySelectorAll('Runway').forEach((r,i)=>{const n=num(r,'number',i+1),d=r.getAttribute('designator')||'',suffix=({LEFT:'L',RIGHT:'R',CENTER:'C',WATER:'W'})[d]||'';f.runways.push({lat:num(r,'lat',f.lat),lon:num(r,'lon',f.lon),altitude:num(r,'alt',f.altitude),heading:num(r,'heading',0),length:num(r,'length',0),width:num(r,'width',30),primary:String(n).padStart(2,'0')+suffix,secondary:String((n+17)%36+1).padStart(2,'0')+({L:'R',R:'L',C:'C',W:'W'}[suffix]||'')});});
-    a.querySelectorAll('TaxiwayParking').forEach((e,i)=>{const name=(e.getAttribute('name')||'Parking').replace(/_/g,' ')+' '+(e.getAttribute('number')||i);f.parking.push(Object.assign(local(e),{key:name,name,gate:(e.getAttribute('type')||'').indexOf('GATE')===0,heading:num(e,'heading',0)}));});
+    a.querySelectorAll('TaxiwayParking').forEach((e,i)=>{
+      const type=(e.getAttribute('type')||'').toUpperCase();if(type==='VEHICLE'||type==='NONE')return;
+      const names=['NONE','PARKING','N_PARKING','NE_PARKING','E_PARKING','SE_PARKING','S_PARKING','SW_PARKING','W_PARKING','NW_PARKING','GATE','DOCK'];
+      const labels=['','Parking','North parking','Northeast parking','East parking','Southeast parking','South parking','Southwest parking','West parking','Northwest parking','Gate','Dock'];
+      const raw=(e.getAttribute('name')||'PARKING').toUpperCase(),suffix=(e.getAttribute('suffix')||'NONE').toUpperCase(),number=e.getAttribute('number')||String(i);
+      const code=v=>/^GATE_[A-Z]$/.test(v)?12+v.charCodeAt(5)-65:names.indexOf(v),n=code(raw),s=code(suffix);
+      const gate=type.indexOf('GATE')===0||n===10||n>=12;
+      let name=(n>=12?'Gate '+raw.slice(-1):(labels[n]||(gate?'Gate':'Parking'))+' ')+number;
+      if(s>=12)name+=suffix.slice(-1);else if(s>0)name+=' '+labels[s];
+      f.parking.push(Object.assign(local(e),{key:n+':'+number+(s>0?':'+s:''),name,gate,heading:num(e,'heading',0)}));
+    });
     a.querySelectorAll('TaxiwayPoint').forEach(e=>{const i=num(e,'index',-1);if(i>=0&&i<10000)f.points[i]=local(e);});
     a.querySelectorAll('TaxiwayPath').forEach(e=>f.paths.push({type:e.getAttribute('type')==='TAXI'?1:0,start:num(e,'start',-1),end:num(e,'end',-1),width:num(e,'width',20)}));
     a.querySelectorAll('TaxiwaySign').forEach((e,i)=>f.signs.push({key:[e.getAttribute('lat'),e.getAttribute('lon'),e.getAttribute('heading'),e.getAttribute('label')].join(':'),lat:num(e,'lat',NaN),lon:num(e,'lon',NaN),altitude:f.altitude,heading:num(e,'heading',0),label:e.getAttribute('label')||'Taxi sign '+(i+1)}));
@@ -2587,7 +2604,10 @@
     $('mc-setting-unqualified').checked = Boolean(host.allowUnqualifiedAdapter);
     if (document.activeElement !== $('mc-setting-look-speed')) $('mc-setting-look-speed').value = String(host.lookSpeedDegPerSec);
     if (document.activeElement !== $('mc-setting-move-speed')) $('mc-setting-move-speed').value = String(host.moveSpeedMetersPerSec);
+    $('mc-setting-unqualified').closest('label').hidden=true;
     $('mc-qual-state').textContent = qualificationText();
+    $('mc-qual-state').parentNode.querySelector('span').textContent='Camera directions';
+    $('mc-qual-run').hidden=true;
     $('mc-qual-run').disabled = !S.snapshot || !aircraftLoaded() || Boolean(Q);
     $('mc-qual-run').title = aircraftLoaded() ? '' : 'Load a flight first.';
   }
@@ -2602,8 +2622,7 @@
     (function poll() { if (test()) resolve(true); else if (Date.now() - start > ms) resolve(false); else setTimeout(poll, 100); })();
   });
   function qualificationText() {
-    const build = S.caps.simVersion ? 'Axis mapping for ' + S.caps.simVersion : 'Axis mapping for this simulator build';
-    return build + ': ' + (S.caps.adapterQualified ? 'checked' : 'not checked yet');
+    return 'Camera directions are configured automatically. No calibration needed.';
   }
   /** Replace the open wizard dialog's content without closing it (closing ends the session). */
   function wizardStep(title, nodes, actions) {

@@ -723,8 +723,20 @@ TEST_CASE("airports: sub-centimeter edits reach world SDK and heading/pitch trac
     CHECK(r.backend.submitted.back().x>first.x);CHECK(r.backend.submitted.back().x-first.x<1e-7);
     r.profile["cameras"].back()["aircraftTracking"]="both";r.setProfile();r.c.setAircraftPosition(40,-89.999,150,r.t);r.advance(.02);
     CHECK_NEAR(r.backend.submitted.back().headingDeg,90,0.1);CHECK(r.backend.submitted.back().pitchDeg<0);
+    CHECK(r.backend.submitted.back().trackUserAircraft);
+    const auto fov=r.backend.submitted.back().fovRad;
+    r.c.onAction({fscs::profiles::Action::ZoomIn,0,true,0,true},r.t);r.advance(.02);
+    CHECK(r.backend.submitted.back().fovRad<fov);
+    CHECK(r.backend.submitted.back().trackUserAircraft);
+    // Native targeting stays enabled if telemetry pauses; right-drag takes over explicitly.
+    r.advance(.02,60);CHECK(r.backend.submitted.back().trackUserAircraft);
+    r.deliver(be::NativeMouseMapping{true});r.deliver(be::NativeMouseButton{true});r.advance(.02);
+    CHECK(!r.backend.submitted.back().trackUserAircraft);
+    r.deliver(be::NativeMouseButton{false});r.advance(.02);
+    CHECK(r.backend.submitted.back().trackUserAircraft);
     const auto trackingPosition=r.backend.submitted.back();r.c.setAircraftPosition(40.001,-90,150,r.t);r.advance(.02);
     CHECK_NEAR(r.backend.submitted.back().headingDeg,0,0.1);CHECK_NEAR(r.backend.submitted.back().x,trackingPosition.x,1e-12);
     r.profile["cameras"].back()["aircraftTracking"]="off";r.setProfile();r.advance(.02);CHECK_NEAR(r.backend.submitted.back().headingDeg,0,1e-9);
+    CHECK(!r.backend.submitted.back().trackUserAircraft);
     fscs::core::ManualInput input;input.moveForward=1;r.c.setManualInput(input);r.advance(.02,50);CHECK(r.backend.submitted.back().x>trackingPosition.x);
 }
