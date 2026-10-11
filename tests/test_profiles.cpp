@@ -365,6 +365,34 @@ TEST_CASE("profiles: C172 defaults have 12 cockpit and 8 exterior views with a p
     CHECK_EQ(exterior, 8);
 }
 
+TEST_CASE("profiles: A320 starter anchors every variant at its own pilot eyepoint") {
+    std::set<std::string> ids;
+    for (const auto& model : {"inibuilds-aircraft-a320neo", "FlyByWire_A32NX", "FNX_320_CFM"}) {
+        CHECK(isA320(model, ""));
+        auto doc = makeA320Profile(model, "Airbus");
+        CHECK(validateProfile(doc).ok());
+        CHECK_EQ(doc["aircraftMatch"]["modelKey"], json(model));
+        CHECK_EQ(doc["cameras"].size(), std::size_t{12});
+        CHECK_EQ(doc["categories"].size(), std::size_t{3});
+        CHECK(ids.insert(doc["profileId"].get<std::string>()).second);
+        std::set<int> viewIds;
+        for (const auto& cam : doc["cameras"]) {
+            CHECK_EQ(cam["mode"], json("aircraftCockpit"));
+            CHECK(cam["positionMetersFRD"] == json::array({0.0, 0.0, 0.0}));
+            CHECK(cam["interaction"].get<bool>());
+            CHECK(viewIds.insert(cam["viewId"].get<int>()).second);
+        }
+        const auto snap = toSnapshot(doc);
+        CHECK_EQ(snap.camera(snap.defaultCameraId)->name, std::string("Pilot - normal"));
+        for (const auto& cat : doc["categories"])
+            CHECK_EQ(cat["defaultCameraId"], cat["cameraIds"][0]);
+    }
+    CHECK(isA320("asobo-aircraft", "Airbus A320 NEO"));
+    CHECK(!isA320("Fenix_A319", "Airbus A319"));
+    CHECK(!isA320("FNX_321", "Fenix A320 family A321"));
+    CHECK(!isA320("Asobo_C172", "Cessna 172"));
+}
+
 TEST_CASE("profiles: aircraft files separate models, keep alternates and import the preferred profile") {
     json cessna = makeC172Profile("asobo_c172sp_g1000", "C172");
     json alternate = makeStarterProfile("Other C172 views", "asobo_c172sp_g1000", "C172");

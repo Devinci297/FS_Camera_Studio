@@ -74,7 +74,7 @@ public:
     void cancelMouseDrag();
     void tick(double now);
     void setAircraftPosition(double lat, double lon, double altitude, double now) { targetLat_=lat; targetLon_=lon; targetAltitude_=altitude; targetAt_=now; }
-    bool selectAutomaticCamera(const std::string& id, double now) { return eligibleToSubmit() && activate(id,now,false).empty(); }
+    bool selectAutomaticCamera(const std::string& id, double now, bool acquire = false) { return (acquire ? canActivate() : eligibleToSubmit()) && activate(id,now,false).empty(); }
 
     // State the host app re-sends to a newly connected UI.
     void emitFullState();

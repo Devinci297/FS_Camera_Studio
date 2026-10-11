@@ -96,6 +96,9 @@ ProfileSnapshot toSnapshot(const json& doc);
 json makeStarterProfile(const std::string& name, const std::string& modelKey, const std::string& displayName);
 bool isC172(const std::string& modelKey, const std::string& displayName);
 json makeC172Profile(const std::string& modelKey, const std::string& displayName);
+bool isA320(const std::string& modelKey, const std::string& displayName);
+// Pilot-eyepoint starter views, independently saved against the loaded aircraft package.
+json makeA320Profile(const std::string& modelKey, const std::string& displayName);
 // Replaces every ID with a new UUID, keeping references (default view included) consistent. Returns old->new map.
 std::vector<std::pair<std::string, std::string>> reassignIds(json& doc);
 

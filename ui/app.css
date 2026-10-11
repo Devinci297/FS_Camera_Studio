@@ -721,3 +721,77 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim[data-surface="mini"][data-name-display="icons"] .mc-dock-categories { flex-basis:68px; }
 #mc-sim[data-surface="mini"][data-name-display="icons"] .mc-dock-favorites button { min-width:28px; }
 @media(max-width:880px) { #mc-sim[data-surface="mini"] .mc-dock-categories { flex-basis:130px; } }
+
+/* Roomier panels; icon-only airport categories keep individually named views readable. */
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock { max-width:none; width:calc(100% - 32px); left:16px; right:16px; }
+#mc-sim[data-name-display="icons"] .mc-airport-camera-name .mc-entity-label { display:inline; }
+#mc-sim[data-surface="mini"][data-name-display="icons"] .mc-dock-favorites .mc-airport-camera-name { min-width:84px; }
+#mc-sim .mc-airport-auto { white-space:nowrap; flex:none; }
+#mc-sim .mc-airport-auto[aria-pressed="true"] { color:var(--mc-accent); background:var(--mc-active); border-color:var(--mc-accent); }
+
+/* Compact, aligned application header; margins also work in Coherent without flex-gap. */
+#mc-sim .mc-panel-head { padding:12px 18px; min-height:66px; gap:0; flex-wrap:nowrap; }
+#mc-sim .mc-panel-head > * + * { margin-left:10px; }
+#mc-sim .mc-panel-head .mc-brand-icon { width:36px; height:36px; }
+#mc-sim .mc-panel-head .mc-brand { display:flex; flex-wrap:wrap; align-items:center; flex:0 1 220px; min-width:176px; }
+#mc-sim .mc-brand h2 { order:0; margin:0 7px 0 0; white-space:nowrap; }
+#mc-sim .mc-brand p { order:2; flex:0 0 100%; margin-top:3px; line-height:15px; }
+#mc-sim .mc-brand .mc-version { order:1; flex:none; min-height:20px; padding:2px 6px; font-size:10px; line-height:14px; border:1px solid var(--mc-line); background:var(--mc-subtle); color:var(--mc-muted); border-radius:5px; }
+#mc-sim .mc-panel-head .mc-profile-button { flex:0 1 380px; min-width:100px; max-width:380px; margin-left:auto; min-height:36px; gap:0; }
+#mc-sim .mc-profile-button #mc-profile-label { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:0 7px; }
+#mc-sim .mc-profile-button svg:last-child { margin-left:auto; }
+#mc-sim .mc-panel-head .mc-airport-auto,#mc-sim .mc-panel-head .mc-compact-button { min-height:36px; flex:none; }
+#mc-sim .mc-global-nav { padding:6px 18px; gap:0; }
+#mc-sim .mc-global-nav > button { margin-right:5px; gap:0; }
+#mc-sim .mc-global-nav > button svg,#mc-sim .mc-compact-button svg { margin-right:6px; }
+@media(max-width:880px) {
+ #mc-sim .mc-panel-head { padding:10px 12px; }
+ #mc-sim .mc-panel-head .mc-brand { flex-basis:190px; }
+}
+@media(max-width:620px) {
+ #mc-sim .mc-panel-head { flex-wrap:wrap; }
+ #mc-sim .mc-panel-head .mc-brand { flex:1; }
+ #mc-sim .mc-panel-head .mc-profile-button { order:5; flex:1 0 100%; max-width:none; margin:8px 0 0; }
+ #mc-sim .mc-panel-head .mc-compact-button span { display:none; }
+}
+/* Every category stays in view. Extra categories add columns, then rows on narrow windows. */
+#mc-sim[data-surface="mini"] .mc-dock-categories { display:flex; flex:none !important; height:auto; max-height:none; overflow:visible; padding-right:8px; }
+#mc-sim[data-surface="mini"] .mc-category-grid { display:grid; grid-auto-rows:34px; grid-template-rows:18px; align-content:start; flex:none; padding:0; margin:0 8px 0 0; gap:2px; }
+#mc-sim[data-surface="mini"][data-name-display="icons"] .mc-category-grid { grid-auto-rows:26px; }
+#mc-sim[data-surface="mini"] .mc-category-group-label { grid-column:1/-1; font-size:9px; line-height:16px; color:var(--mc-muted); text-transform:uppercase; letter-spacing:.05em; padding-left:5px; }
+#mc-sim[data-surface="mini"] .mc-category-grid button { margin:0; padding:3px 5px; min-height:0; height:100%; overflow:hidden; }
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-label { overflow:hidden; text-overflow:ellipsis; }
+#mc-sim[data-surface="mini"] .mc-dock-airport { grid-column:auto; }
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock { box-shadow:none; backdrop-filter:none; }
+
+/* Category display preferences never hide camera labels or icons. */
+#mc-sim[data-name-display] .mc-camera-select>.mc-entity-name{padding-left:22px}
+#mc-sim[data-name-display] .mc-camera-select .mc-entity-label{display:block}
+#mc-sim[data-name-display] .mc-camera-select .mc-entity-name>svg,
+#mc-sim[data-name-display] .mc-dock-favorites .mc-entity-name>svg{display:inline-block}
+#mc-sim[data-name-display] .mc-dock-favorites .mc-entity-label{display:inline}
+#mc-sim[data-surface="mini"][data-name-display] .mc-dock-favorites button{min-width:84px}
+#mc-sim[data-surface="mini"] .mc-category-grid[hidden]{display:none}
+/* One lightweight overlay: mouse hover and keyboard focus share help without intercepting simulator input. */
+#mc-sim .mc-tooltip{position:fixed;z-index:2147483647;pointer-events:none;max-width:280px;padding:9px 12px;border:1px solid #496273;border-radius:7px;background:#101d28;color:#e6f2fa;box-shadow:0 3px 10px rgba(0,0,0,.25);font-size:12px;font-weight:400;line-height:1.45;white-space:normal;text-align:left}
+#mc-sim .mc-tooltip[hidden]{display:none}
+#mc-sim[data-theme="light"] .mc-tooltip{background:#f6fbff;color:#172b3b;border-color:#8ba5b5}
+
+/* Edge-to-edge mini panel: spend width on categories before increasing its height. */
+#mc-sim[data-surface="mini"] .mc-mini-region .mc-dock{left:0;right:0;width:100%;max-width:none;padding:4px 8px;gap:8px;border-radius:7px}
+#mc-sim[data-surface="mini"] .mc-dock-categories{padding-right:6px;gap:0}
+#mc-sim[data-surface="mini"] .mc-category-grid,
+#mc-sim[data-surface="mini"][data-name-display="icons"] .mc-category-grid{grid-auto-rows:24px;grid-template-rows:14px;margin-right:6px;gap:2px}
+#mc-sim[data-surface="mini"] .mc-category-group-label{font-size:8px;line-height:13px;padding-left:4px}
+#mc-sim[data-surface="mini"] .mc-category-grid button{font-size:10px;line-height:10px;padding:1px 4px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name{width:100%;gap:4px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name>svg{width:13px;height:13px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-label{white-space:normal;line-height:10px;max-height:20px;overflow:hidden;overflow-wrap:break-word}
+#mc-sim[data-surface="mini"] .mc-dock-body{height:100%;gap:2px}
+#mc-sim[data-surface="mini"] .mc-dock-current>button{min-height:24px;height:24px;padding:3px}
+#mc-sim[data-surface="mini"] .mc-dock-tools{min-height:24px;height:24px;gap:2px;max-width:calc(100% - 54px)}
+#mc-sim[data-surface="mini"] .mc-dock-tools button{min-height:24px;height:24px;padding:3px 5px}
+#mc-sim[data-surface="mini"] .mc-dock-favorites{height:calc(100% - 26px);max-height:none;gap:2px}
+#mc-sim[data-surface="mini"] .mc-dock-favorites button{min-height:22px;height:22px;padding:2px 5px}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-entity-label{white-space:nowrap}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-key{height:15px;font-size:10px}

@@ -10,7 +10,7 @@ TEST_CASE("airports: geometry generates valid deterministic world cameras and ju
  bool junction=false;
  for(auto& cat:p["categories"])if(cat["name"]=="Taxiway intersections")junction=true;
  CHECK(junction);
- for(auto& cam:p["cameras"]){CHECK_EQ(cam["mode"],json("airport"));CHECK_EQ(cam["viewId"],json(0));CHECK_EQ(cam["worldOrigin"]["altitude"],json(100));}
+ for(auto& cam:p["cameras"]){CHECK_EQ(cam["mode"],json("airport"));CHECK_EQ(cam["aircraftTracking"],json("both"));CHECK_EQ(cam["viewId"],json(0));CHECK_EQ(cam["worldOrigin"]["altitude"],json(100));}
  auto signs=airportFixture();signs["signs"]={{{"key","A"},{"label","A / B"},{"lat",40},{"lon",-90},{"altitude",100},{"heading",0}}};
  auto s=ap::generate(signs,json::object(),notes);bool actual=false;junction=false;
  for(auto& cat:s["categories"]){actual=actual||cat["name"]=="Taxi signs";junction=junction||cat["name"]=="Taxiway intersections";}
@@ -18,9 +18,9 @@ TEST_CASE("airports: geometry generates valid deterministic world cameras and ju
 }
 TEST_CASE("airports: regenerate preserves refinements unless replacement requested") {
  std::vector<std::string> notes;auto p=ap::generate(airportFixture(),json::object(),notes);auto edited=p;
- edited["cameras"][0]["name"]="My runway";edited["cameras"][0]["positionMetersFRD"][0]=123;
+ edited["cameras"][0]["aircraftTracking"]="off";edited["cameras"][0]["name"]="My runway";edited["cameras"][0]["positionMetersFRD"][0]=123;
  auto preserved=ap::merge(edited,p,false);CHECK(validateProfile(preserved).ok());CHECK_EQ(preserved["cameras"][0]["name"],json("My runway"));
- CHECK_EQ(preserved["cameras"].size(),p["cameras"].size());
+ CHECK_EQ(preserved["cameras"].size(),p["cameras"].size());CHECK_EQ(preserved["cameras"][0]["aircraftTracking"],json("off"));
  auto replaced=ap::merge(edited,p,true);CHECK(validateProfile(replaced).ok());CHECK_EQ(replaced["cameras"][0]["name"],p["cameras"][0]["name"]);
 }
 TEST_CASE("airports: roundtrip world coordinates and nearby selection with radius and hysteresis") {

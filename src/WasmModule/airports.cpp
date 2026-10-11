@@ -1,6 +1,7 @@
 #include "module_app.hpp"
 #include "fscs/profiles/json_util.hpp"
 #include <algorithm>
+#include <limits>
 namespace fscs::host {
 using protocol::AckStatus;
 namespace { json noRevision(json p){if(p.is_object())p.erase("revision");return p;} }
@@ -50,14 +51,24 @@ bool ModuleApp::validateCombined(json& doc,std::string& error) const {
 }
 json ModuleApp::airportState() const {return {{"autoSwitch",airportAuto_},{"loaded",loadedAirport_},{"pinned",pinnedAirport_},{"nearby",nearbyAirports_},{"facilities",nearbyFacilities_},{"radiusNm",js::num(js::object(working_.settings,"host"),"airportRadiusNm",25)},{"positionKnown",position_.valid()},{"worldStatus","Preview — world coordinates need in-sim qualification"}};}
 bool ModuleApp::setAirportAuto(bool enabled,double now) {
- const auto* p=coord_.profile();const auto* cam=p?p->camera(coord_.activeCameraId()):nullptr;
- if(enabled && (!cam||cam->mode!=profiles::CameraMode::Airport||coord_.ownership()!=Ownership::Active||!position_.valid()))return false;
  if(airportAuto_==enabled)return true;
- airportAuto_=enabled;autoCameraId_=enabled?cam->id:"";lastAutoSwitch_=now;lastAutoCheck_=now;
+ std::string nearest;
+ if(enabled) {
+  if(!simRunning_||paused_||!position_.valid()||now-positionAt_>2||!coord_.canActivate())return false;
+  const auto* p=coord_.profile();double best=std::numeric_limits<double>::infinity();
+  if(p)for(const auto& cam:p->cameras)if(cam.mode==profiles::CameraMode::Airport) {
+   const auto world=profiles::airport::world({cam.originLat,cam.originLon,cam.originAltitude},cam.pose.positionFRD);
+   const double d=profiles::airport::local(position_,world).length();
+   if(d<best){best=d;nearest=cam.id;}
+  }
+  if(nearest.empty()||!coord_.selectAutomaticCamera(nearest,now,true))return false;
+ }
+ airportAuto_=enabled;autoCameraId_=nearest;lastAutoSwitch_=now;lastAutoCheck_=now;
  emitState("AirportsChanged",airportState());return true;
 }
 void ModuleApp::updateAirportAuto(double now) {
  if(!airportAuto_)return;
+ if(coord_.ownership()==Ownership::Acquiring)return;
  const auto* p=coord_.profile();const auto* cam=p?p->camera(coord_.activeCameraId()):nullptr;
  if(!cam||cam->mode!=profiles::CameraMode::Airport||cam->id!=autoCameraId_||coord_.ownership()!=Ownership::Active){setAirportAuto(false,now);return;}
  if(!simRunning_||paused_||coord_.gameControlled()||!position_.valid()||now-positionAt_>2||now-lastAutoCheck_<.5||now-lastAutoSwitch_<3)return;
@@ -106,7 +117,7 @@ bool ModuleApp::airportEvent(const BackendEvent& ev,double now){
 }
 bool ModuleApp::handleAirport(const protocol::Command& c,double now){
  const auto& a=c.action;const auto& p=c.payload;
- if(a=="SetAirportAuto") {const bool ok=setAirportAuto(js::boolean(p,"enabled",false),now);reply(c,ok?AckStatus::Completed:AckStatus::Rejected,ok?"":"Show an airport camera in the simulator first.");return true;}
+ if(a=="SetAirportAuto") {const bool ok=setAirportAuto(js::boolean(p,"enabled",false),now);reply(c,ok?AckStatus::Completed:AckStatus::Rejected,ok?"":"Load or generate nearby airport cameras and resume the flight before enabling Auto switch.");return true;}
  if(a=="DiscoverAirports"){nearbyFacilities_=json::array();bool ok=position_.valid()&&services_.requestNearbyAirports();reply(c,ok?AckStatus::Accepted:AckStatus::Rejected,ok?"":"Load a flight before finding nearby airports.");return true;}
  if(a=="SelectAirport"){
   auto code=js::str(p,"icao");bool valid=code.empty();for(auto& n:nearbyAirports_)valid=valid||js::str(n,"icao")==code;

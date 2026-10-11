@@ -1,4 +1,5 @@
 #include "test.hpp"
+#include <set>
 
 #include "fake_backend.hpp"
 #include "module_app.hpp"
@@ -317,6 +318,55 @@ TEST_CASE("module: C172 complete profile installs once, opens by default and nev
     CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{1});
 }
 
+TEST_CASE("module: A320 variants get independent starters without camera acquisition or repeat installation") {
+    ModuleRig m;
+    std::set<std::string> ids;
+    for (const auto* model : {"inibuilds-aircraft-a320neo", "FlyByWire_A32NX", "FNX_320_CFM"}) {
+        const std::string path = std::string("SimObjects\\Airplanes\\") + model + "\\aircraft.cfg";
+        m.flight(path);
+        m.frame(2);
+        CHECK_EQ(js::str(m.app.workingProfile(), "builtinTemplate"), std::string("a320-eyepoint-v1"));
+        CHECK_EQ(m.app.workingProfile()["cameras"].size(), std::size_t{12});
+        CHECK(m.app.coordinator().ownership() == Ownership::Observing);
+        const auto id = js::str(m.app.workingProfile(), "profileId");
+        CHECK(ids.insert(id).second);
+        const auto txn = m.app.repository().committed().txn;
+        m.flight(path); m.frame(2);
+        CHECK_EQ(js::str(m.app.workingProfile(), "profileId"), id);
+        CHECK_EQ(m.app.repository().committed().txn, txn);
+    }
+    CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{3});
+}
+
+TEST_CASE("module: existing A320 custom profiles survive startup and explicit new profiles get starter views") {
+    ModuleRig seed;
+    const std::string path = "SimObjects\\Airplanes\\FlyByWire_A32NX\\aircraft.cfg";
+    seed.flight(path); seed.frame(2);
+    auto state = seed.app.repository().committed();
+    const auto modelKey = js::str(seed.app.workingProfile()["aircraftMatch"], "modelKey");
+    auto custom = fscs::profiles::makeStarterProfile("My calibrated A32NX", modelKey, "A32NX");
+    custom["cameras"][0]["positionMetersFRD"] = {.2, -.1, .15};
+    const auto id = js::str(custom, "profileId");
+    state.profiles.clear(); state.profiles[id].current = custom;
+    state.navigation["lastProfileId"] = id;
+    state.navigation["lastByModel"][modelKey] = id;
+    FakeStorage storage;
+    storage.files["\\work\\fscs-store-a.json"] = fscs::profiles::Repository::serialize(state, {});
+    FakeBackend camera; FakeServices services;
+    ModuleApp restored(camera, services, storage, "a320-restart", "test");
+    restored.start(0);
+    restored.onEvent(be::Connected{"1.8.16.0"}, 1);
+    restored.onEvent(be::AircraftLoaded{path}, 1);
+    restored.update(2);
+    CHECK_EQ(restored.repository().committed().profiles.size(), std::size_t{1});
+    CHECK_EQ(js::str(restored.workingProfile(), "profileId"), id);
+    CHECK(restored.workingProfile()["cameras"][0]["positionMetersFRD"] == custom["cameras"][0]["positionMetersFRD"]);
+    CHECK(restored.coordinator().ownership() == Ownership::Observing);
+    seed.panel("CreateProfile", {{"name", "Alternate A320"}, {"forAircraft", true}});
+    CHECK_EQ(js::str(seed.app.workingProfile(), "name"), std::string("Alternate A320"));
+    CHECK_EQ(seed.app.workingProfile()["cameras"].size(), std::size_t{12});
+}
+
 TEST_CASE("module: native mouse blocking aggregates panels and expires with visibility or leases") {
     ModuleRig m; m.flight();
     m.panel("Hello", {{"surface", "main"}});
@@ -487,6 +537,8 @@ TEST_CASE("module: airport nearest auto switch has a dwell and manual movement t
     m.panel("SaveAirportPreview",{{"icao","KAAA"},{"cameraIds",ids}});m.panel("QualificationStart");
     auto first=preview["cameras"][0],second=preview["cameras"][1];
     m.panel("ActivateCamera",{{"cameraId",first["id"]}});m.app.onEvent(be::CameraStatus{SdkAvailability::Acquired,false},m.t);m.frame();
+    auto firstPos=first["positionMetersFRD"];const auto firstWorld=fscs::profiles::airport::world({40,-90,100},{firstPos[0],firstPos[1],firstPos[2]});
+    m.app.onEvent(be::AircraftPosition{firstWorld.lat,firstWorld.lon,firstWorld.altitude},m.t);
     CHECK_EQ(js::str(m.ackFor(m.panel("SetAirportAuto",{{"enabled",true}})),"status"),std::string("Completed"));
     auto p=second["positionMetersFRD"];const auto near=fscs::profiles::airport::world({40,-90,100},{p[0],p[1],p[2]});
     for(int i=0;i<120;++i){m.app.onEvent(be::AircraftPosition{near.lat,near.lon,near.altitude},m.t);m.frame();}
@@ -495,4 +547,99 @@ TEST_CASE("module: airport nearest auto switch has a dwell and manual movement t
     CHECK_EQ(m.app.coordinator().activeCameraId(),second["id"].get<std::string>());
     auto move=static_cast<std::size_t>(std::find(m.services.mapped.begin(),m.services.mapped.end(),"W")-m.services.mapped.begin());m.app.onEvent(be::InputEvent{move,true},m.t);m.frame();
     m.panel("RequestSnapshot");CHECK(!m.lastEvent("Snapshot")["payload"]["airports"]["autoSwitch"].get<bool>());
+}
+
+TEST_CASE("module: global airport auto acquires nearest view from released or cockpit camera") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});m.panel("CreateProfile",{{"name","Global auto"},{"forAircraft",true}});
+    const auto pilot=js::str(m.app.workingProfile(),"defaultCameraId");
+    CHECK_EQ(js::str(m.ackFor(m.panel("SetAirportAuto",{{"enabled",true}})),"status"),std::string("Rejected"));
+    m.app.onEvent(be::AircraftPosition{40,-90,100},m.t);
+    m.panel("PreviewAirportSource",{{"facility",airportFixture()}});auto preview=m.lastEvent("AirportPreview")["payload"]["profile"];
+    json ids=json::array();for(auto& cam:preview["cameras"])ids.push_back(cam["id"]);
+    m.panel("SaveAirportPreview",{{"icao","KAAA"},{"cameraIds",ids}});
+    auto target=preview["cameras"][1],pose=target["positionMetersFRD"];
+    const auto near=fscs::profiles::airport::world({40,-90,100},{pose[0],pose[1],pose[2]});
+    m.app.onEvent(be::AircraftPosition{near.lat,near.lon,near.altitude},m.t);
+    CHECK_EQ(js::str(m.ackFor(m.panel("SetAirportAuto",{{"enabled",true}})),"status"),std::string("Completed"));
+    m.frame();m.panel("RequestSnapshot");CHECK(m.lastEvent("Snapshot")["payload"]["airports"]["autoSwitch"].get<bool>());
+    m.app.onEvent(be::CameraStatus{SdkAvailability::Acquired,false},m.t);m.frame();
+    CHECK_EQ(m.app.coordinator().activeCameraId(),target["id"].get<std::string>());
+    m.panel("SetAirportAuto",{{"enabled",false}});m.panel("ActivateCamera",{{"cameraId",pilot}});m.frame();
+    CHECK_EQ(m.app.coordinator().activeCameraId(),pilot);
+    CHECK_EQ(js::str(m.ackFor(m.panel("SetAirportAuto",{{"enabled",true}})),"status"),std::string("Completed"));
+    CHECK_EQ(m.app.coordinator().activeCameraId(),target["id"].get<std::string>());
+    m.panel("SetAirportAuto",{{"enabled",false}});m.frame(181);
+    CHECK_EQ(js::str(m.ackFor(m.panel("SetAirportAuto",{{"enabled",true}})),"status"),std::string("Rejected"));
+}
+
+TEST_CASE("module: export selected saved profile leaves another profile's working draft intact") {
+    ModuleRig m; m.flight();
+    m.panel("CreateProfile", {{"name", "First aircraft views"}, {"forAircraft", true}});
+    const auto first = m.app.workingProfile();
+    const std::string firstId = js::str(first, "profileId");
+    m.panel("CreateProfile", {{"name", "Second aircraft views"}, {"forAircraft", true}});
+    const std::string secondId = js::str(m.app.workingProfile(), "profileId");
+    auto camera = m.app.workingProfile()["cameras"][0];
+    camera["name"] = "Unsaved camera name";
+    m.panel("UpdateDraft", {{"ops", {{{"op", "setCamera"}, {"camera", camera}}}}}, "main-1", m.app.draftRevision());
+    CHECK(m.app.dirty());
+    auto saved = m.ackFor(m.panel("ExportProfile", {{"profileId", firstId}, {"working", true}}));
+    CHECK_EQ(js::str(saved, "status"), std::string("Completed"));
+    CHECK_EQ(js::str(saved["result"], "label"), std::string("saved"));
+    CHECK(js::parse(js::str(saved["result"], "code"))["profile"] == first);
+    CHECK_EQ(js::str(m.app.workingProfile(), "profileId"), secondId);
+    CHECK(m.app.dirty());
+    auto draft = m.ackFor(m.panel("ExportProfile", {{"profileId", secondId}, {"working", true}}));
+    CHECK_EQ(js::str(draft["result"], "label"), std::string("working copy"));
+    const auto draftDoc = js::parse(js::str(draft["result"], "code"));
+    CHECK(draftDoc["workingCopy"].get<bool>());
+    CHECK_EQ(js::str(draftDoc["profile"]["cameras"][0], "name"), std::string("Unsaved camera name"));
+    saved = m.ackFor(m.panel("ExportProfile", {{"profileId", secondId}, {"working", false}}));
+    CHECK_EQ(js::str(saved["result"], "label"), std::string("saved"));
+    CHECK(js::str(js::parse(js::str(saved["result"], "code"))["profile"]["cameras"][0], "name") != "Unsaved camera name");
+    CHECK_EQ(js::str(m.ackFor(m.panel("ExportProfile", {{"profileId", "missing"}})), "status"), std::string("Rejected"));
+    CHECK(m.app.dirty());
+}
+
+TEST_CASE("module: imported profile is persisted as a separate copy with a report and invalid imports preserve data") {
+    ModuleRig m; m.flight();
+    m.panel("CreateProfile", {{"name", "Shared views"}, {"forAircraft", true}});
+    const auto original = m.app.workingProfile();
+    const auto originalId = js::str(original, "profileId");
+    const auto exportAck = m.ackFor(m.panel("ExportProfile", {{"profileId", originalId}, {"working", false}}));
+    const auto code = js::str(exportAck["result"], "code");
+    const auto request = m.panel("ImportProfile", {{"code", code}});
+    std::string importedId;
+    bool pending = false, committed = false;
+    for (const auto& message : m.drain()) {
+        if (js::str(message, "type") == "ack" && js::str(message, "requestId") == request) {
+            pending = js::str(message, "status") == "Pending";
+            importedId = js::str(message["result"], "profileId");
+            CHECK(message["result"]["report"]["matchesLoadedAircraft"].get<bool>());
+            CHECK_EQ(js::str(message["result"]["report"], "name"), std::string("Shared views"));
+        }
+        if (js::str(message, "name") == "CommitCompleted" && js::str(message["payload"], "requestId") == request)
+            committed = js::str(message["payload"], "status") == "Committed";
+    }
+    CHECK(pending); CHECK(committed);
+    CHECK(!importedId.empty()); CHECK(importedId != originalId);
+    const auto& profiles = m.app.repository().committed().profiles;
+    CHECK_EQ(profiles.size(), std::size_t{2});
+    CHECK(profiles.at(originalId).current == original);
+    const auto& imported = profiles.at(importedId).current;
+    CHECK(imported["cameras"][0]["id"] != original["cameras"][0]["id"]);
+    CHECK_EQ(js::str(imported, "name"), std::string("Shared views"));
+    CHECK_EQ(js::str(m.app.workingProfile(), "profileId"), originalId);
+    CHECK_EQ(js::str(m.ackFor(m.panel("ImportProfile", {{"code", "invalid profile text"}})), "status"), std::string("Rejected"));
+    CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{2});
+    m.storage.failNextWrite = true;
+    m.panel("ImportProfile", {{"code", code}});
+    const auto failed = m.lastEvent("CommitCompleted");
+    CHECK_EQ(js::str(failed["payload"], "status"), std::string("Failed"));
+    CHECK_EQ(m.app.repository().committed().profiles.size(), std::size_t{2});
+    FakeBackend camera; FakeServices services;
+    ModuleApp restarted(camera, services, m.storage, "import-restart", "test");
+    restarted.start(0);
+    CHECK_EQ(restarted.repository().committed().profiles.size(), std::size_t{2});
+    CHECK(restarted.repository().committed().profiles.at(importedId).current == imported);
 }

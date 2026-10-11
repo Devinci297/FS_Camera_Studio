@@ -52,7 +52,22 @@ The app bar displays the version; click it for update detection and the installe
 Close MSFS before installing an update. Airport cameras that have been generated **and saved**
 load automatically within the configured radius (25 NM by default); Auto switch is a separate viewpoint control.
 
-### Reproduce the 0.1.1 tester release
+### Package the current tester build
+
+The `0.1.1-test.20261011.4` release uses the verified package and receipt under
+`build/review/panel-polish-a320`. Its scoped staging script is
+`tools/diagnostics/stage-panel-polish.py`; the diagnostic scripts retain their
+explicit local baseline checks to prevent packaging an unverified host.
+
+```powershell
+python tools/build-installer.py --version 0.1.1-test.20261011.4 --package build/review/panel-polish-a320/fs-camera-studio --receipt build/review/panel-polish-a320/staged.json
+```
+
+See [release notes](doc/releases/0.1.1-test.20261011.4.md),
+[verification notes](doc/test-evidence/2026-10-11-panel-polish-a320.md), and
+[A320 starter guidance](doc/A320-starter-profile.md).
+
+### Reproduce the initial 0.1.1 tester release
 
 ```powershell
 tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.1.1

@@ -1,6 +1,7 @@
 #include "input_router.hpp"
 
 #include <algorithm>
+#include <cctype>
 
 namespace fscs::host {
 
@@ -26,6 +27,49 @@ std::set<PovDirection> povDirections(std::uint32_t angle) {
 const std::vector<std::string>& InputRouter::setBindings(std::vector<profiles::Binding> bindings) {
     releaseAll();
     bindings_ = std::move(bindings);
+    fastBindings_.clear();
+    const auto configured = bindings_;
+    std::set<std::string> modifiers;
+    for (const auto& b : configured) {
+        if (b.action != Action::MoveFast || b.input.kind != profiles::InputKind::Key) continue;
+        const auto& key = b.input.definition;
+        if (key == "VK_SHIFT") {
+            modifiers.insert("VK_LSHIFT");
+            modifiers.insert("VK_RSHIFT");
+        } else if (key == "VK_LSHIFT" || key == "VK_RSHIFT" || key == "VK_LCONTROL" ||
+                   key == "VK_RCONTROL" || key == "VK_LMENU" || key == "VK_RMENU") {
+            modifiers.insert(key);
+        }
+    }
+    const auto alias = [&](profiles::Binding b, const std::string& definition, bool fast) {
+        if (std::any_of(bindings_.begin(), bindings_.end(), [&](const auto& existing) {
+                return existing.input.definition == definition;
+            })) return;
+        b.input.definition = definition;
+        if (fast) fastBindings_.insert(bindings_.size());
+        bindings_.push_back(std::move(b));
+    };
+    for (const auto& b : configured) {
+        if (b.action == Action::MoveFast && b.input.kind == profiles::InputKind::Key &&
+            b.input.definition == "VK_SHIFT") {
+            alias(b, "VK_LSHIFT", false);
+            alias(b, "VK_RSHIFT", false);
+        }
+        const bool movement = b.action == Action::MoveForward || b.action == Action::MoveBack ||
+                              b.action == Action::MoveLeft || b.action == Action::MoveRight ||
+                              b.action == Action::MoveUp || b.action == Action::MoveDown;
+        if (!movement || b.input.kind != profiles::InputKind::Key || b.input.definition.size() != 1 ||
+            !std::isalpha(static_cast<unsigned char>(b.input.definition[0]))) continue;
+        // SimConnect key definitions are case-sensitive and modifiers are distinct chords.
+        // Include both letter cases and the configured speed modifier without stealing explicit bindings.
+        const auto key = static_cast<unsigned char>(b.input.definition[0]);
+        const std::string lower(1, static_cast<char>(std::tolower(key)));
+        const std::string upper(1, static_cast<char>(std::toupper(key)));
+        alias(b, lower, false);
+        alias(b, upper, false);
+        for (const auto& modifier : modifiers)
+            for (const auto& letter : {lower, upper}) alias(b, modifier + "+" + letter, true);
+    }
     definitions_.clear();
     bindingsForDefinition_.clear();
     povState_.clear();
@@ -138,7 +182,10 @@ std::vector<ActionEvent> InputRouter::releaseAll() {
 
 core::ManualInput InputRouter::manualInput() const {
     core::ManualInput m;
+    std::set<Action> applied;
     for (const auto& [physical, h] : held_) {
+        m.fast = m.fast || fastBindings_.count(h.binding) > 0;
+        if (!applied.insert(bindings_[h.binding].action).second) continue;
         switch (bindings_[h.binding].action) {
             case Action::LookLeft: m.lookRight -= 1; break;
             case Action::LookRight: m.lookRight += 1; break;

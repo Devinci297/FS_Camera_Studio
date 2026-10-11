@@ -19,6 +19,8 @@ const assert=require('node:assert/strict'),path=require('node:path');
     FSCApp.bridge.on('event',e=>{if(e.name==='Snapshot')resolve();});
     FSCApp.bridge.send('RequestSnapshot',{});
   }));
+  // Let queued demo commit snapshots settle before replacing its data with a UI-only fixture.
+  await page.waitForTimeout(600);
   // Reserve slots 1..20, then assign the unassigned camera without the legacy cap.
   // These synthetic cameras exist only in the UI fixture, not the demo repository.
   // Do not let a delayed demo snapshot replace the fixture after an unknown ID patch.
@@ -34,7 +36,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
     const s=FSCApp.state,p=s.working.profile,cat=p.categories[0],base=p.cameras[0];cat.name='Apron';cat.airportIcao='KDAB';cat.cameraIds=[];p.cameras=[];
     for(let i=0;i<100;i++){const c=JSON.parse(JSON.stringify(base));c.id=crypto.randomUUID();c.name='Parking '+(i+1);c.mode='airport';c.airportIcao='KDAB';c.viewId=100+i;p.cameras.push(c);cat.cameraIds.push(c.id);}cat.defaultCameraId=cat.cameraIds[0];p.categories=[cat];p.defaultCameraId=cat.cameraIds[0];s.selection.cameraId=cat.cameraIds[0];s.active.cameraId=cat.cameraIds[0];s.ownership.state='Active';s.miniCategory=cat.id;s.airportExpanded=true;
     s.working.settings.ui.miniHover=false;
-    s.airports.autoSwitch=false;window.calls=[];
+    s.airports.autoSwitch=false;s.airports.positionKnown=true;window.calls=[];
     FSCApp.bridge.request=async(a,p)=>{calls.push({a,p});if(a==='SetAirportAuto')s.airports.autoSwitch=p.enabled;return{status:'Completed'};};
     FSCDemo.setOwnership('Active');
     document.getElementById('mc-mini-pin').click();

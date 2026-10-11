@@ -97,3 +97,10 @@ ingame-ui#FSCSMini .mc-mini-region, ingame-ui#FSCSMini .mc-dialog-shade:not([hid
 ingame-ui#FSCSMini, ingame-ui#FSCSMini #mc-sim { pointer-events: none !important; }
 ingame-ui#FSCSMini .mc-mini-region,
 ingame-ui#FSCSMini .mc-dialog-shade:not([hidden]) { pointer-events: auto; }
+
+/* Keep the stock host frame from painting a second backdrop around the dock. */
+ingame-ui#FSCSMini, ingame-ui#FSCSMini .ingameUiWrapper, ingame-ui#FSCSMini .ingameUiContent,
+ingame-ui#FSCSMini::before, ingame-ui#FSCSMini::after,
+ingame-ui#FSCSMini .ingameUiWrapper::before, ingame-ui#FSCSMini .ingameUiWrapper::after {
+ background:transparent !important; border:0 !important; box-shadow:none !important; backdrop-filter:none !important;
+}

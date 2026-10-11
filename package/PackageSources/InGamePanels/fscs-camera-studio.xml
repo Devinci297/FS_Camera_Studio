@@ -5,7 +5,7 @@
     <Filename>fscs-camera-studio.spb</Filename>
     <InGamePanels.InGamePanelDefinition id="PANEL_FSCS_CAMERA_STUDIO" Name="Camera Studio"
         url="html_ui/InGamePanels/FSCameraStudio/main.html" resizeDirections="Both"
-        minWidth="40" minHeight="45" defaultWidth="56" defaultHeight="70" defaultTop="12" defaultRight="22"
+        minWidth="58" minHeight="45" defaultWidth="78" defaultHeight="86" defaultTop="7" defaultRight="11"
         icon="ICON_TOOLBAR_FSCS_CAMERA_STUDIO" buttonVisible="true" headerVisible="false">
     </InGamePanels.InGamePanelDefinition>
 </SimBase.Document>

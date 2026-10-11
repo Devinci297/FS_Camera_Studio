@@ -545,7 +545,9 @@ void ModuleApp::handle(const Command& c, double now) {
             profiles::reassignIds(doc);
         } else {
             const bool forAircraft = js::boolean(p, "forAircraft", true) && !aircraftModelKey_.empty();
-            doc = profiles::makeStarterProfile(name, forAircraft ? aircraftModelKey_ : "", forAircraft ? aircraftTitle_ : "");
+            doc = forAircraft && profiles::isA320(aircraftModelKey_, aircraftTitle_)
+                      ? profiles::makeA320Profile(aircraftModelKey_, aircraftTitle_)
+                      : profiles::makeStarterProfile(name, forAircraft ? aircraftModelKey_ : "", forAircraft ? aircraftTitle_ : "");
         }
         doc["name"] = name;
         if (js::boolean(p, "forAircraft", false) && !aircraftModelKey_.empty())
@@ -995,6 +997,26 @@ void ModuleApp::resolveAircraftProfile(double now) {
     }
     const auto& st = repo_.committed();
     const std::string preferred = js::str(js::object(st.navigation, "lastByModel"), aircraftModelKey_.c_str());
+    if (profiles::isA320(aircraftModelKey_, aircraftTitle_) && !working_.dirtyProfile && !pendingCommit_) {
+        // A saved user profile takes precedence. Never install over or reopen it with starter poses.
+        bool hasModelProfile = false;
+        for (const auto& [id, rec] : st.profiles)
+            if (js::str(js::object(rec.current, "aircraftMatch"), "modelKey") == aircraftModelKey_) hasModelProfile = true;
+        if (!hasModelProfile && defaultProfileAttempts_.insert(aircraftModelKey_).second) {
+            json doc = profiles::makeA320Profile(aircraftModelKey_, aircraftTitle_);
+            const auto id = js::str(doc, "profileId");
+            CommitRequest req;
+            req.upsertProfiles.push_back(doc);
+            req.navigation = navigation();
+            (*req.navigation)["lastProfileId"] = id;
+            (*req.navigation)["lastByModel"][aircraftModelKey_] = id;
+            req.requestId = "builtin:a320-eyepoint-v1:" + aircraftModelKey_;
+            diag("installing A320 starter: 12 pilot-eyepoint cockpit views");
+            commit(std::move(req), {"builtin-a320", "create", working_.draftRevision, nullptr, id}, now);
+            resolveAircraft_ = true;
+            return;
+        }
+    }
     if (profiles::isC172(aircraftModelKey_, aircraftTitle_) && !working_.dirtyProfile && !pendingCommit_) {
         bool installed = false;
         for (const auto& [id, rec] : st.profiles) {

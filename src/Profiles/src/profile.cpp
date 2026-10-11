@@ -591,6 +591,68 @@ json makeC172Profile(const std::string& modelKey, const std::string& displayName
     return doc;
 }
 
+bool isA320(const std::string& modelKey, const std::string& displayName) {
+    // Package paths and titles vary (A320_NEO, A32NX, FNX_320); punctuation is not identity.
+    std::string text;
+    for (unsigned char c : modelKey + " " + displayName)
+        if (std::isalnum(c)) text.push_back(static_cast<char>(std::tolower(c)));
+    for (const char* other : {"a318", "a319", "a321", "fnx319", "fnx321"})
+        if (text.find(other) != std::string::npos) return false;
+    return text.find("a320") != std::string::npos || text.find("a32nx") != std::string::npos ||
+           text.find("fnx320") != std::string::npos;
+}
+
+json makeA320Profile(const std::string& modelKey, const std::string& displayName) {
+    json doc = makeStarterProfile("Airbus A320 - Starter views", modelKey, displayName);
+    doc["builtinTemplate"] = "a320-eyepoint-v1";
+    doc["categories"] = json::array();
+    doc["cameras"] = json::array();
+    const json cameraTemplate = makeStarterProfile("", "", "")["cameras"][0];
+    int viewId = 0;
+    auto category = [&](const char* name, const char* color) {
+        const auto id = newUuid();
+        doc["categories"].push_back({{"id", id}, {"name", name}, {"color", color}, {"cameraIds", json::array()}});
+        return id;
+    };
+    auto view = [&](const std::string& group, const char* name, double pitch, double heading, double fov, bool favorite = false) {
+        json cam = cameraTemplate;
+        const auto id = newUuid();
+        const auto q = core::Quat::fromPbh({pitch, 0, heading});
+        cam["id"] = id;
+        cam["categoryId"] = group;
+        cam["name"] = name;
+        cam["viewId"] = ++viewId;
+        cam["favorite"] = favorite;
+        // No cross-model cockpit coordinates: all views start at this model's pilot eyepoint.
+        cam["positionMetersFRD"] = {0.0, 0.0, 0.0};
+        cam["orientationCameraToAnchorXYZW"] = {q.x, q.y, q.z, q.w};
+        cam["projection"]["value"] = fov * core::kDegToRad;
+        cam["transition"]["durationSeconds"] = 0.55;
+        doc["cameras"].push_back(cam);
+        for (auto& cat : doc["categories"]) if (cat["id"] == group) {
+            if (cat["cameraIds"].empty()) cat["defaultCameraId"] = id;
+            cat["cameraIds"].push_back(id);
+        }
+        if (viewId == 1) doc["defaultCameraId"] = id;
+    };
+    auto group = category("Flight deck", "#75baff");
+    view(group, "Pilot - normal", 0, 0, 62, true);
+    view(group, "Pilot - landing", -3, 0, 52, true);
+    view(group, "Pilot - wide cockpit", -8, 0, 85);
+    view(group, "Left window", 0, -70, 62);
+    view(group, "Right cockpit", -5, 65, 72);
+    group = category("Instruments", "#f5a56b");
+    view(group, "Captain displays", -24, 0, 48, true);
+    view(group, "Center displays", -23, 28, 48, true);
+    view(group, "Main panel overview", -20, 15, 80);
+    group = category("Controls", "#87d5a0");
+    view(group, "Glareshield", -8, 23, 55, true);
+    view(group, "Overhead", 55, 25, 75);
+    view(group, "Pedestal", -58, 38, 65);
+    view(group, "Left side controls", -40, -60, 60);
+    return doc;
+}
+
 std::vector<std::pair<std::string, std::string>> reassignIds(json& doc) {
     std::map<std::string, std::string> remap;
     auto mapId = [&](json& v) {

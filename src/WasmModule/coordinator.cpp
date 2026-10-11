@@ -1019,7 +1019,7 @@ void Coordinator::onAction(const ActionEvent& ev, double now) {
             emit_("SaveViewsRequested", json::object());
             break;
         case Action::ToggleAirportAuto:
-            if (!ev.pressed || !eligibleToSubmit()) return;
+            if (!ev.pressed) return;
             emit_("AirportAutoToggleRequested", json::object());
             break;
         case Action::ToggleMini:

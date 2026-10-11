@@ -396,6 +396,119 @@ TEST_CASE("input: visible movement defaults, boost and zoom pulses can be remove
     CHECK(r.definitions().empty());
 }
 
+TEST_CASE("input: movement letter aliases and both Shift chords release cleanly without double speed") {
+    auto r = routerWithDefaults();
+    for (const auto* definition : {"q", "e", "VK_LSHIFT+q", "VK_LSHIFT+E", "VK_RSHIFT+Q", "VK_RSHIFT+e"}) {
+        const std::string def = definition;
+        const auto index = indexOf(r, def);
+        CHECK(index < r.definitions().size());
+        r.onInput(index, true, 0);
+        CHECK_NEAR(r.manualInput().moveUp, def.back() == 'q' || def.back() == 'Q' ? -1 : 1, 1e-9);
+        CHECK(r.manualInput().fast == (def.find('+') != std::string::npos));
+        r.onInput(index, false, 0);
+        CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
+        CHECK(!r.manualInput().fast);
+    }
+    r.onInput(indexOf(r, "E"), true, 0);
+    r.onInput(indexOf(r, "e"), true, 0);
+    r.onInput(indexOf(r, "VK_RSHIFT+e"), true, 0);
+    CHECK_NEAR(r.manualInput().moveUp, 1, 1e-9);
+    CHECK(r.manualInput().fast);
+    r.onInput(indexOf(r, "VK_RSHIFT+e"), false, 0);
+    CHECK_NEAR(r.manualInput().moveUp, 1, 1e-9);
+    CHECK(!r.manualInput().fast);
+    r.onInput(indexOf(r, "VK_LSHIFT+e"), true, 0);
+    r.setTextFocus(true);
+    CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
+    CHECK(!r.manualInput().fast);
+    r.setTextFocus(false);
+    CHECK(r.onInput(indexOf(r, "VK_LSHIFT+e"), true, 0).empty());
+    r.onInput(indexOf(r, "VK_LSHIFT+e"), false, 0);
+    r.onInput(indexOf(r, "VK_LSHIFT+e"), true, 0);
+    CHECK_NEAR(r.manualInput().moveUp, 1, 1e-9);
+    CHECK(r.manualInput().fast);
+    r.releaseAll();
+    CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
+    CHECK(!r.manualInput().fast);
+}
+
+TEST_CASE("input: boost aliases preserve custom bindings and follow rebound movement and boost") {
+    auto doc = fscs::profiles::defaultBindingsDocument();
+    doc["bindings"].push_back({{"action", "nextCamera"}, {"input", {{"kind", "key"}, {"definition", "VK_LSHIFT+Q"}}}});
+    auto parsed = fscs::profiles::parseBindings(doc);
+    CHECK(parsed.problems.empty());
+    InputRouter r;
+    r.setBindings(parsed.bindings);
+    const auto event = r.onInput(indexOf(r, "VK_LSHIFT+Q"), true, 0);
+    CHECK_EQ(event.size(), std::size_t{1});
+    if (!event.empty()) CHECK(event.front().action == Action::NextCamera);
+    CHECK_NEAR(r.manualInput().moveUp, 0, 1e-9);
+    CHECK(!r.manualInput().fast);
+    for (auto& binding : parsed.bindings) {
+        if (binding.action == Action::MoveUp) binding.input.definition = "U";
+        if (binding.action == Action::MoveFast) binding.input.definition = "VK_RSHIFT";
+    }
+    r.setBindings(parsed.bindings);
+    CHECK(indexOf(r, "e") == r.definitions().size());
+    CHECK(indexOf(r, "VK_LSHIFT+u") == r.definitions().size());
+    r.onInput(indexOf(r, "VK_RSHIFT+u"), true, 0);
+    CHECK_NEAR(r.manualInput().moveUp, 1, 1e-9);
+    CHECK(r.manualInput().fast);
+    r.setBindings({});
+    CHECK(r.definitions().empty());
+    CHECK(!r.manualInput().fast);
+}
+
+TEST_CASE("airports: Q E and Shift chords move world altitude with tracking and coarse speed") {
+    auto run = [](const char* definition, const char* precision) {
+        Rig r;
+        std::vector<std::string> notes;
+        const auto airport = fscs::profiles::airport::generate(airportFixture(), json::object(), notes);
+        auto cam = airport["cameras"][0];
+        cam["positionMetersFRD"] = {0, 0, -3};
+        cam["orientationCameraToAnchorXYZW"] = {0, 0, 0, 1};
+        cam["aircraftTracking"] = "both";
+        cam["transition"]["kind"] = "cut";
+        auto cat = airport["categories"][0];
+        cat["cameraIds"] = json::array({cam["id"]});
+        cat["defaultCameraId"] = cam["id"];
+        r.profile["categories"].push_back(cat);
+        r.profile["cameras"].push_back(cam);
+        r.connect();
+        auto settings = fscs::profiles::defaultSettingsDocument();
+        settings["ui"]["precision"] = precision;
+        r.c.setSettings(fscs::profiles::parseHostSettings(settings), r.t);
+        r.c.setAircraftPosition(40.001, -89.999, 150, r.t);
+        r.activate(cam["id"]); r.grant(); r.advance(.02);
+        const auto before = r.backend.submitted.back();
+        auto input = routerWithDefaults();
+        const auto index = indexOf(input, definition);
+        CHECK(index < input.definitions().size());
+        input.onInput(index, true, 0);
+        r.c.setManualInput(input.manualInput());
+        r.advance(1.0 / 60, 120);
+        const auto after = r.backend.submitted.back();
+        CHECK(after.referential == Referential::World);
+        CHECK(after.trackUserAircraft);
+        CHECK_NEAR(after.x, before.x, 1e-10);
+        CHECK_NEAR(after.y, before.y, 1e-10);
+        input.onInput(index, false, 0);
+        r.c.setManualInput(input.manualInput());
+        r.advance(1.0 / 60, 240); // Let the normal movement deceleration settle.
+        const double stopped = r.backend.submitted.back().z;
+        r.advance(1.0 / 60, 60);
+        CHECK_NEAR(r.backend.submitted.back().z, stopped, 1e-6);
+        return after.z - before.z;
+    };
+    const auto up = run("e", "normal"), down = run("q", "normal");
+    const auto coarse = run("e", "coarse");
+    CHECK(up > .5);
+    CHECK_NEAR(down, -up, 1e-8);
+    CHECK_NEAR(coarse, up * 10, 1e-8);
+    CHECK_NEAR(run("VK_LSHIFT+E", "coarse"), coarse * 4, 1e-8);
+    CHECK_NEAR(run("VK_RSHIFT+q", "coarse"), -coarse * 4, 1e-8);
+}
+
 TEST_CASE("coordinator: precision scales keyboard translation and boost independently of look") {
     auto run = [](const char* precision, bool fast) {
         Rig r; r.connect(); r.activate(r.pilot); r.grant(); r.advance(.01);

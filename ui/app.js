@@ -115,7 +115,7 @@
   function decorateName(control, name, isCategory, chosenIcon, color) {
     const label = control.querySelector('span');
     if (!label) return;
-    empty(label); label.classList.add('mc-entity-name'); if (/^#[0-9a-f]{6}$/i.test(color || '')) label.style.color = color;
+    empty(label); label.classList.add('mc-entity-name'); label.classList.toggle('mc-category-name', Boolean(isCategory)); if (/^#[0-9a-f]{6}$/i.test(color || '')) label.style.color = color;
     add(label, icon(window.FSCIcons.names.indexOf(chosenIcon) >= 0 ? chosenIcon : viewIcon(name, isCategory)), make('span', name, 'mc-entity-label'));
     control.title = name; control.setAttribute('aria-label', name);
   }
@@ -127,6 +127,119 @@
     render();
     if (key) { const target = $$('[data-focus-key]', container).filter(el => el.getAttribute('data-focus-key') === key)[0]; if (target) target.focus(); }
     container.scrollTop = scrollTop; container.scrollLeft = scrollLeft;
+  }
+  /* Delegated help covers rebuilt lists and dialogs as well as fixed controls in both surfaces. */
+  function controlHelp(control) {
+    const help = {
+      'mc-add':'Add a camera, category or generated airport cameras.',
+      'mc-add-camera':'Add a camera to the current category.',
+      'mc-camera-icon':'Choose an icon for this camera.',
+      'mc-camera-name':'Rename this camera. Save changes to keep the new name.',
+      'mc-camera-color':'Choose the camera name and icon color, or inherit its category color.',
+      'mc-category-default':'Start with this camera when selecting its category in the mini panel.',
+      'mc-camera-menu':'Camera actions: rename, color, icon, duplicate, move or delete.',
+      'mc-camera-binding':'Assign a keyboard or controller shortcut to this camera.',
+      'mc-favorite':'Show or hide this camera in quick access.',
+      'mc-view-in-sim':'Activate this camera in the simulator.',
+      'mc-editor-mouse-look':'Hold the right mouse button over the simulator scene and drag to look around.',
+      'mc-mouse-look':'Hold the right mouse button over the simulator scene and drag to look around.',
+      'mc-mini-pin':'Keep the mini panel open, or let it hide when the pointer leaves.',
+      'mc-mini-trigger':'Reveal the mini camera panel.',
+      'mc-expand':'Open the full camera editor.',
+      'mc-compact':'Close the editor and use the mini camera panel.',
+      'mc-hide':'Hide the editor. Camera control remains active.',
+      'mc-prev':'Show the previous camera in this category.',
+      'mc-next':'Show the next camera in this category.',
+      'mc-release':'Release camera control to the simulator.',
+      'mc-dock-release':'Release camera control to the simulator.',
+      'mc-save':'Save the current adjusted view and all pending changes (Ctrl+S by default).',
+      'mc-revert':'Discard unsaved changes and restore the saved profile.',
+      'mc-save-current-view':'Store the current simulator view in this camera, including mouse look and movement.',
+      'mc-restore-pose':'Restore this camera to its last saved position and orientation.',
+      'mc-center-look':'Reset pitch, yaw and roll for this camera.',
+      'mc-fov-number':'Field of view in degrees. Smaller values zoom in; larger values show a wider view.',
+      'mc-fov-range':'Field of view: drag left to zoom in, or right for a wider view.',
+      'mc-view-id':'Set a unique view ID for recalling this camera with a binding.',
+      'mc-view-type':'Choose whether this view is attached to the aircraft or fixed at an airport.',
+      'mc-duration':'Time taken to transition to this camera, in seconds.',
+      'mc-delay':'Pause before the transition begins, in seconds.',
+      'mc-retain-look':'Remember the temporary look direction when revisiting this camera.',
+      'mc-search':'Filter the camera library by name.',
+      'mc-binding-search':'Find bindings by action, camera name or assigned input.',
+      'mc-setting-mini-opacity':'Set only the mini panel background opacity. Camera names and controls stay readable.',
+      'mc-setting-move-speed':'Base keyboard movement speed, in meters per second. Precision and the fast-movement binding scale it.',
+      'mc-setting-look-speed':'Rotation speed for manual look bindings, in degrees per second.',
+      'mc-setting-airport-radius':'Load saved airport cameras within this distance of the aircraft, in nautical miles.',
+      'mc-setting-mouse-sensitivity':'Right-drag rotation sensitivity. Lower values turn more slowly.',
+      'mc-setting-mouse-smoothing':'Right-drag smoothing in milliseconds. Higher values soften movement; zero is immediate.',
+      'mc-mouse-defaults':'Restore the tested default mouse-look sensitivity and smoothing.',
+      'mc-new-profile':'Duplicate the current camera set as a new profile.',
+      'mc-create-profile':'Create a new profile for an aircraft or airport.',
+      'mc-import-profile':'Import a Camera Studio profile file.',
+      'mc-export-profile':'Choose any saved profile to export, or include edits from your current profile.',
+      'mc-backups':'Browse and restore previous saved profiles.',
+      'mc-airport-generator':'Generate airport views from installed scenery and preview them before saving.',
+      'mc-diagnostics':'Inspect module, connection and camera-control status.',
+      'mc-dialog-close':'Close this dialog.',
+      'mc-nav-cameras':'Edit camera views, positions, motion and behavior.',
+      'mc-nav-bindings':'Assign and manage keyboard and controller inputs.',
+      'mc-nav-profiles':'Create, import, export and manage camera profiles.',
+      'mc-nav-settings':'Customize appearance, mouse look and camera controls.',
+      'mc-tab-position':'Move, rotate and zoom the selected camera.',
+      'mc-tab-motion':'Configure transitions and camera motion effects.',
+      'mc-tab-behavior':'Configure view bindings, defaults and camera behavior.'
+    };
+    // A disabled control's existing reason is more useful than a generic action description.
+    if(control.disabled && control.title)return control.title;
+    if(help[control.id])return help[control.id];
+    if(control.closest('#mc-setting-name-display'))return 'Show '+control.textContent.trim().toLowerCase()+' for categories only. Camera names and icons stay visible.';
+    if(control.closest('#mc-setting-theme'))return 'Use the '+control.textContent.trim().toLowerCase()+' appearance.';
+    if(control.dataset.precision)return 'Use '+control.dataset.precision+' movement and rotation steps; this also scales keyboard movement.';
+    if(control.classList.contains('mc-category-head'))return (control.getAttribute('aria-expanded')==='true'?'Collapse ':'Expand ')+(control.getAttribute('aria-label')||'category')+'. Right-click for category actions.';
+    if(control.closest('#mc-dock-categories'))return 'Show '+(control.getAttribute('aria-label')||control.textContent.trim())+' cameras. Right-click for category actions.';
+    if(control.classList.contains('mc-camera-select')||control.closest('#mc-dock-favorites'))return (control.title||control.getAttribute('aria-label')||control.textContent.trim())+'. Right-click for camera actions.';
+    if(control.title)return control.title;
+    const label=control.closest('label'),labelled=control.getAttribute('aria-labelledby');
+    return control.getAttribute('aria-label') || (labelled && $(labelled) && $(labelled).textContent) ||
+      (label && label.textContent.replace(/\s+/g,' ').trim()) || control.getAttribute('placeholder') || control.textContent.replace(/\s+/g,' ').trim();
+  }
+  function installTooltips() {
+    const tip=make('div',null,'mc-tooltip');tip.id='mc-control-tooltip';tip.setAttribute('role','tooltip');tip.hidden=true;root.appendChild(tip);
+    let target=null,timer=null,savedTitle=null,description=null,shown=false;
+    const hide=()=>{
+      clearTimeout(timer);timer=null;tip.hidden=true;
+      if(target&&shown){
+        if(savedTitle!==null&&!target.title)target.title=savedTitle;
+        if(description===null)target.removeAttribute('aria-describedby');else target.setAttribute('aria-describedby',description);
+      }
+      target=null;savedTitle=null;description=null;shown=false;
+    };
+    const find=el=>el&&el.closest?el.closest('button,input,select,textarea,summary,[role="slider"],[tabindex="0"]'):null;
+    const show=(control,delay)=>{
+      if(!control||!root.contains(control)||control===target)return;
+      hide();target=control;
+      timer=setTimeout(()=>{
+        const message=controlHelp(control);
+        if(!message||!document.documentElement.contains(control)||!control.getClientRects().length){hide();return;}
+        savedTitle=control.hasAttribute('title')?control.title:null;
+        if(savedTitle!==null)control.removeAttribute('title');
+        shown=true;description=control.getAttribute('aria-describedby');control.setAttribute('aria-describedby',(description?description+' ':'')+tip.id);
+        tip.textContent=message;tip.hidden=false;
+        const r=control.getBoundingClientRect(),box=tip.getBoundingClientRect();
+        const width=document.documentElement.clientWidth||window.innerWidth,height=window.innerHeight;
+        tip.style.left=Math.max(8,Math.min(r.left+(r.width-box.width)/2,width-box.width-8))+'px';
+        const above=r.top-box.height-8;
+        tip.style.top=Math.max(8,Math.min(above>=8?above:r.bottom+8,height-box.height-8))+'px';
+      },delay);
+    };
+    root.addEventListener('mouseover',event=>show(find(event.target),450),true);
+    root.addEventListener('mouseout',event=>{if(target&&!target.contains(event.relatedTarget))hide();},true);
+    root.addEventListener('focusin',event=>show(find(event.target),150),true);
+    root.addEventListener('focusout',hide,true);
+    root.addEventListener('mousedown',hide,true);
+    root.addEventListener('scroll',hide,true);
+    root.addEventListener('keydown',event=>{if(event.key==='Escape')hide();},true);
+    window.addEventListener('blur',hide);window.addEventListener('resize',hide);
   }
   const HAS_POINTER = typeof window.PointerEvent === 'function';
   const POINTER_FALLBACK = { pointerenter: 'mouseenter', pointerleave: 'mouseleave', pointermove: 'mousemove', pointerdown: 'mousedown', pointerup: 'mouseup', pointercancel: null, lostpointercapture: null };
@@ -184,7 +297,7 @@
     ['toggleEditor', 'Toggle editor', 'Open or hide the Camera Studio editor'],
     ['saveViews', 'Save adjusted view and all changes', 'Ctrl+S stores the current position, look and zoom, then saves pending changes'],
     ['toggleHeadTracking', 'Toggle head tracking', 'Toggle MSFS head tracking for the active camera'],
-    ['toggleAirportAuto', 'Toggle auto airport camera switching', 'Follow the nearest camera while in an airport view'],
+    ['toggleAirportAuto', 'Toggle auto airport camera switching', 'Switch to the nearest loaded airport camera from any view'],
     ['toggleMouseLook', 'Toggle mouse look', 'Move within the custom camera without releasing control'],
     ['toggleMini', 'Toggle mini control panel', 'Show or hide the quick-access dock'],
   ];
@@ -970,6 +1083,7 @@
     row.setAttribute('data-current', String(Boolean(sel) && view.id === sel.id));
     const choose = button(view.name, () => recallFromLibrary(view.id), 'mc-camera-select');
     decorateName(choose, view.name, false, view.icon, entityColor(view));
+    choose.classList.toggle('mc-airport-camera-name',view.mode==='airport');
     choose.setAttribute('data-focus-key', 'cam:' + view.id);
     choose.setAttribute('aria-pressed', String(Boolean(sel) && view.id === sel.id));
     let label = view.name;
@@ -1628,7 +1742,13 @@
       const head=ensure('head','Head tracking',()=>{const v=getView();if(v)trackingPreference(v,(v.trackingPolicy==='on'||v.trackingPolicy!=='off'&&S.caps.headTracking&&S.caps.headTracking.enabled)?'off':'on');});
       head.textContent='Head tracking: '+(policy==='nativeIfQualified'&&!live?'Sim':enabled?'On':'Off');head.setAttribute('aria-pressed',String(enabled));head.disabled=!view||readOnly();head.title=status.error||'Toggle MSFS head tracking for this camera. Save to keep this preference.';
       const tracking=ensure('aircraft','Track aircraft',()=>aircraftTrackingOptions(getView()));tracking.hidden=!view||view.mode!=='airport';tracking.textContent='Track: '+(view&&view.aircraftTracking==='both'?'Aircraft':view&&view.aircraftTracking==='heading'?'Heading':'Off');tracking.disabled=readOnly();
-      const automatic=ensure('auto','Auto switch',()=>command('SetAirportAuto',{enabled:!S.airports.autoSwitch}));automatic.hidden=!view||view.mode!=='airport';automatic.setAttribute('aria-pressed',String(!!S.airports.autoSwitch));automatic.disabled=!live;automatic.title='Select the nearest airport camera as the aircraft moves. Manual camera selection, movement or right-drag turns this off.';
+      let automatic=$(prefix+'auto');
+      if(!automatic){automatic=button('Auto switch',()=>command('SetAirportAuto',{enabled:!S.airports.autoSwitch}),'mc-secondary mc-airport-auto');automatic.id=prefix+'auto';}
+      const globalTools=anchorId==='mc-editor-mouse-look'?$('mc-drag-header'):anchor.parentNode;
+      if(automatic.parentNode!==globalTools)globalTools.insertBefore(automatic,anchorId==='mc-editor-mouse-look'?$('mc-compact'):anchor);
+      automatic.hidden=false;automatic.setAttribute('aria-pressed',String(!!S.airports.autoSwitch));
+      automatic.disabled=!S.snapshot||(!S.airports.autoSwitch&&(!cameras().some(c=>c.mode==='airport')||!S.airports.positionKnown));
+      automatic.title=automatic.disabled?'Load or generate cameras for a nearby airport first.':'Select the nearest loaded airport camera now and as the aircraft moves. Manual camera selection, movement or right-drag turns this off.';
       if(anchorId==='mc-mouse-look'){const save=ensure('save','Save',saveAdjustedViews);save.title='Save adjusted view and all pending changes (Ctrl+S)';save.disabled=!S.snapshot||!!S.pendingCommit;}
     });
     const select=$('mc-tracking');if(select){select.hidden=true;let b=$('mc-head-tracking-options');if(!b){b=button('Head-tracking options',trackingOptions,'mc-secondary');b.id='mc-head-tracking-options';select.parentNode.insertBefore(b,select);const note=select.parentNode.querySelector('small');if(note)note.textContent='Choose simulator default, on or off for this camera.';}b.disabled=readOnly();}
@@ -1683,15 +1803,17 @@
       if (IS_MINI && P()) {
         const groups = P().categories;
         const selectedGroup = groups.find(g => g.id === S.miniCategory) || group || groups[0];
+        const aircraftGroup=make('div',undefined,'mc-category-grid mc-dock-aircraft');
+        aircraftGroup.appendChild(make('span','Aircraft','mc-category-group-label'));categories.appendChild(aircraftGroup);
         let airportGroup=null;
         groups.forEach(g => {
-          if(g.airportIcao&&!airportGroup){airportGroup=make('details',undefined,'mc-dock-airport');airportGroup.open=S.airportExpanded;airportGroup.addEventListener('toggle',()=>{S.airportExpanded=airportGroup.open;});airportGroup.appendChild(make('summary','Airport · '+g.airportIcao));categories.appendChild(airportGroup);}
+          if(g.airportIcao&&!airportGroup){airportGroup=make('div',undefined,'mc-dock-airport mc-category-grid');airportGroup.appendChild(make('span',g.airportIcao,'mc-category-group-label'));airportGroup.setAttribute('aria-label','Airport '+g.airportIcao);categories.appendChild(airportGroup);}
           const entry = button(g.name, () => { S.miniCategory = g.id; const first = camIn(g.defaultCameraId) || g.cameraIds.map(camIn).find(Boolean); if(first)activateCamera(first.id); renderDock(); });
           decorateName(entry, g.name, true, g.icon, g.color);
           wireContext(entry, () => categoryActions(catIn(g.id)));
           entry.setAttribute('aria-pressed', String(selectedGroup && g.id === selectedGroup.id));
           entry.setAttribute('data-focus-key', 'category:' + g.id);
-          (g.airportIcao ? airportGroup : categories).appendChild(entry);
+          (g.airportIcao ? airportGroup : aircraftGroup).appendChild(entry);
         });
         if (selectedGroup) selectedGroup.cameraIds.map(camIn).filter(Boolean).forEach(view => favorites.appendChild(dockViewButton(view, 'category-view:')));
       } else if (IS_MINI && S.miniPicking && P()) {
@@ -1710,10 +1832,31 @@
       }
     });
     updateActiveState();
+    layoutMiniCategories();
+  }
+  function layoutMiniCategories() {
+    if(!IS_MINI)return;
+    const dock=$('mc-mini-panel'),pane=$('mc-dock-categories');
+    const allGroups=$$('.mc-category-grid',pane);
+    allGroups.forEach(g=>{g.hidden=!g.querySelector('button');});
+    const groups=allGroups.filter(g=>!g.hidden);
+    const icons=root.dataset.nameDisplay==='icons',cell=icons?30:84,row=24;
+    // Use available width before adding height; the camera and tool areas retain their own scrolling.
+    const limit=Math.max(cell*groups.length,Math.floor((dock.clientWidth-20)*.60));
+    let rows=2;
+    const count=g=>g.querySelectorAll('button').length;
+    const width=()=>groups.reduce((sum,g)=>sum+Math.ceil(count(g)/rows)*cell+6,0);
+    while(width()>limit&&rows<Math.max(2,...groups.map(count)))rows++;
+    groups.forEach(g=>{g.style.width=(Math.ceil(count(g)/rows)*cell)+'px';g.style.gridTemplateColumns='repeat('+Math.ceil(count(g)/rows)+', minmax(0,1fr))';});
+    const height=Math.max(74,14+Math.min(rows,Math.max(0,...groups.map(count)))*(row+2));
+    pane.style.width=(width()+6)+'px';pane.style.height=height+'px';
+    dock.style.height=(height+10)+'px';dock.style.maxHeight=(height+10)+'px';
+    sizeMiniClearance();
   }
   function dockViewButton(view, prefix) {
     const entry = button(view.name, () => { S.miniPicking = false; activateCamera(view.id); });
     decorateName(entry, view.name, false, view.icon, entityColor(view));
+    entry.classList.toggle('mc-airport-camera-name',view.mode==='airport');
     wireContext(entry, () => { selectCamera(view.id); cameraActions(); });
     entry.setAttribute('data-focus-key', prefix + view.id);
     entry.setAttribute('data-favorite', view.id);
@@ -1802,7 +1945,7 @@
     $('mc-revert').disabled = !dirty || saving;
     $('mc-save').disabled = !dirty || saving || !S.snapshot;
     const exportButton = $('mc-export-profile');
-    setLabel(exportButton, dirtyFlags().profile ? 'Export working copy' : 'Export current');
+    setLabel(exportButton, 'Export profile');
   }
   function renderBanners() {
     const host = $('mc-banners');
@@ -1846,6 +1989,7 @@
   function render() {
     const d = P();
     $('mc-profile-label').textContent = d ? (d.aircraftMatch && d.aircraftMatch.displayName ? d.aircraftMatch.displayName : 'No aircraft') + ' - ' + d.name : statusText();
+    $('mc-profile-picker').title=$('mc-profile-label').textContent;
     setIcon($('mc-profile-picker'), d && d.aircraftMatch && d.aircraftMatch.strategy === 'none' ? 'map-pin' : 'plane');
     renderTree();
     renderDetails();
@@ -1928,6 +2072,13 @@
       ['Camera commands', COMMANDS.map(c => ({ action: c[0], viewId: 0, name: c[1], detail: c[2] }))],
     ];
   }
+  function updateBindingToggle() {
+    const groups=$$('.mc-binding-section',$('mc-bindings-list'));
+    const allOpen=groups.length>0&&groups.every(g=>g.open);
+    $('mc-toggle-bindings').textContent=allOpen?'Collapse all':'Expand all';
+    $('mc-toggle-bindings').setAttribute('aria-expanded',String(allOpen));
+    $('mc-toggle-bindings').disabled=!groups.length;
+  }
   function renderBindings() {
     const list = $('mc-bindings-list');
     if (!$('mc-binding-kind').querySelector('[value="simZoom"]')) {
@@ -1936,11 +2087,9 @@
     const query = $('mc-binding-search').value.trim().toLowerCase();
     const status = $('mc-binding-status').value, kind = $('mc-binding-kind').value;
     const filtering = !!query || status !== 'all' || kind !== 'all';
-    if (!S.bindingExpanded) S.bindingExpanded = [true, true, true, false];
+    if (!S.bindingExpanded) S.bindingExpanded = [];
     const sections = bindingSections().concat([['Manual look & move', MANUAL.map(entry => ({ action: entry[0], viewId: 0, name: entry[1], detail: entry[0] === 'moveFast' ? 'Hold for 4x movement speed' : entry[0].indexOf('zoom') === 0 ? 'Field of view' : entry[0].indexOf('look') === 0 ? 'Temporary look' : 'Fine 0.1x / Normal 1x / Coarse 10x' }))]]);
-    const allOpen = S.bindingExpanded.every(Boolean);
-    $('mc-toggle-bindings').textContent = allOpen ? 'Collapse all' : 'Expand all';
-    $('mc-toggle-bindings').setAttribute('aria-expanded', String(allOpen));
+
     let shown = 0, total = 0;
     keepFocus(list, () => {
       empty(list);
@@ -1957,11 +2106,9 @@
         const details = make('details', undefined, 'mc-binding-section');
         details.open = filtering || S.bindingExpanded[index];
         details.addEventListener('toggle', () => {
-          if (filtering) return;
-          S.bindingExpanded[index] = details.open;
-          const open = S.bindingExpanded.every(Boolean);
-          $('mc-toggle-bindings').textContent = open ? 'Collapse all' : 'Expand all';
-          $('mc-toggle-bindings').setAttribute('aria-expanded', String(open));
+          if (!details.isConnected) return;
+          if (!filtering) S.bindingExpanded[index] = details.open;
+          updateBindingToggle();
         });
         details.appendChild(make('summary', section[0] + ' (' + rows.length + ')'));
         rows.forEach(row => details.appendChild(bindingRow(row)));
@@ -1969,6 +2116,7 @@
       });
       if (!shown) list.appendChild(make('p', 'No bindings match these filters.', 'mc-empty'));
     });
+    updateBindingToggle();
     $('mc-binding-count').textContent = shown + ' of ' + total + ' bindings';
   }
   function bindingRow(spec) {
@@ -2490,8 +2638,11 @@
     dialogActions([['Cancel', () => closeDialog()], ['Import', () => {
       const code = input.value.trim();
       if (!code) { dialogError('Paste a profile code first.'); return; }
-      bridge.request('ImportProfile', { code }).then(ack => {
-        if (ack.status !== 'Completed') { dialogError(reasonText(ack.reason)); return; }
+      bridge.request('ImportProfile', { code }).then(async ack => {
+        if (ack.status === 'Pending') {
+          const done = await waitForCommit(ack.requestId);
+          if (done.status !== 'Committed') { dialogError(reasonText(done.message)); return; }
+        } else if (ack.status !== 'Completed') { dialogError(reasonText(ack.reason)); return; }
         showImportReport(ack.result || {});
       });
     }, 'mc-primary']]);
@@ -2502,11 +2653,11 @@
     const body = openDialog('Profile imported');
     body.appendChild(make('p', '"' + (report.name || 'The profile') + '" was added as a copy with new camera IDs.'));
     const kv = make('dl', undefined, 'mc-kv');
-    const am = report.aircraftMatch || {};
+    const am = report.aircraftMatch || { matches: report.matchesLoadedAircraft, displayName: report.aircraft };
     add(kv, make('dt', 'Aircraft'), make('dd', (am.matches ? 'Matches the loaded aircraft' : 'Not the loaded aircraft') + (am.displayName ? ' - ' + am.displayName : '')));
     add(kv, make('dt', 'Cameras'), make('dd', String(report.cameraCount || 0)));
     body.appendChild(kv);
-    const unsupported = report.unsupported || [];
+    const unsupported = report.unsupported || report.notes || [];
     if (unsupported.length) {
       body.appendChild(make('p', 'Kept, but not available in this version:', 'mc-warn'));
       const ul = make('ul', undefined, 'mc-report-list');
@@ -2516,12 +2667,36 @@
     dialogActions([['Close', () => closeDialog()], ['Open profile', () => { closeDialog(); if (result.profileId) openProfile(result.profileId); }, 'mc-primary']]);
   }
   function exportProfile() {
-    if (!P()) return;
-    const working = Boolean(dirtyFlags().profile || localPending());
-    whenIdle().then(() => bridge.request('ExportProfile', { profileId: P().profileId, working })).then(ack => {
-      if (ack.status !== 'Completed' || !ack.result) { announce(reasonText(ack.reason), 'warn'); return; }
-      const label = ack.result.label === 'working copy' ? make('p', 'This is the working copy and includes unsaved changes.', 'mc-warn') : null;
-      codeDialog(ack.result.label === 'working copy' ? 'Export working copy' : 'Export current profile', 'A shareable copy of your current camera set.', ack.result.code, label);
+    const body = openDialog('Export a camera profile');
+    body.appendChild(make('p', 'Choose a profile to export. Your current camera stays open.'));
+    const list = make('div', undefined, 'mc-profile-list');
+    const profiles = S.profiles.slice();
+    if (P() && !profiles.some(p => p.profileId === P().profileId)) profiles.unshift(P());
+    profiles.forEach(profile => {
+      const row = make('div', undefined, 'mc-profile-entry');
+      const info = make('div', undefined, 'mc-profile-text');
+      info.appendChild(make('strong', profile.name || 'Camera profile'));
+      const active = P() && profile.profileId === P().profileId;
+      info.appendChild(make('small', (active ? 'Current profile' : 'Saved profile') + (profile.aircraftMatch && profile.aircraftMatch.displayName ? ' - ' + profile.aircraftMatch.displayName : '')));
+      const exportSaved = button('Export saved', () => exportSelectedProfile(profile.profileId, false), 'mc-secondary');
+      exportSaved.title = 'Export the saved version of ' + profile.name;
+      add(row, info, exportSaved);
+      if (active && (dirtyFlags().profile || localPending())) {
+        const draft = button('Export with edits', () => exportSelectedProfile(profile.profileId, true), 'mc-secondary');
+        draft.title = 'Include unsaved camera changes in the exported copy';
+        row.appendChild(draft);
+      }
+      list.appendChild(row);
+    });
+    body.appendChild(list);
+    if (!profiles.length) body.appendChild(make('p', 'No saved profiles are available yet.'));
+    dialogActions([['Close', () => closeDialog()]]);
+  }
+  function exportSelectedProfile(profileId, working) {
+    whenIdle().then(() => bridge.request('ExportProfile', { profileId, working })).then(ack => {
+      if (ack.status !== 'Completed' || !ack.result) { dialogError(reasonText(ack.reason)); return; }
+      const label = ack.result.label === 'working copy' ? make('p', 'This copy includes unsaved camera changes.', 'mc-warn') : null;
+      codeDialog(ack.result.label === 'working copy' ? 'Export working copy' : 'Export saved profile', 'Copy this profile code to share or import on another installation.', ack.result.code, label);
     });
   }
   function backupDialog() {
@@ -2559,8 +2734,13 @@
     root.dataset.theme = ui.theme === 'light' ? 'light' : 'dark';
     root.dataset.reducedMotion = String(Boolean(ui.reducedMotion));
     root.dataset.miniEnabled = String(ui.miniEnabled !== false);
-    root.style.setProperty('--mc-mini-opacity', String(isFinite(ui.miniOpacity) ? M.clamp(ui.miniOpacity, 0.15, 1) : 0.65));
+    const miniOpacity=isFinite(ui.miniOpacity)?M.clamp(ui.miniOpacity,0.15,1):0.65;
+    root.style.setProperty('--mc-mini-opacity',String(miniOpacity));
+    // Coherent can reject a CSS variable inside rgba(), leaving the old opaque dock background.
+    $('mc-mini-panel').style.background='rgba('+(ui.theme==='light'?'238,245,248,':'14,25,35,')+miniOpacity+')';
+    $('mc-name-display-label').textContent='Category display';
     root.dataset.nameDisplay = ui.nameDisplay === 'icons' || ui.nameDisplay === 'labels' ? ui.nameDisplay : 'both';
+    layoutMiniCategories();
     if (IS_MINI) applyMiniMode(ui.miniEnabled === false ? 'off' : ui.miniHover !== false ? 'hover' : 'always');
     if (Boolean(ui.miniPinned) !== miniPinned) setMiniPinned(Boolean(ui.miniPinned), false);
   }
@@ -2870,14 +3050,15 @@
     attachScrollbar($('mc-inspector'));
     attachScrollbar($('mc-dialog-body'));
     attachScrollbar($('mc-dock-favorites'), IS_MINI ? 'y' : 'x');
-    if(IS_MINI){attachScrollbar($('mc-dock-categories'));attachScrollbar($('mc-mini-panel').querySelector('.mc-dock-tools'),'x');}
+    if(IS_MINI){attachScrollbar($('mc-mini-panel').querySelector('.mc-dock-tools'),'x');}
     // Resize events are unreliable in-sim: poll the window size and content every 500 ms as well.
     let lastSize = '';
     const tick = () => {
       const size = document.body.clientWidth + 'x' + window.innerHeight;
-      if (size !== lastSize) { lastSize = size; if (SURFACE === 'demo') sizeMiniClearance(); }
+      if (size !== lastSize) { lastSize = size; layoutMiniCategories(); if (SURFACE === 'demo') sizeMiniClearance(); }
       updateScrollbars();
     };
+    window.addEventListener('resize', layoutMiniCategories);
     window.addEventListener('resize', tick);
     setInterval(tick, 500);
   }
@@ -2911,8 +3092,9 @@
     $('mc-browser-toggle').addEventListener('click', () => { const open = root.dataset.browserOpen !== 'true'; root.dataset.browserOpen = String(open); $('mc-browser-toggle').setAttribute('aria-expanded', String(open)); });
     $('mc-search').addEventListener('input', renderTree);
     $('mc-toggle-bindings').addEventListener('click', () => {
-      const expand = !(S.bindingExpanded || []).every(Boolean);
-      S.bindingExpanded = [expand, expand, expand, expand];
+      const groups=$$('.mc-binding-section',$('mc-bindings-list'));
+      const expand = !groups.length || !groups.every(g=>g.open);
+      S.bindingExpanded = Array(bindingSections().length+1).fill(expand);
       $('mc-binding-search').value = ''; $('mc-binding-status').value = 'all'; $('mc-binding-kind').value = 'all';
       renderBindings();
     });
@@ -3109,6 +3291,7 @@
   window.FSCIcons.hydrateIcons(root);
   $$('button,summary,label').forEach(control => control.classList.add('cursor-interaction'));
   wire();
+  installTooltips();
   attachScrollbars();
   setTab('position');
   setPage('cameras');

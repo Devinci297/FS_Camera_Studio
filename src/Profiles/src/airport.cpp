@@ -44,7 +44,7 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
    json* cat=nullptr;for(auto& c:doc["categories"])if(js::str(c,"id")==catId)cat=&c;
    if(!cat){doc["categories"].push_back({{"id",catId},{"name",group},{"icon","map-pin"},{"airportIcao",code},{"cameraIds",json::array()}});cat=&doc["categories"].back();}
    auto delta=target-pos;auto q=core::Quat::fromPbh({-std::atan2(delta.z,std::hypot(delta.x,delta.y))/core::kDegToRad,0,std::atan2(delta.y,delta.x)/core::kDegToRad});
-   auto cam=seed;cam.update({{"id",id},{"categoryId",catId},{"name",name.substr(0,60)},{"mode","airport"},{"viewId",nullptr},{"favorite",false},{"interaction",false},{"requiredCapabilities",json::array()},
+   auto cam=seed;cam.update({{"id",id},{"categoryId",catId},{"name",name.substr(0,60)},{"mode","airport"},{"aircraftTracking","both"},{"viewId",nullptr},{"favorite",false},{"interaction",false},{"requiredCapabilities",json::array()},
       {"airportIcao",code},{"worldOrigin",asJson(origin)},{"generatedKey",key},{"icon","camera"},{"positionMetersFRD",{pos.x,pos.y,pos.z}},{"orientationCameraToAnchorXYZW",{q.x,q.y,q.z,q.w}},
       {"transition",{{"kind","cut"},{"durationSeconds",0.6},{"delaySeconds",0}}}});
    doc["cameras"].push_back(cam);(*cat)["cameraIds"].push_back(id);if(!cat->contains("defaultCameraId"))(*cat)["defaultCameraId"]=id;
