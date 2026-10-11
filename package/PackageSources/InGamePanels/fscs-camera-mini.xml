@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Mini control panel: a bounded strip centred in the bottom safe area (design 2.0 §2.2, §4.4). Hover mode needs about
+<!-- Mini control panel: a bounded strip centred in the bottom safe area (design 2.0 section 2.2, section 4.4). Hover mode needs about
      110 px of height (dock plus the handle band). Whether hover inside
      a toolbar window and click-through around it behave as designed is qualification gate H01. -->
 <SimBase.Document Type="InGamePanels" version="1,0">
     <Filename>fscs-camera-mini.spb</Filename>
     <InGamePanels.InGamePanelDefinition id="PANEL_FSCS_CAMERA_MINI" Name="Camera Studio Mini"
-        url="html_ui/InGamePanels/FSCameraStudio/mini.html" resizeDirections="Horizontal"
+        url="html_ui/InGamePanels/FSCameraStudio/mini.html" resizeDirections="Both"
         minWidth="30" minHeight="11" defaultWidth="52" defaultHeight="13" defaultTop="85" defaultRight="24"
         icon="ICON_TOOLBAR_FSCS_CAMERA_MINI" buttonVisible="true">
     </InGamePanels.InGamePanelDefinition>

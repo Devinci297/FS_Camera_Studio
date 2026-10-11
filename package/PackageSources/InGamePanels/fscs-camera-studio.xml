@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Full editor (design 2.0 §4.1). Size/position attributes are percentages of the screen; MSFS 2024 may ignore
+<!-- Full editor (design 2.0 section 4.1). Size/position attributes are percentages of the screen; MSFS 2024 may ignore
      them (qualification gate H01). -->
 <SimBase.Document Type="InGamePanels" version="1,0">
     <Filename>fscs-camera-studio.spb</Filename>

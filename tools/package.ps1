@@ -76,7 +76,40 @@ $sdk = $env:MSFS2024_SDK.TrimEnd('\')
 $tool = Join-Path $sdk 'Tools\bin\fspackagetool.exe'
 $output = Join-Path $root 'build\package'
 $temp = Join-Path $root 'build\package-temp'
+foreach ($d in $output, $temp) { if (Test-Path $d) { Remove-Item -Recurse -Force $d } }  # no stale reports or files
 New-Item -ItemType Directory -Force $output, $temp | Out-Null
 & $tool (Join-Path $project 'fs-camera-studio.xml') -outputdir $output -tempdir $temp -rebuild -nopause
 if ($LASTEXITCODE -ne 0) { throw "fspackagetool failed with exit code $LASTEXITCODE (see its log in $temp)." }
+# fspackagetool can exit 0 after a failed build; its error report is authoritative.
+$report = Join-Path $temp '_PackageInt\_RPTErrors.xml'
+if ((Test-Path $report) -and (Select-String -Path $report -Pattern '<RPTError>' -Quiet)) {
+    Get-Content $report | Select-String 'Message=' | ForEach-Object { Write-Host $_.Line.Trim() }
+    throw "fspackagetool reported build errors ($report)."
+}
+$pkg = Join-Path $output 'Packages\fs-camera-studio'
+# The simulator finishes copying after fspackagetool returns: wait for every expected output and for build mode to end.
+$expected = @('InGamePanels\fscs-camera-studio.spb', 'InGamePanels\fscs-camera-mini.spb', 'modules\FSCameraStudio.wasm',
+              'html_ui\InGamePanels\FSCameraStudio\main.html', 'html_ui\InGamePanels\FSCameraStudio\mini.html',
+              'html_ui\InGamePanels\FSCameraStudio\app.js', 'manifest.json')
+$deadline = (Get-Date).AddMinutes(3)
+while ($true) {
+    $missing = @($expected | Where-Object { -not (Test-Path (Join-Path $pkg $_)) })
+    $busy = Get-Process -Name 'FlightSimulator2024' -ErrorAction SilentlyContinue
+    if ($missing.Count -eq 0 -and -not $busy) { break }
+    if ((Get-Date) -gt $deadline) { throw "The package was not completed. Missing: $($missing -join ', ')" }
+    Start-Sleep -Seconds 2
+}
+# fspackagetool on this setup writes no layout.json (also seen in other projects on this PC); MSFS needs it to mount
+# the package, so build it from the package contents: every file except manifest/layout, with size and FILETIME.
+$entries = Get-ChildItem -Recurse -File $pkg | Where-Object { $_.Name -ne 'layout.json' -and $_.Name -ne 'manifest.json' } |
+    Sort-Object FullName | ForEach-Object {
+        [ordered]@{
+            path = $_.FullName.Substring($pkg.Length + 1).Replace('\', '/')
+            size = $_.Length
+            date = $_.LastWriteTimeUtc.ToFileTimeUtc()
+        }
+    }
+$layout = [ordered]@{ content = @($entries) } | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText((Join-Path $pkg 'layout.json'), $layout, (New-Object Text.UTF8Encoding($false)))
+Write-Host "layout.json written ($(@($entries).Count) files)."
 Write-Host "Package: $(Join-Path $output 'Packages\fs-camera-studio')"
