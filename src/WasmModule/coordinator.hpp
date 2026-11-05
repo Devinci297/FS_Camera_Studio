@@ -89,6 +89,7 @@ public:
     bool canActivate() const { return blockReason().empty(); }
     std::string blockReason() const;
     const core::CameraEngine& engine() const { return engine_; }
+    const core::CameraEffects& effects() const { return effects_; }
     const Aircraft& aircraft() const { return aircraft_; }
     std::uint64_t submissions() const { return submissions_; }
 

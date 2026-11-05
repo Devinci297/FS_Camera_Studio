@@ -82,12 +82,12 @@
               <div class="mc-motion-demo"><div class="mc-motion-labels"><span>Previous view</span><span id="mc-motion-destination">-</span></div><div class="mc-motion-track"><span class="mc-motion-marker" id="mc-motion-marker"><i data-icon="camera"></i></span></div><button type="button" id="mc-preview-motion"><i data-icon="play"></i>Preview transition</button></div>
               <div class="mc-divider"></div>
             <section id="mc-detail-effects" aria-label="Flight effects">
-              <div class="mc-section-heading"><div><h4>Flight effects</h4><span class="mc-unit-label">Subtle head movement driven by your flight</span></div></div>
+              <div class="mc-section-heading"><div><h4>Flight effects</h4><span class="mc-unit-label">Subtle camera movement driven by your flight</span></div></div>
               <label class="mc-switch-row"><span class="mc-switch-copy"><span>Enable effects for this camera</span><small>Saved with this view. Set an effect to 0% to turn it off.</small></span><input type="checkbox" class="mc-switch" id="mc-effects-enabled"></label>
+              <div class="mc-form-grid"><label class="mc-field">Preset<select id="mc-effects-preset"><option value="off">Off</option><option value="subtle">Subtle</option><option value="realistic">Realistic</option><option value="action">Action</option><option value="custom" disabled>Custom</option></select></label></div>
               <p class="mc-note" id="mc-effects-status"></p>
               <div id="mc-effects-controls"></div>
-              <div class="mc-pose-toolbar"><button type="button" id="mc-effects-gentle">Gentle preset</button><button type="button" id="mc-effects-reset">Reset effects</button></div>
-              <p class="mc-note">Cockpit views only. Effects are temporary: they never change your saved pose, mouse look or field of view. Start low if another add-on also adds camera motion.</p>
+              <p class="mc-note">Cockpit, exterior and orbit views; exterior and orbit views move at half strength. Airport and fly-by views stay fixed. Effects are temporary: they never change your saved pose, mouse look or field of view. Start low if another add-on also adds camera motion.</p>
             </section>
 
             </div>

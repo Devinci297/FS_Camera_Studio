@@ -261,6 +261,27 @@ TEST_CASE("effects: stationary aircraft is still and touchdown does not trigger 
     for (int i=0;i<100;++i) fx.tick(.02,motion,settings,true);
     CHECK_NEAR(fx.offset().length(),0.,1e-9);
 }
+TEST_CASE("effects: scale reduces offsets and pitch proportionally for exterior views") {
+    EffectsSettings settings; settings.enabled=true; FlightMotion motion; motion.forwardAcceleration=5.;
+    const auto run=[&](double scale) {
+        CameraEffects fx; FlightMotion m=motion;
+        for (int i=0;i<50;++i) fx.tick(.02,m,settings,true,scale);
+        m.onGround=0; m.verticalSpeed=-3.; fx.tick(.02,m,settings,true,scale);
+        m.onGround=1; m.verticalSpeed=0.; for (int i=0;i<5;++i) fx.tick(.02,m,settings,true,scale);
+        return fx;
+    };
+    const auto full=run(1.), exterior=run(kExteriorEffectsScale);
+    CHECK(full.offset().length()>1e-4);
+    CHECK_NEAR(exterior.offset().x,full.offset().x*kExteriorEffectsScale,1e-12);
+    CHECK_NEAR(exterior.offset().z,full.offset().z*kExteriorEffectsScale,1e-12);
+    const CameraPose base=pose({1,2,3},{},1.);
+    const double fullPitch=full.apply(base).orientation.toPbh().pitchDeg, exteriorPitch=exterior.apply(base).orientation.toPbh().pitchDeg;
+    CHECK(std::abs(fullPitch)>1e-6);
+    CHECK_NEAR(exteriorPitch,fullPitch*kExteriorEffectsScale,1e-6);
+    CHECK_NEAR(run(0.).offset().length(),0.,1e-12);
+    CHECK_NEAR(run(std::numeric_limits<double>::quiet_NaN()).offset().length(),0.,1e-12);
+    CHECK_NEAR(run(4.).offset().x,full.offset().x,1e-12);
+}
 TEST_CASE("adapter: automatic mapping ignores accumulated visual wizard corrections") {
     fscs::host::AdapterContract wrong;wrong.pitchSign=1;wrong.headingSign=-1;wrong.axisSign={-1,1,1};
     const nlohmann::json saved={{"records",nlohmann::json::array({{{"simVersion","12.2.282174.999"},{"contract",wrong.toJson()},{"gates",{{"G01","pass"},{"G03","pass"},{"G02","pass"}}}}})}};
