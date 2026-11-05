@@ -564,6 +564,9 @@ TEST_CASE("input: text focus suppresses everything except Release Camera") {
     auto e = r.onInput(indexOf(r, "VK_LCONTROL+VK_LMENU+R"), true, 0);
     CHECK_EQ(e.size(), std::size_t{1});
     CHECK(e[0].action == Action::ReleaseCamera);
+    e = r.onInput(indexOf(r, "VK_LCONTROL+VK_LMENU+X"), true, 0);  // default Panic release
+    CHECK_EQ(e.size(), std::size_t{1});
+    CHECK(e[0].action == Action::PanicRelease);
 }
 
 TEST_CASE("input: POV angles map to directions with diagonals and centring") {
@@ -817,6 +820,64 @@ TEST_CASE("tracking: unavailable and rejected controls report failure without re
     CHECK(!r.c.capabilitiesJson()["headTracking"]["error"].get<std::string>().empty());
     r.backend.tracking.reset();r.activate(r.pfd);r.advance(.02,20);
     CHECK(r.c.capabilitiesJson()["headTracking"]["enabled"].is_null());
+}
+TEST_CASE("panic: from Active restores head tracking, forgets looks and never re-activates") {
+    Rig r; r.profile["cameras"][0]["temporaryLookPolicy"] = "retain";
+    r.connect(); r.activate(r.pilot); r.grant(); r.advance(.02);
+    CHECK(r.backend.tracking == false);  // global preference off was leased over the simulator's original "on"
+    r.deliver(be::NativeMouseMapping{true}); r.deliver(be::NativeMouseButton{true}); r.deliver(be::NativeMouseAxis{true, 32768}); r.advance(.02, 50);
+    CHECK(r.c.engine().look().headingDeg > 1);
+    r.events.clear();
+    r.c.onAction({Action::PanicRelease, 0, true, 1}, r.t);  // mouse button still held
+    CHECK(r.backend.tracking == true);
+    CHECK(r.c.ownership() == Ownership::Releasing);
+    CHECK(r.c.activeCameraId().empty());
+    CHECK(r.emitted("PanicReleased"));
+    CHECK(r.emitted("OwnershipChanged"));
+    CHECK_EQ(r.backend.count("release"), std::size_t{1});
+    r.c.onAction({Action::PanicRelease, 0, false, 1}, r.t);
+    r.deliver(be::NativeMouseAxis{true, 32768});
+    r.deliver(be::CameraStatus{SdkAvailability::NotAcquired, false});
+    r.advance(.02, 200);
+    CHECK(r.c.ownership() == Ownership::Observing);
+    CHECK_EQ(r.backend.count("acquire"), std::size_t{1});
+    CHECK_EQ(r.backend.count("release"), std::size_t{1});
+    // A later deliberate Enable starts from the saved pose: the panic dropped the retained look.
+    r.activate(r.pilot); r.grant(); r.advance(.02, 50);
+    CHECK_NEAR(r.c.engine().look().headingDeg, 0, 1e-9);
+}
+TEST_CASE("panic: clears a recall queued behind an ordinary release") {
+    Rig r; r.connect(); r.activate(r.pilot); r.grant();
+    r.send("ReleaseCamera");
+    CHECK(r.c.ownership() == Ownership::Releasing);
+    r.activate(r.pfd);  // would re-activate once the release is confirmed
+    r.c.onAction({Action::PanicRelease, 0, true, 1}, r.t);
+    r.deliver(be::CameraStatus{SdkAvailability::NotAcquired, false});
+    r.advance(.02, 100);
+    CHECK(r.c.ownership() == Ownership::Observing);
+    CHECK(r.c.activeCameraId().empty());
+    CHECK_EQ(r.backend.count("acquire"), std::size_t{1});
+}
+TEST_CASE("panic: while Observing is an idempotent no-op that still reports success") {
+    Rig r; r.connect(); r.advance(.02);
+    const auto calls = r.backend.calls.size();
+    for (std::uint64_t hold = 1; hold <= 2; ++hold) {
+        r.events.clear();
+        r.c.onAction({Action::PanicRelease, 0, true, hold}, r.t);
+        CHECK(r.c.ownership() == Ownership::Observing);
+        CHECK(r.emitted("PanicReleased"));
+        for (const auto& [name, payload] : r.events) {
+            if (name == "PanicReleased") CHECK_EQ(payload["state"].get<std::string>(), std::string("Observing"));
+            if (name == "BindingTriggered") {
+                CHECK_EQ(payload["action"].get<std::string>(), std::string("panicRelease"));
+                CHECK(payload["result"].is_null());
+            }
+        }
+    }
+    CHECK_EQ(r.backend.calls.size(), calls);  // no release, acquire or head-tracking write
+    r.advance(.02, 50);
+    CHECK(r.c.ownership() == Ownership::Observing);
+    CHECK_EQ(r.backend.count("acquire"), std::size_t{0});
 }
 TEST_CASE("look: temporary offsets belong to each camera and return on release or panel cancellation") {
     Rig r;r.profile["cameras"][0]["temporaryLookPolicy"]="retain";r.connect();r.activate(r.pilot);r.grant();

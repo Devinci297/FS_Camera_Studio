@@ -94,7 +94,10 @@ There is no desktop application, tray app or external process.
 
 Actions: `selectView` (+`viewId`), `peekView` (+`viewId`), `nextCamera`, `previousCamera`, `nextCategory`,
 `returnToPilot`, `releaseCamera`, `recenterLook`, `toggleEditor`, `toggleMini`, `lookLeft`, `lookRight`, `lookUp`,
-`lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveFast`, `zoomIn`, `zoomOut`.
+`lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveFast`, `zoomIn`, `zoomOut`,
+`panicRelease`.
+`panicRelease` ("Panic: release camera and restore simulator", default Ctrl + Alt + X) is a stronger `releaseCamera`;
+see [Panic release](dual-bindings.md#panic-release).
 An input definition and, for POVs, direction maps to at most one action. Bindings can carry
 `slot: "primary" | "secondary"`; each action has two independent UI slots. Legacy extra bindings are retained.
 Joystick `pov` is `up`, `right`, `down` or `left`; definitions use zero-based button and POV indices.
@@ -217,7 +220,7 @@ Rules:
 | `TestBinding` | `binding` | Dispatches the action once; reply distinguishes dispatch from visible recall |
 | `RelaySurface` | `target` (`main`\|`mini`), `op` (`expand`\|`compact`\|`show`) | Broadcast `SurfaceRequest`; e.g. mini "Edit" → main expands on Cameras |
 | `GetDiagnostics` | — | `result.text` preview for in-panel export |
-| `TextFocus` | `focused` (bool) | A panel text field has focus: bindings other than Release Camera are suppressed |
+| `TextFocus` | `focused` (bool) | A panel text field has focus: bindings other than Release Camera and Panic release are suppressed |
 | `QualificationStart` | — | Begins the in-panel axis check; live control is allowed on an unqualified build while it runs. `result`: `simVersion`, `contract`, `axes` |
 | `QualificationProbe` | `axis` (`forward\|right\|up\|pitch\|heading\|bank`) | Offsets the active view by 30 cm / 15°; `result.expect` describes what should be seen |
 | `QualificationRestore` | — | Returns the active view to its draft pose |
@@ -262,6 +265,7 @@ being edited.
 | `ControllerInputCaptured` | `input`, `captureId`; directed to requester, followed by stopped status |
 | `InputTest` | `definition`, `phase` (`down`\|`up`) |
 | `BindingTriggered` | `action`, `viewId`, `result` |
+| `PanicReleased` | `state` (ownership after the panic), `reason`, `airportAutoStopped` (bool). Sent for every panic press, including a no-op while Observing |
 | `SurfaceRequest` | `target`, `op` |
 | `FaultRaised` | `code`, `message` |
 

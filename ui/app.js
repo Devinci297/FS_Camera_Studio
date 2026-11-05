@@ -315,6 +315,7 @@
     ['nextCategory', 'Next category', 'Jump to the next category'],
     ['returnToPilot', 'Return to default view', 'The starting view for this profile'],
     ['releaseCamera', 'Release camera control', 'Give control back to the simulator'],
+    ['panicRelease', 'Panic: release camera and restore simulator', 'Release, restore head tracking, stop motion and auto switching; works with both panels closed'],
     ['recenterLook', 'Recenter look', 'Clear the temporary mouse look'],
     ['toggleEditor', 'Toggle editor', 'Open or hide the Camera Studio editor'],
     ['saveViews', 'Save adjusted view and all changes', 'Ctrl+S stores the current position, look and zoom, then saves pending changes'],
@@ -490,6 +491,8 @@
     bridge.context.sessionEpoch = p.sessionEpoch;
     S.session = p.session || 'Ready';
     S.aircraft = p.aircraft || null;
+    // A paused simulator delivers no events: a fresh snapshot can be the first sign of an automatic hand-back.
+    if (!firstSnapshot && p.ownership && p.ownership.state === 'Observing' && HELD_STATES.indexOf(S.ownership.state) >= 0) announceReleased();
     S.ownership = p.ownership || S.ownership;
     if (S.ownership.state !== 'Active') stopMouseLook();
     S.caps = p.capabilities || S.caps;
@@ -540,7 +543,9 @@
       if (S.page === 'profiles') { renderProfiles(); renderAirportSummary(); }
     },
     OwnershipChanged(p) {
+      const handedBack = HELD_STATES.indexOf(S.ownership.state) >= 0 && p.state === 'Observing';
       S.ownership = p;
+      if (handedBack) announceReleased();
       if (p.state !== 'Active') stopMouseLook();
       if (p.state === 'Active' || p.state === 'Acquiring') S.userReleased = false;
       if (p.state === 'Observing' && p.reason === 'userReleased') S.userReleased = true;
@@ -587,6 +592,11 @@
     InputTest: onInputTest,
     ControllerInputCaptured: onControllerInputCaptured,
     ControllerCaptureStatus: onControllerCaptureStatus,
+    PanicReleased(p) {
+      S.userReleased = true;
+      if (p.state === 'Observing' || p.state === 'Releasing') announceReleased();
+      render();
+    },
     BindingTriggered(p) { if (S.page === 'bindings') setBindingResult('Triggered "' + actionName(p.action, p.viewId) + '"' + (p.result === 'recalled' ? ' - the view was recalled.' : '.')); },
     SurfaceRequest: onSurfaceRequest,
     FaultRaised(p) { S.fault = p; announce(p.message || 'The camera stopped after an error.', 'error'); render(); },
@@ -633,7 +643,7 @@
 
   /* ------------- Toast ------------- */
   let toastTimer = 0;
-  function announce(message, tone) {
+  function announce(message, tone, ms) {
     if (!message) return;
     clearTimeout(toastTimer);
     const el = $('mc-toast');
@@ -641,9 +651,17 @@
     el.setAttribute('data-tone', tone || 'ok');
     setIcon(el, !tone || tone === 'ok' ? 'check-circle-2' : 'alert-triangle');
     el.hidden = false;
-    toastTimer = setTimeout(() => { el.hidden = true; }, !tone || tone === 'ok' ? 2600 : 4200);
+    toastTimer = setTimeout(() => { el.hidden = true; }, ms || (!tone || tone === 'ok' ? 2600 : 4200));
   }
   const toast = announce;
+  // Confirms every hand-back to the simulator: Release button or binding, Panic release and automatic releases.
+  const RELEASED_TEXT = 'Camera released - simulator has control';
+  const HELD_STATES = ['Active', 'SimulatorSuspended', 'Releasing'];
+  function announceReleased() {
+    const el = $('mc-toast');
+    if (!el.hidden && el.getAttribute('data-tone') === 'error') return; // keep a fault message readable
+    announce(RELEASED_TEXT, 'ok', 3000);
+  }
 
   /* ------------- Mini dock presentation (mockup sec. 4.5 behaviour) ------------- */
   // Mini surface presentation: hover (handle + reveal, default) | always (fixed dock) | off (note only).

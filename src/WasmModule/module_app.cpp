@@ -814,6 +814,12 @@ void ModuleApp::importProfileCode(const protocol::Command& c, const std::string&
 void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
     if (name == "SaveViewsRequested") { saveViewsRequested_=true; return; }
     if (name == "AirportAutoToggleRequested") { setAirportAuto(!airportAuto_,now_); return; }
+    if (name == "PanicReleased") {
+        // A panic must not hand the camera straight back: switching off Auto switch only clears module state.
+        payload["airportAutoStopped"] = airportAuto_;
+        if (airportAuto_) setAirportAuto(false, now_);
+        diag("panic release: " + js::dump(payload));
+    }
     if (name == "HeadTrackingToggleRequested") {
         json settings=working_.settings;
         settings["host"]["globalHeadTrackingEnabled"]=js::boolean(payload,"enabled",false);

@@ -686,6 +686,17 @@ void Coordinator::release(const std::string& reason, double now) {
     emitActiveCamera();
 }
 
+void Coordinator::panicRelease(double now) {
+    // release() already stops walkaround/orbit/fly-by motion, restores head tracking, drops a pending
+    // re-activation and hands the camera back. A panic also forgets remembered temporary looks so a later
+    // Enable starts from the saved pose, and neutralises any mouse gesture even when already Observing.
+    release("Panic release: the simulator has control", now);
+    rememberedLooks_.clear();
+    cancelMouseDrag();
+    emitLook(now, true);
+    emit_("PanicReleased", {{"state", toString(state_)}, {"reason", stateReason_}});
+}
+
 void Coordinator::fault(const std::string& code, const std::string& message, double now) {
     emit_("FaultRaised", {{"code", code}, {"message", message}});
     release(message, now);
@@ -1199,6 +1210,10 @@ void Coordinator::onAction(const ActionEvent& ev, double now) {
         case Action::ReleaseCamera:
             if (!ev.pressed) return;
             release("Camera returned to the simulator", now);
+            break;
+        case Action::PanicRelease:
+            if (!ev.pressed) return;
+            panicRelease(now);
             break;
         case Action::RecenterLook:
             if (!ev.pressed) return;

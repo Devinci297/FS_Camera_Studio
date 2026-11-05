@@ -50,6 +50,9 @@ public:
     json handle(const protocol::Command& cmd, double now);
     // Fast path: never queued behind other work.
     void release(const std::string& reason, double now);
+    // Panic binding: release() plus forgetting every remembered temporary look. Valid in every ownership state and
+    // idempotent; never re-activates afterwards. Emits PanicReleased so the host stops automatic switching.
+    void panicRelease(double now);
     void onBackendEvent(const BackendEvent& ev, double now);
     void onAction(const ActionEvent& ev, double now);
     // The working profile (drafts included) the coordinator recalls from. Each call is an immutable revision;

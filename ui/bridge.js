@@ -278,6 +278,7 @@
     list.push({ action: 'nextCamera', input: ctrlAlt('N', 'N') });
     list.push({ action: 'previousCamera', input: ctrlAlt('B', 'B') });
     list.push({ action: 'releaseCamera', input: ctrlAlt('R', 'R') });
+    list.push({ action: 'panicRelease', input: ctrlAlt('X', 'X') });
     list.push({ action: 'toggleEditor', input: ctrlAlt('E', 'E') });
     list.push({ action: 'toggleMini', input: ctrlAlt('M', 'M') });
     list.push({ action: 'recenterLook', input: ctrlAlt('C', 'C') });
@@ -581,6 +582,12 @@
           else { recalled = true; message = 'Recalled ' + camera.name + '.'; activate(internal(env, 'dispatch'), camera.id); }
           break;
         case 'releaseCamera': release(null); message = 'Camera released.'; break;
+        case 'panicRelease':
+          // Same hand-back as releaseCamera, and idempotent: a press while Observing still reports.
+          release(null, 'Panic release: the simulator has control');
+          event('PanicReleased', { state: m.ownership.state, reason: m.ownership.reason, airportAutoStopped: false });
+          message = 'Camera released and simulator settings restored.';
+          break;
         case 'nextCamera': case 'previousCamera': case 'returnToPilot': case 'nextCategory':
           if (!caps.canActivate) { message = blocked(caps.blockReason); break; }
           recalled = true;
