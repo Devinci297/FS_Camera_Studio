@@ -30,11 +30,11 @@ There is no desktop application, tray app or external process.
 
 ## 2. Documents (module-owned, stored in `\work`)
 
-### 2.1 Profile — schemaVersion 2
+### 2.1 Profile — schemaVersion 3
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "profileId": "b8cfa6d9-2fe2-48d1-8bd2-f4e3df83722a",
   "name": "My cameras",
   "aircraftMatch": { "strategy": "aircraftPath", "modelKey": "asobo-c172sp-classic", "variantKey": null,
@@ -57,7 +57,7 @@ There is no desktop application, tray app or external process.
     "projection": { "kind": "simulatorFovRadians", "value": 1.0821, "axis": "adapterDefined" },
     "transition": { "kind": "smoothstep3", "durationSeconds": 0.65, "delaySeconds": 0 },
     "interaction": true, "trackingPolicy": "nativeIfQualified", "effects": { "enabled": false },
-    "temporaryLookPolicy": "resetOnRecall", "levelHorizon": false, "seedDefinitionName": null
+    "temporaryLookPolicy": "resetOnRecall", "followHorizon": 1, "seedDefinitionName": null
   } ],
   "sequences": []
 }
@@ -79,12 +79,21 @@ There is no desktop application, tray app or external process.
   at half strength; `airport`, `flyby` and `free` ignore them. The editor's Off/Subtle/Realistic/Action presets are
   derived from these values (no stored preset name).
 * `mouseLookOnRelease`: optional `retain` (default) | `reset`. Per camera: keep temporary native right-drag look, or recenter it on button release. Does not overwrite the saved pose.
-* `temporaryLookPolicy`: `resetOnRecall` | `retain`. `levelHorizon` is capability-gated (disabled until qualified).
+* `temporaryLookPolicy`: `resetOnRecall` | `retain`.
+* `followHorizon`: number 0–1, default 1 (finite; outside the range is rejected). How much of the aircraft's bank the
+  view inherits: 1 banks fully with the aircraft (previous behaviour), 0 keeps the horizon level, 0.5 shows half the
+  bank. Applies to `aircraftCockpit` (rolls about the aircraft's longitudinal axis, eye position unchanged),
+  `aircraftExterior` and `orbit` (position and orientation swing about the aircraft's longitudinal axis, so the
+  aircraft stays framed). `airport` and `flyby` are world-fixed and ignore it. Presentation only: never written into
+  saved poses, captures or the temporary look; eased with a 0.15 s time constant; when bank telemetry is older than
+  0.5 s the correction eases back to 0 (camera banks with the aircraft). Held through a simulator pause.
 * Validation: ≤ 10 MiB, finite numbers, |position| ≤ 10 000 m, FOV 0.1–2.8 rad, quaternion norm within 1e-3
   (normalised; zero rejected), unique UUIDs, every camera in exactly one category matching its `categoryId`,
   existing `defaultCameraId`, unique non-zero `viewId`, ≤ 500 cameras, ≤ 100 categories, names 1–60 chars.
   Unknown `requiredSchemaFeatures` → read-only, cannot activate. Schema 1 documents migrate (`shortcutSlot` →
   `viewId`, `smoothstep5` → `smoothstep3`, `smoothstep7` → `smoothstep5`) into a new revision; the input is retained.
+  Schema 2 documents (and migrated schema 1) migrate to 3: `levelHorizon: true` → `followHorizon: 0`, `false` or
+  absent → `1`, and `levelHorizon` is removed. Builds before schema 3 cannot open schema 3 documents.
 
 ### 2.2 Bindings — schemaVersion 2
 
@@ -255,7 +264,7 @@ being edited.
 | `SessionChanged` | `moduleBootId`, `sessionEpoch`, `session` (`Initializing\|Discovering\|Ready\|Suspended\|Faulted`), `reason` |
 | `AircraftChanged` | `title`, `modelKey`, `matchProfileId`, `matchReason` (plain text, e.g. "Matched by aircraft package") |
 | `OwnershipChanged` | `state` (`Observing, Acquiring, Active, SimulatorSuspended, OtherClient, UserDisabled, Releasing, Faulted`), `gameControlled`, `reason` |
-| `CapabilitiesChanged` | `adapterQualified`, `adapterContract`, `captureQualified`, `allowUnqualifiedAdapter`, `canActivate`, `blockReason`, `simVersion`, `fovRangeDeg` [min,max], `levelHorizon` (bool), `modes` {mode: {available, preview, reason}} |
+| `CapabilitiesChanged` | `adapterQualified`, `adapterContract`, `captureQualified`, `allowUnqualifiedAdapter`, `canActivate`, `blockReason`, `simVersion`, `fovRangeDeg` [min,max], `levelHorizon` (bool, legacy name) and `followHorizon` (bool): per-camera follow horizon is applied, `modes` {mode: {available, preview, reason}} |
 | `ActiveCameraChanged` | `profileId`, `cameraId`, `peeking`, `transitioning`, `fromDraft` |
 | `SelectionChanged` | `profileId`, `cameraId` |
 | `DraftChanged` | `draftRevision`, `dirty`, `ops` (as applied, so mirrors update without a snapshot), `origin` (uiInstanceId) |

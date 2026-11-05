@@ -227,14 +227,14 @@
       projection: { kind: 'simulatorFovRadians', value: round(M.degToRad(p.fov), 4), axis: 'adapterDefined' },
       transition: x.transition || { kind: 'smoothstep3', durationSeconds: 0.65, delaySeconds: 0 },
       interaction: mode === 'aircraftCockpit', trackingPolicy: 'nativeIfQualified', effects: { enabled: false },
-      temporaryLookPolicy: x.temporaryLookPolicy || 'retain', levelHorizon: false, seedDefinitionName: null,
+      temporaryLookPolicy: x.temporaryLookPolicy || 'retain', followHorizon: 1, seedDefinitionName: null,
     };
   }
   function calibration() {
     return { frameContract: FRAME_CONTRACT, anchor: { kind: 'sdkPilotEyepoint', seedDefinitionName: null, correctionMetersFRD: [0, 0, 0], correctionRotationXYZW: [0, 0, 0, 1] }, adapterContract: 'pending-qualification', simulatorBuild: null };
   }
   function makeProfile(spec) {
-    const profile = { schemaVersion: 2, profileId: M.uuid(), name: spec.name, aircraftMatch: spec.aircraftMatch, calibration: calibration(), requiredSchemaFeatures: [], defaultCameraId: null, categories: [], cameras: [], sequences: [] };
+    const profile = { schemaVersion: 3, profileId: M.uuid(), name: spec.name, aircraftMatch: spec.aircraftMatch, calibration: calibration(), requiredSchemaFeatures: [], defaultCameraId: null, categories: [], cameras: [], sequences: [] };
     spec.categories.forEach(group => {
       const category = { id: M.uuid(), name: group.name, cameraIds: [] };
       group.cameras.forEach(entry => {
@@ -293,7 +293,7 @@
   }
 
   function validateProfile(p) {
-    if (!p || p.schemaVersion !== 2) return 'This profile uses an unknown format.';
+    if (!p || p.schemaVersion !== 3) return 'This profile uses an unknown format.';
     const nameOk = n => typeof n === 'string' && n.trim().length >= 1 && n.length <= 60;
     if (!nameOk(p.name)) return 'Profile names need 1-60 characters.';
     if (!Array.isArray(p.categories) || !Array.isArray(p.cameras)) return 'The profile is incomplete.';
@@ -318,6 +318,7 @@
       const n = Math.hypot.apply(null, c.orientationCameraToAnchorXYZW);
       if (!(n > 0) || Math.abs(n - 1) > 1e-3) return '"' + c.name + '" has an invalid orientation.';
       if (c.viewId) { if (views.has(c.viewId)) return 'View ID ' + c.viewId + ' is used twice.'; views.add(c.viewId); }
+      if (c.followHorizon !== undefined && !(typeof c.followHorizon === 'number' && c.followHorizon >= 0 && c.followHorizon <= 1)) return '"' + c.name + '" needs a follow horizon from 0 to 1.';
     }
     if (seen.size !== p.cameras.length) return 'A category lists a camera that does not exist.';
     if (!p.cameras.some(c => c.id === p.defaultCameraId)) return 'Choose a default camera.';
@@ -332,7 +333,7 @@
     profile.defaultCameraId = remap(profile.defaultCameraId);
     return profile;
   }
-  /** Schema 1 > 2 migration (sec. 2.1). */
+  /** Schema 1 > 2 > 3 migration (sec. 2.1). */
   function migrate(input) {
     const p = clone(input);
     if (p && p.schemaVersion === 1) {
@@ -344,9 +345,16 @@
         const kind = c.transition && c.transition.kind;
         if (kind === 'smoothstep5') c.transition.kind = 'smoothstep3';
         else if (kind === 'smoothstep7') c.transition.kind = 'smoothstep5';
-        if (c.levelHorizon === undefined) c.levelHorizon = false;
       });
       if (p.aircraftMatch && p.aircraftMatch.confirmed === undefined) p.aircraftMatch.confirmed = p.aircraftMatch.strategy === 'userConfirmedModelVariant';
+    }
+    // Schema 2 > 3: levelHorizon true became followHorizon 0; false or absent banks with the aircraft (1).
+    if (p && p.schemaVersion === 2) {
+      p.schemaVersion = 3;
+      (p.cameras || []).forEach(c => {
+        if (c.followHorizon === undefined) c.followHorizon = c.levelHorizon === true ? 0 : 1;
+        delete c.levelHorizon;
+      });
     }
     return p;
   }
@@ -446,7 +454,7 @@
       else if (m.session !== 'Ready') blockReason = 'Camera Studio is not ready yet.';
       else if (!m.aircraft || !m.aircraft.modelKey) blockReason = 'Load a flight to use your cameras.';
       else if (!m.qualified && !allow && !m.qualification) blockReason = 'This simulator build has not passed the axis check yet. Run it from Settings > Simulator.';
-      return { adapterQualified: m.qualified, adapterContract: 'camera-api-v1', captureQualified: m.captureQualified, allowUnqualifiedAdapter: allow, canActivate: !blockReason, blockReason, simVersion: m.simVersion, fovRangeDeg: [20, 120], levelHorizon: false, modes: clone(MODE_CAPS) };
+      return { adapterQualified: m.qualified, adapterContract: 'camera-api-v1', captureQualified: m.captureQualified, allowUnqualifiedAdapter: allow, canActivate: !blockReason, blockReason, simVersion: m.simVersion, fovRangeDeg: [20, 120], levelHorizon: true, followHorizon: true, modes: clone(MODE_CAPS) };
     }
     function summaries() {
       return Array.from(repo.profiles.values()).map(e => {

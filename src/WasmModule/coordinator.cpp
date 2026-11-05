@@ -162,7 +162,8 @@ json Coordinator::capabilitiesJson() const {
               {"blockReason", block.empty() ? json(nullptr) : json(block)},
               {"simVersion", simVersion_.empty() ? json(nullptr) : json(simVersion_)},
               {"fovRangeDeg", {30, 110}},
-              {"levelHorizon", false},
+              {"levelHorizon", true},
+              {"followHorizon", true},
               {"modes", modes}};
 }
 
@@ -828,6 +829,7 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                 emitLook(now);
             } else if constexpr (std::is_same_v<T, backend_event::MotionTelemetry>) {
                 if (e.motion.finite()) { flightMotion_ = e.motion; motionReceivedAt_ = now; }
+                aircraftBankDeg_ = e.motion.finite() ? e.bankDeg : NAN;
             } else if constexpr (std::is_same_v<T, backend_event::Connected>) {
                 simConnected_ = true;
                 simVersion_ = e.simVersion;
@@ -1114,6 +1116,17 @@ void Coordinator::updateAirportAutoZoom(double dt) {
     airportAutoZoomFov_=core::clamp(current,minimum,maximum);
 }
 
+void Coordinator::updateHorizon(double dt, double now) {
+    if (motionReceivedAt_ < 0) { horizon_.reset(); return; }  // session reset: nothing to ease from
+    if (motionPaused_) return;  // hold through a sim pause
+    const CameraEntry* cam = activeEntry();
+    const bool fresh = now - motionReceivedAt_ < .5 && std::isfinite(aircraftBankDeg_);
+    const bool relative = cam && (cam->mode == profiles::CameraMode::AircraftCockpit ||
+                                  cam->mode == profiles::CameraMode::AircraftExterior || cam->mode == profiles::CameraMode::Orbit);
+    // Stale attitude or a world camera eases back to the aircraft's own roll rather than holding an old correction.
+    horizon_.tick(dt, fresh && relative ? core::horizonCounterRollDeg(aircraftBankDeg_, cam->followHorizon) : 0.0);
+}
+
 void Coordinator::submit(bool refreshTrackingPosition) {
     const CameraEntry* cam = activeEntry();
     if (!cam || !eligibleToSubmit()) return;
@@ -1133,6 +1146,13 @@ void Coordinator::submit(bool refreshTrackingPosition) {
             if (aircraftTracking == "both") angles.pitchDeg = core::clamp(std::atan2(-target.z,horizontal)*core::kRadToDeg,-89.,89.);
             submittedPose.orientation = core::Quat::fromPbh(angles);
         }
+    }
+    // Follow horizon: after aiming, so exterior views stay on the aircraft. Never written back to the engine.
+    double horizonRoll = 0;
+    if (cam->mode == profiles::CameraMode::AircraftCockpit || cam->mode == profiles::CameraMode::AircraftExterior ||
+        cam->mode == profiles::CameraMode::Orbit) {
+        horizonRoll = horizon_.rollDeg();
+        submittedPose = core::counterRoll(submittedPose, horizonRoll, cam->mode != profiles::CameraMode::AircraftCockpit);
     }
     SdkPose sdk = toSdk(submittedPose, qual_.contract, referentialFor(*cam));
     if(cam->mode==profiles::CameraMode::Airport || cam->mode==profiles::CameraMode::Flyby){
@@ -1174,6 +1194,7 @@ void Coordinator::submit(bool refreshTrackingPosition) {
     if (lastSubmitted_ && nearlyEqual(*lastSubmitted_, sdk)) return;
     if (backend_.submitPose(sdk)) {
         lastSubmitted_ = sdk;
+        submittedHorizonRollDeg_ = horizonRoll;
         ++submissions_;
     }
 }
@@ -1333,7 +1354,8 @@ void Coordinator::tick(double now) {
             if (lastSubmitted_->referential == Referential::World)
                 movement=core::Quat::fromPbh({-lastSubmitted_->pitchDeg,lastSubmitted_->bankDeg,lastSubmitted_->headingDeg});
             else if (lastSubmitted_->referential == Referential::SimObject)
-                movement=fromSdk(*lastSubmitted_,qual_.contract).orientation;
+                // Move in the saved (un-rolled) frame: follow horizon swings the shown pose about the aircraft.
+                movement=(core::Quat::fromAxisAngle({1,0,0},-submittedHorizonRollDeg_*core::kDegToRad)*fromSdk(*lastSubmitted_,qual_.contract).orientation).normalized();
         }
         const bool manualActive = mouseHeld_ || manual_.lookRight != 0 || manual_.lookUp != 0 || manual_.moveForward != 0 ||
             manual_.moveRight != 0 || manual_.moveUp != 0 || manual_.zoomIn != 0;
@@ -1368,6 +1390,7 @@ void Coordinator::tick(double now) {
         }
         updateAirportTrackingPosition();
         updateAirportAutoZoom(dt);
+        updateHorizon(dt, now);
         submit(false);
         if (engine_.transitioning() != lastTransitioning_) emitActiveCamera();
         emitLook(now);

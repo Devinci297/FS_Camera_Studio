@@ -394,6 +394,8 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim .mc-inline-field small { display: block; color: var(--mc-muted); font-size: 11px; margin-top: 4px; }
 #mc-sim .mc-inline-field .mc-unit { display: flex; align-items: center; gap: 7px; color: var(--mc-muted); }
 #mc-sim .mc-inline-field input[type="number"] { width: 110px; font-size: 12px; text-align: right; }
+#mc-sim .mc-follow-horizon-input { display: flex; align-items: center; gap: 10px; flex: 0 1 240px; min-width: 160px; }
+#mc-sim .mc-follow-horizon-input input[type="number"] { width: 66px; text-align: center; }
 #mc-sim .mc-section-label.mc-spaced { margin-top: 28px; }
 #mc-sim .mc-form-grid.mc-flush { margin-top: 0; }
 

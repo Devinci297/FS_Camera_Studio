@@ -7,6 +7,7 @@
 #include "head_tracking.hpp"
 #include "input_router.hpp"
 #include "fscs/core/engine.hpp"
+#include "fscs/core/horizon.hpp"
 #include "fscs/profiles/bindings.hpp"
 #include "fscs/profiles/profile.hpp"
 #include "fscs/protocol/protocol.hpp"
@@ -114,6 +115,7 @@ private:
     const std::string& aircraftTrackingFor(const profiles::CameraEntry& cam) const;
     void updateAirportAutoZoom(double dt);
     void updateAirportTrackingPosition();
+    void updateHorizon(double dt, double now);
     core::CameraPose effectiveAirportPose(const profiles::CameraEntry& cam) const;
     void emitCapabilities(bool force = false);
     void emitActiveCamera();
@@ -172,6 +174,9 @@ private:
     core::CameraEffects effects_;
     core::FlightMotion flightMotion_;
     double motionReceivedAt_ = -1;
+    double aircraftBankDeg_ = NAN;  // FRD, right wing down > 0; NAN while unknown
+    core::HorizonFilter horizon_;  // follow-horizon counter-roll, applied at submission only
+    double submittedHorizonRollDeg_ = 0;  // the counter-roll inside lastSubmitted_
     core::ManualInput manual_;
     bool mouseMapped_ = false, mouseHeld_ = false, mouseBlocked_ = false, mouseMoved_ = false;
     std::string mouseCameraId_;

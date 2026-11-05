@@ -24,7 +24,8 @@ struct AircraftPosition { double lat=0, lon=0, altitude=0, headingDeg=0; };
 struct AirportList { nlohmann::json airports; bool complete=false; };
 struct AirportIdentity { std::string ident, region, icao; double lat=0, lon=0; };
 struct AirportFacility { std::uint32_t requestId=0; nlohmann::json facility; std::string error; };
-struct MotionTelemetry { core::FlightMotion motion; };
+// bankDeg: aircraft bank in FRD degrees (right wing down > 0) for follow horizon; NAN when not reported.
+struct MotionTelemetry { core::FlightMotion motion; double bankDeg = NAN; };
 struct Connected { std::string simVersion; };
 struct Disconnected { std::string reason; };
 struct CameraStatus { SdkAvailability state = SdkAvailability::NotAcquired; bool gameControlled = false; };

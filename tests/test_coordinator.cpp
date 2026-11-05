@@ -1112,6 +1112,118 @@ TEST_CASE("tracking: shared aircraft preference applies to exterior views and ne
     const auto cockpit=fromSdk(r.backend.submitted.back(),r.qual.contract).orientation.toPbh();CHECK_NEAR(cockpit.headingDeg,0,1e-7);CHECK_NEAR(cockpit.pitchDeg,0,1e-7);
 }
 
+TEST_CASE("follow horizon: cockpit views counter-roll smoothly, only at submission, and relax when bank is stale") {
+    Rig r;
+    for (auto& cam : r.profile["cameras"]) cam["transition"]["kind"] = "cut";
+    r.connect();
+    r.activate(r.pilot);
+    r.grant();
+    const auto bankOf = [&] { return fromSdk(r.backend.submitted.back(), r.qual.contract).orientation.toPbh().bankDeg; };
+    const auto fly = [&](double bank, int frames) {
+        for (int i = 0; i < frames; ++i) { r.deliver(be::MotionTelemetry{{}, bank}); r.advance(1.0 / 60); }
+    };
+    fly(30, 60);
+    CHECK_NEAR(bankOf(), 0, 1e-9);  // default 1: banks with the aircraft, as before
+    r.profile["cameras"][0]["followHorizon"] = 0.0;
+    r.setProfile();
+    fly(30, 1);
+    CHECK(bankOf() < -.5);
+    CHECK(bankOf() > -30 * (1 - std::exp(-1.0 / 60 / .15)) - 1e-6);  // eased, never snapped
+    fly(30, 120);
+    CHECK_NEAR(bankOf(), -30, 1e-3);
+    r.profile["cameras"][0]["followHorizon"] = 0.5;
+    r.setProfile();
+    fly(30, 120);
+    CHECK_NEAR(bankOf(), -15, 1e-3);
+    fly(-20, 120);
+    CHECK_NEAR(bankOf(), 10, 1e-3);
+    // Presentation only: the engine pose and a capture never contain the counter-roll.
+    CHECK_NEAR(r.c.engine().sample().pose.orientation.toPbh().bankDeg, 0, 1e-9);
+    r.events.clear();
+    r.send("CaptureView");
+    CHECK(r.emitted("ViewCaptured"));
+    for (const auto& e : r.events)
+        if (e.first == "ViewCaptured") {
+            const auto& q = e.second["orientationCameraToAnchorXYZW"];
+            CHECK_NEAR(q[0].get<double>(), 0, 1e-9);
+            CHECK_NEAR(q[3].get<double>(), 1, 1e-9);
+        }
+    // Stale telemetry (no samples for 0.5 s) eases back to the aircraft's roll; a non-finite bank counts as stale.
+    r.advance(1.0 / 60, 30);
+    CHECK(std::abs(bankOf()) > 5);
+    r.advance(1.0 / 60, 120);
+    CHECK_NEAR(bankOf(), 0, 1e-3);
+    fly(NAN, 120);
+    CHECK_NEAR(bankOf(), 0, 1e-3);
+}
+
+TEST_CASE("follow horizon: exterior views swing about the aircraft and world cameras are unaffected") {
+    Rig r;
+    for (auto& cam : r.profile["cameras"]) {
+        cam["mode"] = "aircraftExterior";
+        cam["transition"]["kind"] = "cut";
+        cam["positionMetersFRD"] = {0, 10, -2};
+        cam["followHorizon"] = 0.0;
+    }
+    std::vector<std::string> notes;
+    auto airport = fscs::profiles::airport::generate(airportFixture(), json::object(), notes);
+    auto world = airport["cameras"][0];
+    world["positionMetersFRD"] = {0, 0, -3}; world["orientationCameraToAnchorXYZW"] = {0, 0, 0, 1};
+    world["transition"]["kind"] = "cut"; world["aircraftTracking"] = "off"; world["followHorizon"] = 0.0;
+    auto cat = airport["categories"][0]; cat["cameraIds"] = json::array({world["id"]}); cat["defaultCameraId"] = world["id"];
+    r.profile["categories"].push_back(cat); r.profile["cameras"].push_back(world);
+    r.connect();
+    r.activate(r.pilot);
+    r.grant();
+    for (int i = 0; i < 120; ++i) { r.deliver(be::MotionTelemetry{{}, 30}); r.advance(1.0 / 60); }
+    const auto shown = fromSdk(r.backend.submitted.back(), r.qual.contract);
+    const fscs::core::Vec3 expected = fscs::core::Quat::fromPbh({0, -30, 0}).rotate({0, 10, -2});
+    CHECK_NEAR(shown.positionFRD.y, expected.y, 1e-3);
+    CHECK_NEAR(shown.positionFRD.z, expected.z, 1e-3);
+    const auto aim = shown.orientation.rotate({1, 0, 0});
+    const auto toAircraft = shown.positionFRD * (-1 / shown.positionFRD.length());
+    CHECK_NEAR(fscs::core::dot(aim, toAircraft), 1, 1e-6);  // still tracking the aircraft
+    CHECK(r.backend.submitted.back().referential == Referential::SimObject);
+    r.activate(world["id"]);
+    for (int i = 0; i < 120; ++i) { r.deliver(be::MotionTelemetry{{}, 30}); r.advance(1.0 / 60); }
+    CHECK(r.backend.submitted.back().referential == Referential::World);
+    CHECK_NEAR(r.backend.submitted.back().bankDeg, 0, 1e-9);
+}
+
+TEST_CASE("follow horizon: keyboard movement in a tracked exterior view is unchanged by the counter-roll") {
+    const auto moved = [](double follow) {
+        Rig r;
+        for (auto& cam : r.profile["cameras"]) {
+            cam["mode"] = "aircraftExterior";
+            cam["transition"]["kind"] = "cut";
+            cam["positionMetersFRD"] = {-8, 4, -3};
+            cam["followHorizon"] = follow;
+        }
+        r.connect();
+        r.activate(r.pilot);
+        r.grant();
+        for (int i = 0; i < 60; ++i) { r.deliver(be::MotionTelemetry{{}, 30}); r.advance(1.0 / 60); }
+        fscs::core::ManualInput in;
+        in.moveRight = 1;
+        r.c.setManualInput(in);
+        for (int i = 0; i < 30; ++i) { r.deliver(be::MotionTelemetry{{}, 30}); r.advance(1.0 / 60); }
+        return r.c.engine().sample().pose.positionFRD;
+    };
+    const auto level = moved(0), banked = moved(1);
+    CHECK(std::abs(level.y - 4) > .01);
+    CHECK_NEAR(level.x, banked.x, 1e-9);
+    CHECK_NEAR(level.y, banked.y, 1e-9);
+    CHECK_NEAR(level.z, banked.z, 1e-9);
+}
+
+TEST_CASE("follow horizon: capabilities report the feature") {
+    Rig r;
+    r.connect();
+    const auto caps = r.c.capabilitiesJson();
+    CHECK_EQ(caps["levelHorizon"], json(true));
+    CHECK_EQ(caps["followHorizon"], json(true));
+}
+
 TEST_CASE("tracking: airport and flyby use shared mode despite legacy camera overrides") {
     Rig r;std::vector<std::string> notes;auto airport=fscs::profiles::airport::generate(airportFixture(),json::object(),notes);
     auto cam=airport["cameras"][0];cam["positionMetersFRD"]={0,0,-3};cam["orientationCameraToAnchorXYZW"]={0,0,0,1};cam["transition"]["kind"]="cut";cam["aircraftTracking"]="off";
