@@ -104,6 +104,17 @@ void migrateFrom1(json& doc) {
     }
 }
 
+// Schema 2 -> 3: the never-applied levelHorizon flag became the followHorizon amount (true = level = 0).
+void migrateFrom2(json& doc) {
+    doc["schemaVersion"] = 3;
+    if (!doc.contains("cameras") || !doc["cameras"].is_array()) return;
+    for (auto& cam : doc["cameras"]) {
+        if (!cam.is_object() || !cam.contains("levelHorizon")) continue;
+        if (!cam.contains("followHorizon")) cam["followHorizon"] = js::boolean(cam, "levelHorizon", false) ? 0.0 : 1.0;
+        cam.erase("levelHorizon");
+    }
+}
+
 }  // namespace
 
 const char* toString(CameraMode m) {
@@ -147,11 +158,12 @@ ValidationResult validateProfile(json& doc) {
         return r;
     }
     const auto version = js::integer(doc, "schemaVersion", -1);
-    if (version == 1) {
-        migrateFrom1(doc);
+    if (version == 1) migrateFrom1(doc);
+    if (version == 1 || version == 2) {
+        migrateFrom2(doc);
         r.migrated = true;
     } else if (version != kSchemaVersion) {
-        c.error("$.schemaVersion", "unsupported schema version (this build reads versions 1 and 2)");
+        c.error("$.schemaVersion", "unsupported schema version (this build reads versions 1 to 3)");
         return r;
     }
     if (c.text(doc, "profileId", "$", 36, 36) && !isUuid(doc["profileId"].get<std::string>())) c.error("$.profileId", "must be a UUID");
@@ -275,7 +287,7 @@ ValidationResult validateProfile(json& doc) {
             cam["viewId"] = vid;
             const std::pair<const char*, json> defaults[] = {
                 {"favorite", false},          {"interaction", true},  {"trackingPolicy", "nativeIfQualified"},
-                {"temporaryLookPolicy", "resetOnRecall"}, {"levelHorizon", false}, {"seedDefinitionName", nullptr},
+                {"temporaryLookPolicy", "resetOnRecall"}, {"followHorizon", 1.0}, {"seedDefinitionName", nullptr},
                 {"effects", {{"enabled", false}}}, {"requiredCapabilities", json::array()}};
             for (const auto& [k, v] : defaults)
                 if (!cam.contains(k)) cam[k] = v;
@@ -350,8 +362,13 @@ ValidationResult validateProfile(json& doc) {
             if (look != "resetOnRecall" && look != "retain") c.error(p + ".temporaryLookPolicy", "unknown look policy");
             const std::string mouseRelease = js::str(cam, "mouseLookOnRelease", "retain");
             if ((cam.contains("mouseLookOnRelease") && !cam["mouseLookOnRelease"].is_string()) || (mouseRelease != "retain" && mouseRelease != "reset")) c.error(p + ".mouseLookOnRelease", "must be retain or reset");
-            if (!cam["favorite"].is_boolean() || !cam["interaction"].is_boolean() || !cam["levelHorizon"].is_boolean())
-                c.error(p, "favorite, interaction and levelHorizon must be true or false");
+            if (!cam["favorite"].is_boolean() || !cam["interaction"].is_boolean())
+                c.error(p, "favorite and interaction must be true or false");
+            {
+                const double follow = js::num(cam, "followHorizon", NAN);
+                if (!cam["followHorizon"].is_number() || !std::isfinite(follow) || follow < 0 || follow > 1)
+                    c.error(p + ".followHorizon", "must be a number between 0 and 1");
+            }
             if (!(cam["seedDefinitionName"].is_null() || cam["seedDefinitionName"].is_string())) cam["seedDefinitionName"] = nullptr;
         }
     }
@@ -496,7 +513,7 @@ ProfileSnapshot toSnapshot(const json& doc) {
         const auto& fx = js::object(cam, "effects");
         e.effects = {js::boolean(fx, "enabled", false), js::num(fx, "intensity", .35), js::num(fx, "turbulence", .5),
                      js::num(fx, "groundRoll", .35), js::num(fx, "touchdown", .5), js::num(fx, "acceleration", .35), js::num(fx, "engine", .2)};
-        e.levelHorizon = js::boolean(cam, "levelHorizon", false);
+        e.followHorizon = core::clamp(js::num(cam, "followHorizon", 1.0), 0., 1.);
         e.seedDefinitionName = js::str(cam, "seedDefinitionName");
         s.cameras.push_back(std::move(e));
     }
@@ -640,7 +657,7 @@ json makeStarterProfile(const std::string& name, const std::string& modelKey, co
                                   {"trackingPolicy", "nativeIfQualified"},
                                   {"effects", {{"enabled", false}}},
                                   {"temporaryLookPolicy", "resetOnRecall"},
-                                  {"levelHorizon", false},
+                                  {"followHorizon", 1.0},
                                   {"seedDefinitionName", nullptr}}})},
         {"sequences", json::array()}};
 }

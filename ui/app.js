@@ -186,6 +186,8 @@
       'mc-duration':'Time taken to transition to this camera, in seconds.',
       'mc-delay':'Pause before the transition begins, in seconds.',
       'mc-retain-look':'Remember the temporary look direction when revisiting this camera.',
+      'mc-follow-horizon-range':FOLLOW_HORIZON_HELP,
+      'mc-follow-horizon-number':FOLLOW_HORIZON_HELP,
       'mc-search':'Filter the camera library by name.',
       'mc-binding-search':'Find bindings by action, camera name or assigned input.',
       'mc-setting-mini-opacity':'Set only the mini panel background opacity. Camera names and controls stay readable.',
@@ -629,7 +631,9 @@
     if (r && r.length === 2 && r[0] < r[1]) return [Math.max(UI_FOV[0], Math.ceil(r[0])), Math.min(UI_FOV[1], Math.floor(r[1]))];
     return UI_FOV.slice();
   }
-  const levelHorizonAvailable = () => Boolean((S.caps.features && S.caps.features.levelHorizon) || S.caps.levelHorizon === true);
+  const levelHorizonAvailable = () => Boolean((S.caps.features && (S.caps.features.levelHorizon || S.caps.features.followHorizon)) || S.caps.levelHorizon === true || S.caps.followHorizon === true);
+  const FOLLOW_HORIZON_HELP = 'How much this view banks with the aircraft: 1 = banks fully with the aircraft, 0 = the horizon stays level. Display only; never changes the saved pose.';
+  const followHorizonOf = view => (view && typeof view.followHorizon === 'number' && isFinite(view.followHorizon) ? M.clamp(view.followHorizon, 0, 1) : 1);
 
   /* ------------- Toast ------------- */
   let toastTimer = 0;
@@ -1264,17 +1268,19 @@
     $('mc-quick-access').checked = Boolean(view.favorite);
     $('mc-retain-look').checked = view.temporaryLookPolicy === 'retain';
     $$('[data-value]', $('mc-mouse-release')).forEach(b => { b.disabled = ro; b.setAttribute('aria-pressed', String(b.dataset.value === (view.mouseLookOnRelease || 'retain'))); });
-    const level = levelHorizonAvailable();
-    $('mc-level').checked = Boolean(view.levelHorizon);
-    $('mc-level').disabled = ro || !level;
-    $('mc-level-note').textContent = level ? 'Stabilize roll for this camera.' : 'Not available until qualified.';
+    const level = levelHorizonAvailable(), worldHorizon = view.mode === 'airport' || view.mode === 'flyby';
+    const follow = followHorizonOf(view);
+    if (document.activeElement !== $('mc-follow-horizon-number')) $('mc-follow-horizon-number').value = String(Math.round(follow * 100) / 100);
+    $('mc-follow-horizon-range').value = String(follow);
+    ['mc-follow-horizon-range', 'mc-follow-horizon-number'].forEach(id => { $(id).disabled = ro || !level || worldHorizon; });
+    $('mc-follow-horizon-note').textContent = !level ? 'Not available with this camera module.' : worldHorizon ? 'World-fixed views always keep the horizon level.' : '1 = banks with the aircraft, 0 = horizon stays level.';
     $('mc-interaction').checked = Boolean(view.interaction);
     $('mc-tracking').value = S.working.settings.host.globalHeadTrackingEnabled === true ? 'on' : 'off';
     let airportSettings=$('mc-camera-airport-settings');
     if(!airportSettings){airportSettings=button('Airport camera settings',()=>airportCameraSettings(current()),'mc-secondary','view-tower');airportSettings.id='mc-camera-airport-settings';$('mc-detail-behavior').appendChild(airportSettings);}
     airportSettings.hidden=view.mode!=='airport';airportSettings.disabled=ro;
     $$('#mc-inspector input, #mc-inspector select, #mc-inspector .mc-stepper button, #mc-inspector .mc-select-card button, #mc-inspector .mc-precision button', document).forEach(el => {
-      if (el.id === 'mc-tracking' || el.id === 'mc-level' || el.id === 'mc-duration' || el.hasAttribute('data-fov')) return;
+      if (el.id === 'mc-tracking' || el.id === 'mc-follow-horizon-range' || el.id === 'mc-follow-horizon-number' || el.id === 'mc-duration' || el.hasAttribute('data-fov')) return;
       el.disabled = ro;
     });
     $('mc-default-view').disabled=ro||Boolean(view.airportIcao);
@@ -1605,7 +1611,7 @@
       projection: { kind: 'simulatorFovRadians', value: DEFAULT_FOV_RAD, axis: 'adapterDefined' },
       transition: { kind: 'smoothstep3', durationSeconds: 0.65, delaySeconds: 0 },
       interaction: true, trackingPolicy: 'nativeIfQualified', effects: { enabled: false },
-      temporaryLookPolicy: 'resetOnRecall', levelHorizon: false, seedDefinitionName: null,
+      temporaryLookPolicy: 'resetOnRecall', followHorizon: 1, seedDefinitionName: null,
     };
     return Object.assign(base, { id: M.uuid(), categoryId, name, viewId: 0, favorite: true });
   }
@@ -1767,7 +1773,7 @@
   function copyCameraSettings(view) {
     if(!view||!P())return;
     cameraSettingsClipboard={version:1,source:{name:view.name,modelKey:(P().aircraftMatch||{}).modelKey||null,calibration:clone(P().calibration||null)},camera:{}};
-    const fields=['mode','airportIcao','worldOrigin','seedDefinitionName','positionMetersFRD','orientationCameraToAnchorXYZW','projection','transition','effects','interaction','trackingPolicy','temporaryLookPolicy','mouseLookOnRelease','levelHorizon','aircraftTracking'];
+    const fields=['mode','airportIcao','worldOrigin','seedDefinitionName','positionMetersFRD','orientationCameraToAnchorXYZW','projection','transition','effects','interaction','trackingPolicy','temporaryLookPolicy','mouseLookOnRelease','followHorizon','aircraftTracking'];
     fields.forEach(key=>{if(view[key]!==undefined)cameraSettingsClipboard.camera[key]=clone(view[key]);});
     try {window.localStorage.setItem(CAMERA_SETTINGS_KEY,JSON.stringify(cameraSettingsClipboard));}catch(error){/* In-memory fallback. */}
     announce('Copied settings from '+view.name+'. Choose another camera and use Paste settings.');
@@ -1809,7 +1815,7 @@
       if(choices.lens.checked)assign(['projection']);
       if(choices.motion.checked){assign(['transition']);if(source.mode===next.mode)assign(['effects']);}
       if(choices.behavior.checked){
-        assign(['temporaryLookPolicy','mouseLookOnRelease','levelHorizon']);
+        assign(['temporaryLookPolicy','mouseLookOnRelease','followHorizon']);
         if(source.mode===next.mode)assign(['interaction']);
       }
       if(next.mode!=='airport')next.aircraftTracking='off';
@@ -4054,12 +4060,21 @@
     });
     $('mc-quick-access').addEventListener('change', () => { const v = current(); if (v) setFavorite(v); });
     $$('[data-value]', $('mc-mouse-release')).forEach(b => b.addEventListener('click', () => { const view = current(); if (!view || readOnly()) return; view.mouseLookOnRelease = b.dataset.value; saveCamera(view); renderDetails(); }));
-    [['mc-retain-look', v => (v ? 'retain' : 'resetOnRecall'), 'temporaryLookPolicy'], ['mc-level', v => v, 'levelHorizon'], ['mc-interaction', v => v, 'interaction']].forEach(entry => $(entry[0]).addEventListener('change', e => {
+    [['mc-retain-look', v => (v ? 'retain' : 'resetOnRecall'), 'temporaryLookPolicy'], ['mc-interaction', v => v, 'interaction']].forEach(entry => $(entry[0]).addEventListener('change', e => {
       const view = current();
       if (!view) return;
       view[entry[2]] = entry[1](e.target.checked);
       saveCamera(view);
     }));
+    const setFollowHorizon = value => {
+      const view = current();
+      if (!view || readOnly() || !isFinite(value)) { renderDetails(); return; }
+      view.followHorizon = Math.round(M.clamp(value, 0, 1) * 100) / 100;
+      saveCamera(view);
+      renderDetails();
+    };
+    $('mc-follow-horizon-range').addEventListener('input', e => setFollowHorizon(Number(e.target.value)));
+    $('mc-follow-horizon-number').addEventListener('change', e => setFollowHorizon(e.target.value === '' ? NaN : Number(e.target.value)));
     ['shortcuts', 'contrast', 'backups', 'remember'].forEach(key => $('mc-setting-' + key).addEventListener('change', e => { S.working.settings.ui[key] = e.target.checked; settingChanged(); }));
     $('mc-setting-precision').addEventListener('change', e => { S.working.settings.ui.precision = e.target.value; setPrecision(e.target.value); settingChanged(); });
     $$('[data-value]', $('mc-setting-theme')).forEach(b => b.addEventListener('click', () => { S.working.settings.ui.theme = b.dataset.value; settingChanged(); }));

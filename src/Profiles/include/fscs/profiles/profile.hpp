@@ -1,5 +1,5 @@
 #pragma once
-// Profile schema v2 (doc/protocol.md §2.1, design 2.0 §8): validation, migration and an immutable typed snapshot
+// Profile schema v3 (doc/protocol.md §2.1, design 2.0 §8): validation, migration and an immutable typed snapshot
 // for the coordinator. Portable: no Windows API, no exceptions.
 
 #include "fscs/core/engine.hpp"
@@ -16,7 +16,7 @@ namespace fscs::profiles {
 
 using json = nlohmann::json;
 
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 constexpr std::size_t kMaxProfileBytes = 10u << 20;
 constexpr std::size_t kMaxCameras = 500;
 constexpr std::size_t kMaxCategories = 100;
@@ -74,7 +74,7 @@ struct CameraEntry {
     bool retainLook = false;
     bool resetMouseLookOnRelease = false;
     core::EffectsSettings effects;
-    bool levelHorizon = false;
+    double followHorizon = 1;  // 1 = banks with the aircraft, 0 = horizon stays level (presentation only)
     std::string seedDefinitionName;
 };
 
