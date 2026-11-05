@@ -74,6 +74,10 @@ There is no desktop application, tray app or external process.
   profile for display. Each domain is validated and saved separately; cross-domain category moves are rejected.
 * `transition.kind`: `cut` (Instant), `smoothstep3` (Smooth, default), `smoothstep5` (Cinematic).
   `durationSeconds` 0.1–15 (ignored for `cut`); `delaySeconds` 0–30 = **start delay** before movement.
+* `effects`: `enabled` plus `intensity`, `turbulence`, `groundRoll`, `touchdown`, `acceleration`, `engine` (0–1;
+  defaults .35/.5/.35/.5/.35/.2). Applied to `aircraftCockpit` at full strength and to `aircraftExterior` / `orbit`
+  at half strength; `airport`, `flyby` and `free` ignore them. The editor's Off/Subtle/Realistic/Action presets are
+  derived from these values (no stored preset name).
 * `mouseLookOnRelease`: optional `retain` (default) | `reset`. Per camera: keep temporary native right-drag look, or recenter it on button release. Does not overwrite the saved pose.
 * `temporaryLookPolicy`: `resetOnRecall` | `retain`. `levelHorizon` is capability-gated (disabled until qualified).
 * Validation: ≤ 10 MiB, finite numbers, |position| ≤ 10 000 m, FOV 0.1–2.8 rad, quaternion norm within 1e-3

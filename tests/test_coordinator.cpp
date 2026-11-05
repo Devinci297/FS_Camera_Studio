@@ -1234,3 +1234,43 @@ TEST_CASE("airports: global category heights preserve position offsets and allow
     settings.airportCategoryHeights["runways"]=80;r.c.setSettings(settings,r.t);r.advance(.02);CHECK_NEAR(r.backend.submitted.back().z,105,1e-9);
     camera["airportOverrides"].erase("heightMeters");r.setProfile();r.advance(.02);CHECK_NEAR(r.backend.submitted.back().z,180,1e-9);
 }
+TEST_CASE("effects: cockpit full strength, exterior and orbit reduced, world-fixed views excluded") {
+    struct Result { fscs::core::Vec3 offset, submittedMinusBase, base; std::size_t submissions = 0; };
+    const auto run=[](const std::string& mode, bool tracking) {
+        Rig r;std::string id=r.pilot;
+        if (mode=="airport") id=addAutoZoomAirport(r);
+        auto& cam=mode=="airport" ? r.profile["cameras"].back() : r.profile["cameras"][0];
+        cam["effects"]={{"enabled",true},{"intensity",1},{"acceleration",1}};
+        if (mode!="airport") {cam["mode"]=mode;cam["transition"]["kind"]="cut";}
+        if (mode!="aircraftCockpit" && mode!="airport") {cam["positionMetersFRD"]={-20,0,-5};cam["orientationCameraToAnchorXYZW"]={0,0,0,1};}
+        r.connect();
+        if (!tracking) {fscs::profiles::HostSettings settings;settings.globalAircraftTracking="off";r.c.setSettings(settings,r.t);}
+        if (mode=="flyby" || mode=="airport") r.c.setAircraftPosition(40,-89.999,120,r.t,90);
+        r.activate(id);r.grant();
+        fscs::core::FlightMotion motion;motion.forwardAcceleration=5;
+        for (int i=0;i<60;++i) {r.deliver(be::MotionTelemetry{motion});r.advance(.02);}
+        CHECK_EQ(r.c.activeCameraId(),id);
+        Result result;result.offset=r.c.effects().offset();result.base=r.c.engine().sample().pose.positionFRD;
+        result.submissions=r.backend.submitted.size();
+        if (!r.backend.submitted.empty() && r.backend.submitted.back().referential!=Referential::World)
+            result.submittedMinusBase=fromSdk(r.backend.submitted.back(),r.qual.contract).positionFRD-result.base;
+        return result;
+    };
+    const auto cockpit=run("aircraftCockpit",true);
+    CHECK(cockpit.offset.x< -1e-3);
+    CHECK_NEAR(cockpit.submittedMinusBase.x,cockpit.offset.x,1e-6);
+    const auto exterior=run("aircraftExterior",false);
+    CHECK_NEAR(exterior.offset.x,cockpit.offset.x*fscs::core::kExteriorEffectsScale,1e-9);
+    // The reduced offset reaches the submitted aircraft-relative pose; the saved base is unchanged.
+    CHECK_NEAR(exterior.submittedMinusBase.x,exterior.offset.x,1e-6);CHECK_NEAR(exterior.base.x,-20,1e-9);
+    CHECK_NEAR(run("aircraftExterior",true).offset.x,exterior.offset.x,1e-9);
+    // Orbit keeps animating its base; the effect is layered on top at exterior strength.
+    const auto orbit=run("orbit",true);
+    CHECK_NEAR(orbit.offset.x,exterior.offset.x,1e-9);
+    CHECK(orbit.base.length()>1);
+    for (const auto* mode : {"flyby","airport"}) {
+        const auto fixed=run(mode,true);
+        CHECK(fixed.submissions>0);
+        CHECK_NEAR(fixed.offset.length(),0,1e-12);
+    }
+}

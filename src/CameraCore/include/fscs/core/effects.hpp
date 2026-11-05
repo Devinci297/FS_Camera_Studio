@@ -3,6 +3,7 @@
 
 namespace fscs::core {
 // Camera-local presentation only. These offsets never enter saved presets or temporary look.
+// Defaults are the editor's "Realistic" preset values (ui/app.js EFFECT_DEFAULTS) with enabled off.
 struct EffectsSettings {
     bool enabled = false;
     double intensity = .35, turbulence = .5, groundRoll = .35, touchdown = .5, acceleration = .35, engine = .2;
@@ -16,10 +17,14 @@ struct FlightMotion {
                std::isfinite(lateralAcceleration) && std::isfinite(engineRpm);
     }
 };
+// Aircraft-relative exterior views (chase, orbit) move at reduced strength: a camera
+// outside the aircraft should not shake like the pilot's head.
+inline constexpr double kExteriorEffectsScale = .5;
 class CameraEffects {
 public:
     void reset() { *this = CameraEffects{}; }
-    void tick(double dt, const FlightMotion& m, const EffectsSettings& settings, bool eligible) {
+    // scale (0..1) multiplies every output (offsets and pitch) on top of settings.intensity.
+    void tick(double dt, const FlightMotion& m, const EffectsSettings& settings, bool eligible, double scale = 1.) {
         if (!eligible || !settings.enabled || !m.finite() || !std::isfinite(dt) || dt < 0 || dt > .1) { reset(); return; }
         if (dt == 0) return;
         if (!seeded_) { ground_ = m.onGround > .5; previousVs_ = m.verticalSpeed; meanG_ = m.gForce; seeded_ = true; }
@@ -30,7 +35,7 @@ public:
         impact_ *= std::exp(-dt * 5.);
         meanG_ += (m.gForce - meanG_) * (1. - std::exp(-dt * .7));
         const auto amount = [](double v) { return std::isfinite(v) ? clamp(v, 0., 1.) : 0.; };
-        const double master = amount(settings.intensity);
+        const double master = amount(settings.intensity) * amount(scale);
         const double rough = ground ? amount(settings.groundRoll) * clamp((m.groundSpeed - .5) / 25., 0., 1.) : 0.;
         const double air = ground ? 0. : amount(settings.turbulence) * clamp(m.gForce - meanG_, -1., 1.);
         const double motor = amount(settings.engine) * clamp(m.engineRpm / 2500., 0., 1.);

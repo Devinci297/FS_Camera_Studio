@@ -40,6 +40,20 @@ bool nearlyEqual(const SdkPose& a, const SdkPose& b) {
            std::abs(a.headingDeg - b.headingDeg) < e && std::abs(a.fovRad - b.fovRad) < e;
 }
 
+// Flight effects strength by view type; 0 = not eligible. World-fixed views
+// (airport, fly-by) and free cameras never move with the aircraft.
+double effectsScaleFor(profiles::CameraMode mode) {
+    switch (mode) {
+        case profiles::CameraMode::AircraftCockpit: return 1.;
+        case profiles::CameraMode::AircraftExterior:
+        case profiles::CameraMode::Orbit: return core::kExteriorEffectsScale;
+        case profiles::CameraMode::Flyby:
+        case profiles::CameraMode::Airport:
+        case profiles::CameraMode::Free: return 0.;
+    }
+    return 0.;
+}
+
 
 }  // namespace
 
@@ -1286,9 +1300,9 @@ void Coordinator::tick(double now) {
         if(activeEntry())headTracking_.update("global",settings_.globalHeadTrackingEnabled ? "on" : "off",now);
         emitCapabilities();
         const auto* effectCamera = activeEntry();
+        const double effectsScale = effectCamera ? effectsScaleFor(effectCamera->mode) : 0.;
         effects_.tick(dt, flightMotion_, effectCamera ? effectCamera->effects : core::EffectsSettings{},
-                      effectCamera && effectCamera->mode == profiles::CameraMode::AircraftCockpit &&
-                      motionReceivedAt_ >= 0 && now - motionReceivedAt_ < .5);
+                      effectsScale > 0 && motionReceivedAt_ >= 0 && now - motionReceivedAt_ < .5, effectsScale);
         if (mouseHeld_ && !mouseBlocked_ && mouseCameraId_ == activeCameraId_) {
             ++mouseFrames_;
             mouseMaxFrameGap_ = std::max(mouseMaxFrameGap_, dt);
