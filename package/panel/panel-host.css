@@ -126,3 +126,8 @@ ingame-ui#FSCSMain .ingameUiWrapper::before, ingame-ui#FSCSMain .ingameUiWrapper
 ingame-ui#FSCSMain .ingameUiContent::before, ingame-ui#FSCSMain .ingameUiContent::after {
   background:transparent !important; box-shadow:none !important; backdrop-filter:none !important;
 }
+
+/* Popped-out editor: it now sits in its own desktop window (often on another monitor), where there is no scene
+   behind it to see through and the window frame provides moving. Paint it opaque whatever the opacity setting. */
+ingame-ui#FSCSMain.extern #mc-editor { background-color: rgb(16, 25, 35) !important; }
+ingame-ui#FSCSMain.extern #mc-sim[data-theme="light"] #mc-editor { background-color: rgb(246, 248, 251) !important; }

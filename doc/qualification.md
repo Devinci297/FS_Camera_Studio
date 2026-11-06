@@ -22,6 +22,7 @@ Camera directions are configured automatically; there is no user axis-calibratio
 | Open assignment, tracking, walkaround and confirmation dialogs | Content scrolls above visible action buttons; no unwanted full-screen opaque panel |
 | Test opacity, reopen and resize | Main and mini alpha settings are independent; scene is visible without native blur |
 | Click cockpit controls around visible and hidden panels | No invisible hit regions block simulator controls |
+| **Pop out** the editor, drag it to a second monitor, edit and save a camera, then **Dock** it; repeat with Right Alt + click | Editor opens in its own opaque desktop window and stays fully usable; Dock returns it to the sim window; no CoherentUIGT crash; mini panel unaffected |
 
 ## Input and camera behavior
 

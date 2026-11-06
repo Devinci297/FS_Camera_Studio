@@ -170,6 +170,7 @@
       'mc-expand':'Open the full camera editor.',
       'mc-compact':'Close the editor and use the mini camera panel.',
       'mc-hide':'Hide the editor. Camera control remains active.',
+      'mc-pop-out':'Move the editor into its own window that you can drag to another monitor, or dock it back into the simulator. Holding Right Alt and clicking the editor does the same.',
       'mc-prev':'Show the previous camera in this category.',
       'mc-next':'Show the next camera in this category.',
       'mc-release':'Release camera control to the simulator.',

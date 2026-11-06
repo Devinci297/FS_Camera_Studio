@@ -23,7 +23,9 @@ function harness(surface) {
   const strip = new Node('mc-mini-region'); strip.rect = { left: 0, right: 1920, top: 1044, bottom: 1080 };
   const dock = new Node('mc-mini-panel'); dock.rect = { left: 480, right: 1440, top: 970, bottom: 1044 };
   const dialog = new Node('mc-dialog-shade'); dialog.hidden = true; dialog.rect = { left: 0, right: 1920, top: 0, bottom: 1080 };
-  const nodes = Object.fromEntries([editor,header,strip,dock,dialog].map(n => [n.id,n]));
+  const popOut = new Node('mc-pop-out'); popOut.hidden = true; popOut.attrs = {}; popOut.setAttribute = (k, v) => { popOut.attrs[k] = v; };
+  const popOutLabel = new Node('mc-pop-out-label'); popOutLabel.textContent = 'Pop out';
+  const nodes = Object.fromEntries([editor,header,strip,dock,dialog,popOut,popOutLabel].map(n => [n.id,n]));
   const document = new Node('document'); document.readyState = 'complete'; document.body = editor;
   document.getElementById = id => nodes[id]; document.querySelector = () => panel; document.querySelectorAll = () => [panel];
   const calls = []; const timers = []; const observers = [];
@@ -32,7 +34,7 @@ function harness(surface) {
     requestAnimationFrame: fn => fn(), setTimeout: fn => timers.push(fn), setInterval: fn => timers.push(fn), clearInterval() {}, Event };
   context.window = context; context.addEventListener = () => {}; context.removeEventListener = () => {};
   vm.createContext(context); vm.runInContext(source, context);
-  return { observers, panel, editor, header, strip, dock, dialog, context, calls, run: () => timers.forEach(fn => fn()) };
+  return { observers, panel, editor, header, strip, dock, dialog, popOut, popOutLabel, context, calls, run: () => timers.forEach(fn => fn()) };
 }
 
 const main = harness('main'); let drags = 0;
@@ -89,4 +91,35 @@ main.panel.visible=false;main.run();main.panel.visible=true;main.run();
 assert.equal(relays.length,2,'reopening editor releases mini capture');
 mini.context.innerWidth=mini.context.innerHeight=67;mini.panel.active=true;mini.editor.dataset.mouseLook='true';mini.context.fscsUpdateMiniRect();
 assert.deepEqual(mini.calls.at(-1), ['UPDATE_PANEL_RECT','mini',0,67,67,67], 'loading viewport never receives inverted bounds');
-console.log('5 panel host regressions passed');
+
+// Pop out: offered only when the stock host can externalize the editor; it uses the stock call and mirrors its state.
+const pop = harness('main'); pop.panel.dragDropHandler = main.panel.dragDropHandler; pop.run();
+if (typeof pop.context.fscsTogglePopOut === 'function') { // older frozen hosts predate pop-out
+assert.equal(pop.popOut.hidden, true, 'no pop-out button without a stock extern handler');
+assert.equal(pop.context.fscsTogglePopOut(), false);
+const externCalls = [];
+pop.panel.toggleExternPanel = out => { externCalls.push(out); if (out) pop.panel.classList.add('extern'); else pop.panel.classList.remove('extern'); };
+pop.run();
+assert.equal(pop.popOut.hidden, false, 'pop-out offered once the stock handler exists');
+assert.equal(pop.editor.dataset.popOut, 'false');
+pop.popOut.emit('click');
+assert.deepEqual(externCalls, [true], 'click asks the simulator to externalize the editor');
+assert.equal(pop.editor.dataset.popOut, 'true');
+assert.equal(pop.popOutLabel.textContent, 'Dock');
+assert.match(pop.popOut.attrs['aria-label'], /Dock/);
+drags = 0; pop.header.emit('mousedown', { target: background, button: 0 });
+assert.equal(drags, 0, 'a popped-out editor is moved by its desktop window, not the in-sim drag handler');
+pop.popOut.emit('click');
+assert.deepEqual(externCalls, [true, false], 'second click docks it back');
+assert.equal(pop.popOutLabel.textContent, 'Pop out');
+pop.header.emit('mousedown', { target: background, button: 0 });
+assert.equal(drags, 1, 'docked editor drags again');
+pop.panel.classList.add('extern'); pop.run();
+assert.equal(pop.editor.dataset.popOut, 'true', 'Right Alt + click pop-outs by the simulator are reflected');
+pop.panel.classList.remove('extern'); pop.panel.isExternalizable = false; pop.run();
+assert.equal(pop.popOut.hidden, true, 'hidden when the simulator says the window cannot be externalized (for example in VR)');
+assert.equal(pop.context.fscsTogglePopOut(), false);
+const miniPop = harness('mini'); miniPop.panel.toggleExternPanel = () => externCalls.push('mini'); miniPop.run();
+assert.equal(miniPop.context.fscsTogglePopOut(), false, 'the mini dock never pops out');
+}
+console.log('6 panel host regressions passed');

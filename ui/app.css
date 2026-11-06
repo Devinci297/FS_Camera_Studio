@@ -746,6 +746,10 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim .mc-global-nav { padding:6px 18px; gap:0; }
 #mc-sim .mc-global-nav > button { margin-right:5px; gap:0; }
 #mc-sim .mc-global-nav > button svg,#mc-sim .mc-compact-button svg { margin-right:6px; }
+/* Pop out / Dock: one header button; msfs-panel.js sets #mc-sim[data-pop-out] from the simulator's extern state. */
+#mc-sim .mc-pop-out svg[data-icon="pop-in"],
+#mc-sim[data-pop-out="true"] .mc-pop-out svg[data-icon="pop-out"] { display:none; }
+#mc-sim[data-pop-out="true"] .mc-pop-out svg[data-icon="pop-in"] { display:inline-block; }
 @media(max-width:880px) {
  #mc-sim .mc-panel-head { padding:10px 12px; }
  #mc-sim .mc-panel-head .mc-brand { flex-basis:190px; }
