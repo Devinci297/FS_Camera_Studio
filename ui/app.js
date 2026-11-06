@@ -2874,6 +2874,7 @@
     if (sp.state === 'tracking') return 'Spotting ' + label + (sp.view ? ' · ' + (SPOT_VIEW_NAMES[sp.view] || sp.view) : '') + (sp.autoSpot ? ' · Auto-spot' : '');
     if (sp.state === 'lost') return 'Lost ' + label + (sp.reason ? ': ' + sp.reason : '');
     if (sp.state === 'waiting') return 'Auto-spot is waiting for arriving or departing traffic' + (sp.reason ? ': ' + sp.reason : '.');
+    if (S.snapshot && !S.caps.canActivate) return 'Spotting needs camera control: ' + (S.caps.blockReason || 'camera control is not available right now.') + (S.caps.blockReason === 'No camera profile is open for this aircraft.' ? ' Use Create profile for this aircraft above, then choose a view.' : '');
     return 'Not spotting. Choose a view for an aircraft below.';
   }
   function miniSpotText() {
@@ -2945,7 +2946,7 @@
     setText(chip, TRAFFIC_STATUS[a.status] || a.status || '');
     chip.dataset.status = a.status || '';
     const numbers = row.querySelector('.mc-traffic-figures');
-    setText(numbers, figures.join(' · '));
+    setText(numbers, figures.join(', '));  // plain comma: the figures' tabular-number font has no middle dot in the sim
     numbers.title = 'Distance ' + figures[0] + ', altitude ' + figures[1] + ', ground speed ' + figures[2];
     $$('button[data-view]', row).forEach(choose => {
       const view = choose.dataset.view, reason = reasons[view];

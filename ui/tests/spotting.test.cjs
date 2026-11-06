@@ -41,10 +41,10 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.equal(await first.locator('.mc-traffic-name strong').innerText(),'Lufthansa 441');
   assert.match(await first.locator('.mc-traffic-name small').innerText(),/A320 · D-AINB/);
   assert.equal((await first.locator('.mc-traffic-status').innerText()).toLowerCase(),'parked');
-  assert.match(await first.locator('.mc-traffic-figures').innerText(),/^0\.1 NM · 1,417 ft · 0 kt$/);
+  assert.match(await first.locator('.mc-traffic-figures').innerText(),/^0\.1 NM, 1,417 ft, 0 kt$/);
   const gaRow=rows.filter({hasText:'N172DM'});
   assert.match(await gaRow.locator('.mc-traffic-name strong').innerText(),/^N172DM$/,'the ATC id labels aircraft without an airline flight');
-  assert.match(await rows.filter({hasText:'United 15'}).locator('.mc-traffic-figures').innerText(),/35,000 ft · 480 kt/);
+  assert.match(await rows.filter({hasText:'United 15'}).locator('.mc-traffic-figures').innerText(),/35,000 ft, 480 kt/);
 
   // Filters: status, airline or callsign text, maximum distance.
   const shown=()=>rows.evaluateAll(list=>list.map(r=>({id:Number(r.dataset.objectId),status:r.dataset.status,ground:r.dataset.onGround==='true'})));
