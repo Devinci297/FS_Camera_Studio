@@ -41,7 +41,8 @@ bool nearlyEqual(const SdkPose& a, const SdkPose& b) {
 }
 
 // Flight effects strength by view type; 0 = not eligible. World-fixed views
-// (airport, fly-by) and free cameras never move with the aircraft.
+// (airport, fly-by) and free cameras never move with the aircraft. Mounted cameras
+// are rigid on the airframe and use their own airframe vibration instead.
 double effectsScaleFor(profiles::CameraMode mode) {
     switch (mode) {
         case profiles::CameraMode::AircraftCockpit: return 1.;
@@ -49,7 +50,8 @@ double effectsScaleFor(profiles::CameraMode mode) {
         case profiles::CameraMode::Orbit: return core::kExteriorEffectsScale;
         case profiles::CameraMode::Flyby:
         case profiles::CameraMode::Airport:
-        case profiles::CameraMode::Free: return 0.;
+        case profiles::CameraMode::Free:
+        case profiles::CameraMode::Mounted: return 0.;
     }
     return 0.;
 }
@@ -129,7 +131,7 @@ const CameraEntry* Coordinator::activeEntry() const {
 
 Referential Coordinator::referentialFor(const CameraEntry& cam) const {
     if(cam.mode==profiles::CameraMode::Airport || cam.mode==profiles::CameraMode::Flyby)return Referential::World;
-    return cam.mode == profiles::CameraMode::AircraftExterior || cam.mode == profiles::CameraMode::Orbit ? Referential::SimObject : Referential::Eyepoint;
+    return cam.mode == profiles::CameraMode::AircraftExterior || cam.mode == profiles::CameraMode::Orbit || cam.mode == profiles::CameraMode::Mounted ? Referential::SimObject : Referential::Eyepoint;
 }
 
 void Coordinator::setState(Ownership s, const std::string& reason) {
@@ -147,11 +149,13 @@ json Coordinator::capabilitiesJson() const {
     const std::string block = blockReason();
     json modes = json::object();
     for (auto m : {profiles::CameraMode::AircraftCockpit, profiles::CameraMode::AircraftExterior, profiles::CameraMode::Orbit,
-                   profiles::CameraMode::Flyby, profiles::CameraMode::Airport, profiles::CameraMode::Free}) {
+                   profiles::CameraMode::Flyby, profiles::CameraMode::Airport, profiles::CameraMode::Free, profiles::CameraMode::Mounted}) {
         const bool ok = profiles::modeActivatable(m);
         modes[profiles::toString(m)] = {{"available", ok},
-                                        {"preview", m == profiles::CameraMode::AircraftExterior || m == profiles::CameraMode::Airport},
-                                        {"reason", ok ? (m == profiles::CameraMode::AircraftExterior ? json("Preview: exterior views keep cockpit sound in the current simulator build.") : json(nullptr))
+                                        {"preview", m == profiles::CameraMode::AircraftExterior || m == profiles::CameraMode::Airport || m == profiles::CameraMode::Mounted},
+                                        {"reason", ok ? (m == profiles::CameraMode::AircraftExterior ? json("Preview: exterior views keep cockpit sound in the current simulator build.")
+                                                         : m == profiles::CameraMode::Mounted ? json("Preview: mounted views keep cockpit sound and need live checking of the gimbal and vibration.")
+                                                                                              : json(nullptr))
                                                       : json("Not available in this version. Saved with the profile but cannot be activated.")}};
     }
     return {{"headTracking", headTracking_.status()}, {"nativeMouseLook", mouseMapped_}, {"adapterQualified", qual_.adapterQualified},
@@ -830,6 +834,7 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
             } else if constexpr (std::is_same_v<T, backend_event::MotionTelemetry>) {
                 if (e.motion.finite()) { flightMotion_ = e.motion; motionReceivedAt_ = now; }
                 aircraftBankDeg_ = e.motion.finite() ? e.bankDeg : NAN;
+                aircraftPitchDeg_ = e.motion.finite() ? e.pitchDeg : NAN;
             } else if constexpr (std::is_same_v<T, backend_event::Connected>) {
                 simConnected_ = true;
                 simVersion_ = e.simVersion;
@@ -1061,6 +1066,8 @@ core::CameraPose Coordinator::effectiveAirportPose(const CameraEntry& cam) const
 }
 
 const std::string& Coordinator::aircraftTrackingFor(const CameraEntry& cam) const {
+    static const std::string off = "off";
+    if (cam.mode == profiles::CameraMode::Mounted) return off;  // rigid on the airframe: never aims at the aircraft
     if (cam.mode == profiles::CameraMode::Airport && cam.airportOverrides.aircraftTracking)
         return *cam.airportOverrides.aircraftTracking;
     return settings_.globalAircraftTracking;
@@ -1127,6 +1134,17 @@ void Coordinator::updateHorizon(double dt, double now) {
     horizon_.tick(dt, fresh && relative ? core::horizonCounterRollDeg(aircraftBankDeg_, cam->followHorizon) : 0.0);
 }
 
+void Coordinator::updateGimbal(double dt, double now) {
+    if (motionReceivedAt_ < 0) { gimbal_.reset(); return; }  // session reset: nothing to ease from
+    if (motionPaused_) return;  // hold through a sim pause
+    const CameraEntry* cam = activeEntry();
+    const bool fresh = now - motionReceivedAt_ < .5 && std::isfinite(aircraftBankDeg_);
+    // Older telemetry without pitch levels the roll only. Stale attitude eases back to locked on the airframe.
+    const double pitch = std::isfinite(aircraftPitchDeg_) ? aircraftPitchDeg_ : 0.0;
+    const bool stabilise = fresh && cam && cam->mode == profiles::CameraMode::Mounted;
+    gimbal_.tick(dt, stabilise ? cam->gimbal : core::Gimbal::Locked, fresh ? pitch : NAN, fresh ? aircraftBankDeg_ : NAN);
+}
+
 void Coordinator::submit(bool refreshTrackingPosition) {
     const CameraEntry* cam = activeEntry();
     if (!cam || !eligibleToSubmit()) return;
@@ -1153,6 +1171,11 @@ void Coordinator::submit(bool refreshTrackingPosition) {
         cam->mode == profiles::CameraMode::Orbit) {
         horizonRoll = horizon_.rollDeg();
         submittedPose = core::counterRoll(submittedPose, horizonRoll, cam->mode != profiles::CameraMode::AircraftCockpit);
+    }
+    // Mounted cameras stay rigid on the airframe (no tracking, no follow horizon): gimbal, then airframe vibration.
+    if (cam->mode == profiles::CameraMode::Mounted) {
+        submittedPose.orientation = gimbal_.apply(submittedPose.orientation);
+        submittedPose = mountVibration_.apply(submittedPose);
     }
     SdkPose sdk = toSdk(submittedPose, qual_.contract, referentialFor(*cam));
     if(cam->mode==profiles::CameraMode::Airport || cam->mode==profiles::CameraMode::Flyby){
@@ -1339,6 +1362,9 @@ void Coordinator::tick(double now) {
         const double effectsScale = effectCamera ? effectsScaleFor(effectCamera->mode) : 0.;
         effects_.tick(dt, flightMotion_, effectCamera ? effectCamera->effects : core::EffectsSettings{},
                       effectsScale > 0 && motionReceivedAt_ >= 0 && now - motionReceivedAt_ < .5, effectsScale);
+        const bool mounted = effectCamera && effectCamera->mode == profiles::CameraMode::Mounted;
+        mountVibration_.tick(dt, flightMotion_, mounted ? effectCamera->mountVibration : 0.,
+                             mounted && motionReceivedAt_ >= 0 && now - motionReceivedAt_ < .5);
         if (mouseHeld_ && !mouseBlocked_ && mouseCameraId_ == activeCameraId_) {
             ++mouseFrames_;
             mouseMaxFrameGap_ = std::max(mouseMaxFrameGap_, dt);
@@ -1391,6 +1417,7 @@ void Coordinator::tick(double now) {
         updateAirportTrackingPosition();
         updateAirportAutoZoom(dt);
         updateHorizon(dt, now);
+        updateGimbal(dt, now);
         submit(false);
         if (engine_.transitioning() != lastTransitioning_) emitActiveCamera();
         emitLook(now);

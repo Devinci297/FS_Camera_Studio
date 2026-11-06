@@ -1447,3 +1447,227 @@ TEST_CASE("effects: cockpit full strength, exterior and orbit reduced, world-fix
         CHECK_NEAR(fixed.offset.length(),0,1e-12);
     }
 }
+
+namespace {
+// A profile whose first camera is mounted on the left wing tip, looking along `look` (PBH degrees).
+Rig& mountRig(Rig& r, const std::string& gimbal, double vibration, fscs::core::Pbh look = {}) {
+    auto& cam = r.profile["cameras"][0];
+    const auto q = fscs::core::Quat::fromPbh(look);
+    cam["mode"] = "mounted";
+    cam["gimbal"] = gimbal;
+    cam["mountVibration"] = vibration;
+    cam["interaction"] = false;
+    cam["positionMetersFRD"] = {0.4, -5.4, 0.3};
+    cam["orientationCameraToAnchorXYZW"] = {q.x, q.y, q.z, q.w};
+    cam["transition"]["kind"] = "cut";
+    return r;
+}
+// Steady flight attitude for the gimbal: FRD pitch (nose up > 0) and bank (right wing down > 0).
+void flyAttitude(Rig& r, double pitch, double bank, int frames, fscs::core::FlightMotion motion = {}) {
+    for (int i = 0; i < frames; ++i) { r.deliver(be::MotionTelemetry{motion, bank, pitch}); r.advance(1.0 / 60); }
+}
+fscs::core::CameraPose shownPose(Rig& r) { return fromSdk(r.backend.submitted.back(), r.qual.contract); }
+}  // namespace
+
+TEST_CASE("mounted: rigid on the SimObject anchor; locked follows the aircraft and ignores aircraft tracking") {
+    Rig r;
+    mountRig(r, "locked", 0, {-5, 0, 30});
+    r.connect();
+    fscs::profiles::HostSettings settings;
+    settings.globalAircraftTracking = "both";  // would aim an exterior view at the aircraft
+    r.c.setSettings(settings, r.t);
+    r.activate(r.pilot);
+    r.grant();
+    flyAttitude(r, 10, 30, 60);
+    const auto& sdk = r.backend.submitted.back();
+    CHECK(sdk.referential == Referential::SimObject);
+    CHECK(!sdk.trackUserAircraft);
+    const auto shown = shownPose(r);
+    CHECK_NEAR(shown.positionFRD.x, 0.4, 1e-9);
+    CHECK_NEAR(shown.positionFRD.y, -5.4, 1e-9);
+    CHECK_NEAR(shown.positionFRD.z, 0.3, 1e-9);
+    // Locked: exactly the saved orientation relative to the airframe, so it banks and pitches with the aircraft.
+    CHECK_NEAR(fscs::core::angleBetween(shown.orientation, fscs::core::Quat::fromPbh({-5, 0, 30})), 0, 1e-7);
+    // Keyboard movement uses the camera's own frame, never a tracked basis.
+    fscs::core::ManualInput in;
+    in.moveRight = 1;
+    r.c.setManualInput(in);
+    flyAttitude(r, 10, 30, 30);
+    const auto moved = r.c.engine().sample().pose.positionFRD;
+    CHECK(std::abs(moved.y + 5.4) > .01);
+    // The capability list offers the mode.
+    const auto caps = r.c.capabilitiesJson();
+    CHECK_EQ(caps["modes"]["mounted"]["available"], json(true));
+}
+
+TEST_CASE("mounted: horizon gimbal levels the bank for any lens direction, keeps the mount's pitch and eases in") {
+    using fscs::core::Quat;
+    for (const double lensHeading : {0.0, 90.0, -135.0}) {
+        Rig r;
+        mountRig(r, "horizon", 0, {-4, 0, lensHeading});
+        r.connect();
+        r.activate(r.pilot);
+        r.grant();
+        flyAttitude(r, 10, 30, 1);
+        const Quat aircraft = Quat::fromPbh({10, 30, 0});
+        const Quat saved = Quat::fromPbh({-4, 0, lensHeading});
+        CHECK(std::abs((aircraft * shownPose(r).orientation).toPbh().bankDeg) > 1);  // eased, not snapped
+        flyAttitude(r, 10, 30, 120);
+        const auto shown = shownPose(r);
+        const auto world = (aircraft * shown.orientation).toPbh();
+        CHECK_NEAR(world.bankDeg, 0, 1e-3);
+        // The lens still points where the airframe points it.
+        const auto look = (aircraft * shown.orientation).rotate({1, 0, 0});
+        const auto mountLook = (aircraft * saved).rotate({1, 0, 0});
+        CHECK_NEAR(fscs::core::dot(look, mountLook), 1, 1e-6);
+        CHECK_NEAR(shown.positionFRD.y, -5.4, 1e-9);  // only the lens turns: the mount stays on the wing
+    }
+    // Forward lens, wings-level pitch: the same as the follow-horizon counter-roll at followHorizon 0.
+    Rig r;
+    mountRig(r, "horizon", 0);
+    r.connect();
+    r.activate(r.pilot);
+    r.grant();
+    flyAttitude(r, 0, 25, 120);
+    const auto phase1 = fscs::core::counterRoll(r.c.engine().sample().pose, fscs::core::horizonCounterRollDeg(25, 0), false);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, phase1.orientation), 0, 1e-5);
+    // With pitch: the world pitch is the aircraft's, the roll is gone.
+    flyAttitude(r, 12, 25, 120);
+    const auto world = (Quat::fromPbh({12, 25, 0}) * shownPose(r).orientation).toPbh();
+    CHECK_NEAR(world.pitchDeg, 12, 1e-3);
+    CHECK_NEAR(world.bankDeg, 0, 1e-3);
+    CHECK_NEAR(world.headingDeg, 0, 1e-3);
+}
+
+TEST_CASE("mounted: yaw gimbal cancels pitch and bank, holds through a pause and relaxes when telemetry is stale") {
+    using fscs::core::Quat;
+    Rig r;
+    mountRig(r, "yaw", 0, {-6, 0, 20});
+    r.connect();
+    r.activate(r.pilot);
+    r.grant();
+    const Quat saved = Quat::fromPbh({-6, 0, 20});
+    flyAttitude(r, 10, 30, 120);
+    CHECK_NEAR(fscs::core::angleBetween(Quat::fromPbh({10, 30, 0}) * shownPose(r).orientation, saved), 0, 1e-5);
+    flyAttitude(r, -8, -45, 120);
+    CHECK_NEAR(fscs::core::angleBetween(Quat::fromPbh({-8, -45, 0}) * shownPose(r).orientation, saved), 0, 1e-5);
+    // The engine pose never contains the gimbal.
+    CHECK_NEAR(fscs::core::angleBetween(r.c.engine().sample().pose.orientation, saved), 0, 1e-9);
+    // No samples for 0.5 s: eases back to the airframe (locked) instead of holding an old correction.
+    r.advance(1.0 / 60, 30);
+    CHECK(fscs::core::angleBetween(shownPose(r).orientation, saved) > .05);
+    r.advance(1.0 / 60, 150);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, saved), 0, 1e-4);
+    // Switching the gimbal to locked eases out as well.
+    flyAttitude(r, 10, 30, 120);
+    r.profile["cameras"][0]["gimbal"] = "locked";
+    r.setProfile();
+    flyAttitude(r, 10, 30, 1);
+    CHECK(fscs::core::angleBetween(shownPose(r).orientation, saved) > .1);
+    flyAttitude(r, 10, 30, 120);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, saved), 0, 1e-4);
+}
+
+TEST_CASE("mounted: gimbals apply to mounted cameras only; follow horizon and flight effects do not") {
+    using fscs::core::Quat;
+    Rig r;
+    mountRig(r, "locked", 0);
+    auto& cam = r.profile["cameras"][0];
+    cam["followHorizon"] = 0.0;  // ignored: the gimbal decides
+    cam["effects"] = {{"enabled", true}, {"intensity", 1}, {"acceleration", 1}};
+    auto& exterior = r.profile["cameras"][1];
+    exterior["mode"] = "aircraftExterior";
+    exterior["gimbal"] = "yaw";  // left over from a mode change: ignored
+    exterior["mountVibration"] = 1.0;
+    exterior["followHorizon"] = 1.0;
+    exterior["transition"]["kind"] = "cut";
+    exterior["positionMetersFRD"] = {-10, 0, -2};
+    r.connect();
+    fscs::profiles::HostSettings settings;
+    settings.globalAircraftTracking = "off";
+    r.c.setSettings(settings, r.t);
+    r.activate(r.pilot);
+    r.grant();
+    fscs::core::FlightMotion motion;
+    motion.forwardAcceleration = 5;
+    motion.engineRpm = 2400;
+    flyAttitude(r, 10, 30, 60, motion);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, Quat::identity()), 0, 1e-9);
+    CHECK_NEAR(r.c.effects().offset().length(), 0, 1e-12);
+    r.activate(r.pfd);
+    flyAttitude(r, 10, 30, 60, motion);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, Quat::fromPbh({0, 0, 0})), 0, 1e-9);
+    CHECK_NEAR(r.c.mountVibration().offset().length(), 0, 1e-12);
+    CHECK_NEAR(shownPose(r).positionFRD.x, -10, 1e-9);
+}
+
+TEST_CASE("mounted: airframe vibration is small, bounded, follows engine and ground roll, and is mounted only") {
+    struct Run { double maxAxis = 0, maxAngleDeg = 0; int zeroCrossings = 0; };
+    const auto run = [](const std::string& mode, double amount, fscs::core::FlightMotion motion) {
+        Rig r;
+        mountRig(r, "locked", amount);
+        r.profile["cameras"][0]["mode"] = mode;
+        r.connect();
+        r.activate(r.pilot);
+        r.grant();
+        flyAttitude(r, 0, 0, 60, motion);  // amplitudes settle
+        Run out;
+        double previous = 0;
+        const fscs::core::Vec3 saved{0.4, -5.4, 0.3};
+        for (int i = 0; i < 120; ++i) {
+            flyAttitude(r, 0, 0, 1, motion);
+            const auto shown = shownPose(r);
+            const auto d = shown.positionFRD - saved;
+            out.maxAxis = std::max({out.maxAxis, std::abs(d.x), std::abs(d.y), std::abs(d.z)});
+            out.maxAngleDeg = std::max(out.maxAngleDeg, fscs::core::angleBetween(shown.orientation, fscs::core::Quat::identity()) * fscs::core::kRadToDeg);
+            const double z = r.c.mountVibration().offset().z;
+            if (i > 0 && (z > 0) != (previous > 0)) ++out.zeroCrossings;
+            previous = z;
+        }
+        return out;
+    };
+    fscs::core::FlightMotion rolling;
+    rolling.onGround = 1; rolling.groundSpeed = 30; rolling.engineRpm = 2500;
+    fscs::core::FlightMotion cruise;
+    cruise.onGround = 0; cruise.groundSpeed = 55; cruise.engineRpm = 2400;
+    fscs::core::FlightMotion parked;  // engine off, standing still
+
+    const auto full = run("mounted", 1, rolling);
+    CHECK(full.maxAxis > .1 * fscs::core::kMountVibrationMaxMeters);
+    CHECK(full.maxAxis <= fscs::core::kMountVibrationMaxMeters + 1e-12);
+    CHECK(full.maxAngleDeg > .05);
+    CHECK(full.maxAngleDeg <= 2.5 * fscs::core::kMountVibrationMaxDeg);
+    CHECK(full.zeroCrossings > 20);  // fast: more than 10 Hz over two seconds
+    const auto light = run("mounted", .3, rolling);
+    CHECK(light.maxAxis <= .3 * fscs::core::kMountVibrationMaxMeters + 1e-12);
+    CHECK(light.maxAxis < full.maxAxis);
+    const auto air = run("mounted", 1, cruise);
+    CHECK(air.maxAxis > 0);
+    CHECK(air.maxAxis < full.maxAxis);  // engine only: no ground roll
+    CHECK_NEAR(run("mounted", 1, parked).maxAxis, 0, 1e-12);
+    CHECK_NEAR(run("mounted", 0, rolling).maxAxis, 0, 1e-12);
+    // Other modes never vibrate, whatever their stored mountVibration says.
+    for (const auto* mode : {"aircraftExterior", "aircraftCockpit", "orbit"}) {
+        Rig r;
+        mountRig(r, "locked", 1);
+        r.profile["cameras"][0]["mode"] = mode;
+        r.connect();
+        r.activate(r.pilot);
+        r.grant();
+        flyAttitude(r, 0, 0, 60, rolling);
+        CHECK_NEAR(r.c.mountVibration().offset().length(), 0, 1e-12);
+    }
+    // Direct class checks: non-finite input, oversize steps and ineligibility reset to zero.
+    fscs::core::MountVibration v;
+    for (int i = 0; i < 60; ++i) v.tick(1.0 / 60, rolling, 1, true);
+    CHECK(v.offset().length() > 0);
+    v.tick(.5, rolling, 1, true);
+    CHECK_NEAR(v.offset().length(), 0, 1e-12);
+    for (int i = 0; i < 60; ++i) v.tick(1.0 / 60, rolling, 5, true);  // amount clamps to 1
+    CHECK(std::abs(v.offset().z) <= fscs::core::kMountVibrationMaxMeters + 1e-12);
+    v.tick(1.0 / 60, rolling, NAN, true);
+    CHECK_NEAR(v.offset().length(), 0, 1e-12);
+    for (int i = 0; i < 60; ++i) v.tick(1.0 / 60, rolling, 1, true);
+    v.tick(1.0 / 60, rolling, 1, false);
+    CHECK_NEAR(v.offset().length(), 0, 1e-12);
+}

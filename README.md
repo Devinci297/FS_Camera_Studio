@@ -125,7 +125,7 @@ UI tests and browser preview: `node ui/tests/math.test.mjs`, `node ui/tests/brid
 | Path | Contents |
 | --- | --- |
 | `src/CameraCore` | Pure math: frames, quaternions, transitions, manual movement |
-| `src/Profiles` | Profile schema v3, validation, bindings/settings, the two-slot repository, profile codes |
+| `src/Profiles` | Profile schema v4, validation, bindings/settings, the two-slot repository, profile codes |
 | `src/Protocol` | Panel ⇄ module envelopes and CommBus chunking |
 | `src/WasmModule` | Coordinator, input router and module app (pure); `wasm/` holds the SDK adapters and entry points |
 | `ui/` | The in-sim panels (one codebase, `main` and `mini` surfaces) |

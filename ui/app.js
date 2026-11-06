@@ -292,6 +292,7 @@
     aircraftExterior: { reference: 'Aircraft relative - meters', blurb: 'Your aircraft from another perspective.' },
     orbit: { reference: 'Aircraft relative - meters', blurb: 'A moving view around your aircraft.' },
     flyby: { reference: 'World fixed fly-by', blurb: 'A stationary viewpoint ahead of the aircraft, tracking its pass.' },
+    mounted: { reference: 'Airframe mounted - meters', blurb: 'An action cam fixed to the airframe: wing tip, tail, gear or belly.' },
     airport: { reference: 'Airport local - meters', blurb: 'A view anchored around the airport.' },
     free: { reference: 'Scene origin - meters', blurb: 'Position this view freely.' },
   };
@@ -645,6 +646,58 @@
   const levelHorizonAvailable = () => Boolean((S.caps.features && (S.caps.features.levelHorizon || S.caps.features.followHorizon)) || S.caps.levelHorizon === true || S.caps.followHorizon === true);
   const FOLLOW_HORIZON_HELP = 'How much this view banks with the aircraft: 1 = banks fully with the aircraft, 0 = the horizon stays level. Display only; never changes the saved pose.';
   const followHorizonOf = view => (view && typeof view.followHorizon === 'number' && isFinite(view.followHorizon) ? M.clamp(view.followHorizon, 0, 1) : 1);
+  // Mounted action cams: gimbal and airframe vibration (doc/protocol.md 2.1). Presentation only, like follow horizon.
+  const MOUNT_GIMBALS = [
+    ['locked', 'Locked', 'view-wing', 'Moves rigidly with the airframe, like a bolted-on action cam.'],
+    ['horizon', 'Level horizon', 'view-roll', 'Keeps the horizon level in a bank; still pitches and turns with the airframe.'],
+    ['yaw', 'Heading only', 'view-yaw', 'Stays level in pitch and bank and follows only the aircraft heading.']
+  ];
+  const MOUNT_VIBRATION_DEFAULT = 0.3;
+  const gimbalOf = view => (view && MOUNT_GIMBALS.some(g => g[0] === view.gimbal) ? view.gimbal : 'locked');
+  const mountVibrationOf = view => (view && typeof view.mountVibration === 'number' && isFinite(view.mountVibration) ? M.clamp(view.mountVibration, 0, 1) : MOUNT_VIBRATION_DEFAULT);
+  function renderMountSettings(view, ro) {
+    let section = $('mc-mount-settings');
+    if (!section) {
+      section = make('section', undefined, 'mc-mount-settings'); section.id = 'mc-mount-settings'; section.setAttribute('aria-label', 'Mounted camera');
+      add(section, make('h4', 'Mounted action cam'), make('p', 'Fixed to the airframe. Aircraft tracking and follow horizon do not apply; the gimbal decides how the view stays level. Display only: the saved pose never changes.', 'mc-note'));
+      const gimbalRow = make('div', undefined, 'mc-inline-field'), gimbalCopy = make('span', undefined, 'mc-switch-copy');
+      const gimbalLabel = make('span', 'Gimbal'); gimbalLabel.id = 'mc-mount-gimbal-label';
+      add(gimbalCopy, gimbalLabel, make('small', 'Locked moves with the aircraft. Level horizon removes the bank. Heading only also removes the pitch.'));
+      const choices = make('div', undefined, 'mc-setting-choices'); choices.id = 'mc-mount-gimbal'; choices.setAttribute('role', 'group'); choices.setAttribute('aria-labelledby', 'mc-mount-gimbal-label');
+      MOUNT_GIMBALS.forEach(([value, label, iconName, help]) => {
+        const choice = button(label, () => { const cam = current(); if (!cam || readOnly() || cam.mode !== 'mounted') return; cam.gimbal = value; saveCamera(cam); renderDetails(); }, 'mc-secondary', iconName);
+        choice.dataset.gimbal = value; choice.setAttribute('aria-label', 'Gimbal: ' + label); choice.title = help; choices.appendChild(choice);
+      });
+      add(gimbalRow, gimbalCopy, choices);
+      const vibrationRow = make('div', undefined, 'mc-inline-field'), vibrationCopy = make('span', undefined, 'mc-switch-copy');
+      const vibrationLabel = make('span', 'Airframe vibration'); vibrationLabel.id = 'mc-mount-vibration-label';
+      const vibrationNote = make('small', 'Fine shake from engine RPM and ground roll. 0 = off.'); vibrationNote.id = 'mc-mount-vibration-note';
+      add(vibrationCopy, vibrationLabel, vibrationNote);
+      const inputs = make('div', undefined, 'mc-follow-horizon-input');
+      const range = make('input'); Object.assign(range, { type: 'range', id: 'mc-mount-vibration-range', min: '0', max: '1', step: '0.05' });
+      range.setAttribute('aria-labelledby', 'mc-mount-vibration-label'); range.setAttribute('aria-describedby', 'mc-mount-vibration-note');
+      const numberLabel = make('label', undefined, 'mc-value-input'), number = make('input'); Object.assign(number, { type: 'number', id: 'mc-mount-vibration-number', min: '0', max: '1', step: '0.05' });
+      number.setAttribute('aria-label', 'Airframe vibration, from 0 (off) to 1 (strong)'); numberLabel.appendChild(number);
+      const setVibration = value => {
+        const cam = current();
+        if (!cam || readOnly() || cam.mode !== 'mounted' || !isFinite(value)) { renderDetails(); return; }
+        cam.mountVibration = Math.round(M.clamp(value, 0, 1) * 100) / 100; saveCamera(cam); renderDetails();
+      };
+      range.addEventListener('input', () => setVibration(Number(range.value)));
+      number.addEventListener('change', () => setVibration(number.value === '' ? NaN : Number(number.value)));
+      add(inputs, range, numberLabel); add(vibrationRow, vibrationCopy, inputs);
+      add(section, gimbalRow, vibrationRow);
+      $('mc-follow-horizon-range').closest('.mc-inline-field').after(section);
+    }
+    const mounted = view.mode === 'mounted';
+    section.hidden = !mounted;
+    if (!mounted) return;
+    const gimbal = gimbalOf(view), vibration = mountVibrationOf(view);
+    $$('[data-gimbal]', section).forEach(choice => { choice.setAttribute('aria-pressed', String(choice.dataset.gimbal === gimbal)); choice.disabled = ro; });
+    if (document.activeElement !== $('mc-mount-vibration-number')) $('mc-mount-vibration-number').value = String(vibration);
+    $('mc-mount-vibration-range').value = String(vibration);
+    $('mc-mount-vibration-range').disabled = $('mc-mount-vibration-number').disabled = ro;
+  }
 
   /* ------------- Toast ------------- */
   let toastTimer = 0;
@@ -1274,7 +1327,7 @@
     $('mc-motion-destination').textContent = view.name;
     renderMotionSettings(view);
     // Behavior
-    $('mc-view-type').textContent = ({aircraftCockpit:'Cockpit',aircraftExterior:'Aircraft exterior',airport:'Airport (world fixed)',orbit:'Orbit',flyby:'Fly-by',free:'Free camera'})[view.mode] || view.mode;
+    $('mc-view-type').textContent = ({aircraftCockpit:'Cockpit',aircraftExterior:'Aircraft exterior',airport:'Airport (world fixed)',orbit:'Orbit',flyby:'Fly-by',mounted:'Mounted action cam',free:'Free camera'})[view.mode] || view.mode;
     $('mc-view-type').disabled = ro || Boolean(view.airportIcao);
     $('mc-mode-pill').hidden = view.mode !== 'aircraftExterior';
     const note = $('mc-mode-note');
@@ -1286,12 +1339,12 @@
     $('mc-quick-access').checked = Boolean(view.favorite);
     $('mc-retain-look').checked = view.temporaryLookPolicy === 'retain';
     $$('[data-value]', $('mc-mouse-release')).forEach(b => { b.disabled = ro; b.setAttribute('aria-pressed', String(b.dataset.value === (view.mouseLookOnRelease || 'retain'))); });
-    const level = levelHorizonAvailable(), worldHorizon = view.mode === 'airport' || view.mode === 'flyby';
+    const level = levelHorizonAvailable(), worldHorizon = view.mode === 'airport' || view.mode === 'flyby', mountedHorizon = view.mode === 'mounted';
     const follow = followHorizonOf(view);
     if (document.activeElement !== $('mc-follow-horizon-number')) $('mc-follow-horizon-number').value = String(Math.round(follow * 100) / 100);
     $('mc-follow-horizon-range').value = String(follow);
-    ['mc-follow-horizon-range', 'mc-follow-horizon-number'].forEach(id => { $(id).disabled = ro || !level || worldHorizon; });
-    $('mc-follow-horizon-note').textContent = !level ? 'Not available with this camera module.' : worldHorizon ? 'World-fixed views always keep the horizon level.' : '1 = banks with the aircraft, 0 = horizon stays level.';
+    ['mc-follow-horizon-range', 'mc-follow-horizon-number'].forEach(id => { $(id).disabled = ro || !level || worldHorizon || mountedHorizon; });
+    $('mc-follow-horizon-note').textContent = !level ? 'Not available with this camera module.' : worldHorizon ? 'World-fixed views always keep the horizon level.' : mountedHorizon ? 'Mounted cameras use the gimbal setting below instead.' : '1 = banks with the aircraft, 0 = horizon stays level.';
     $('mc-interaction').checked = Boolean(view.interaction);
     $('mc-tracking').value = S.working.settings.host.globalHeadTrackingEnabled === true ? 'on' : 'off';
     let airportSettings=$('mc-camera-airport-settings');
@@ -1303,6 +1356,7 @@
     });
     // After the read-only pass: effects are also locked for views that cannot use them.
     renderEffects(view, ro);
+    renderMountSettings(view, ro);
     $('mc-default-view').disabled=ro||Boolean(view.airportIcao);
     $('mc-default-view').title=view.airportIcao?'Shared airport cameras cannot be the default view for an aircraft profile.':'';
   }
@@ -1723,6 +1777,7 @@
         const updateRepeat=()=>{const on=view.motion&&typeof view.motion.repeat==='boolean'?view.motion.repeat:settings.repeat;repeat.textContent='Repeat back and forth: '+(on?'On':'Off');repeat.setAttribute('aria-pressed',String(on));};updateRepeat();repeat.disabled=readOnly();host.appendChild(repeat);
       }
     }
+    if(view.mode==='mounted')add(host,make('h4','Mounted action cam'),make('p','Rigid on the airframe: no automatic motion, aircraft tracking or flight effects. Set the gimbal and airframe vibration in Behavior. The transition below still applies when you recall this view.','mc-note'));
     if(walkaroundAvailable(view))host.appendChild(button(S.walkaround.running?'Walkaround: running':'Walkaround settings',walkaroundDialog,'mc-secondary','view-wheel'));
   }  function walkaroundDialog() {
     const groups=walkaroundCategories();
@@ -2161,8 +2216,8 @@
       const override=view&&view.mode==='airport'&&view.airportOverrides&&view.airportOverrides.aircraftTracking;
       const effectiveTracking=override||aircraftTracking;
       effective.hidden=!view||(!editor&&view.mode!=='airport');
-      effective.textContent=!view?'':view.mode==='aircraftCockpit'?'Cockpit · aircraft tracking excluded':(view.mode==='airport'?'Airport':'Exterior')+' · '+(effectiveTracking==='off'?'fixed direction':effectiveTracking==='heading'?'tracks heading':'tracks heading + pitch')+(override?' · override':' · global');
-      effective.title=override?'This camera overrides global aircraft tracking. Change it in Airport camera settings.':'Effective aircraft tracking for this camera. Cockpit cameras never track the aircraft.';
+      effective.textContent=!view?'':view.mode==='aircraftCockpit'?'Cockpit · aircraft tracking excluded':view.mode==='mounted'?'Mounted · aircraft tracking excluded':(view.mode==='airport'?'Airport':'Exterior')+' · '+(effectiveTracking==='off'?'fixed direction':effectiveTracking==='heading'?'tracks heading':'tracks heading + pitch')+(override?' · override':' · global');
+      effective.title=override?'This camera overrides global aircraft tracking. Change it in Airport camera settings.':'Effective aircraft tracking for this camera. Cockpit and mounted cameras never track the aircraft.';
       if(!editor){
         const save=ensure('save','Save all',saveAdjustedViews);setIcon(save,'save');save.title='Save adjusted view and all pending changes (Ctrl+S)';save.disabled=!S.snapshot||!!S.pendingCommit;
         let viewTools=$(prefix+'view');
@@ -4074,8 +4129,8 @@
     $('mc-view-type').addEventListener('click', () => {
       const view=current();if(!view||readOnly()||view.airportIcao)return;
       const body=openDialog('Camera view type');
-      [['aircraftCockpit','Cockpit'],['aircraftExterior','Aircraft exterior'],['orbit','Orbit'],['flyby','Fly-by']].forEach(([mode,label])=>{const b=button(label,()=>{view.mode=mode;if(mode==='orbit'||mode==='flyby'){view.requiredCapabilities=[];view.interaction=false;}saveCamera(view);closeDialog();render();},'mc-secondary');b.setAttribute('aria-pressed',String(view.mode===mode));body.appendChild(b);});
-      body.appendChild(make('p','Set orbit and fly-by parameters on the Motion tab. Create airport views from the library + menu.','mc-note'));
+      [['aircraftCockpit','Cockpit'],['aircraftExterior','Aircraft exterior'],['orbit','Orbit'],['flyby','Fly-by'],['mounted','Mounted action cam']].forEach(([mode,label])=>{const b=button(label,()=>{view.mode=mode;if(mode==='orbit'||mode==='flyby'){view.requiredCapabilities=[];view.interaction=false;}if(mode==='mounted'){view.requiredCapabilities=['fov'];view.interaction=false;view.gimbal=gimbalOf(view);view.mountVibration=mountVibrationOf(view);if(!view.iconCustomized&&['camera','plane'].indexOf(entityIcon(view,false))>=0)view.icon='view-wing';}saveCamera(view);closeDialog();render();},'mc-secondary');b.setAttribute('aria-pressed',String(view.mode===mode));body.appendChild(b);});
+      body.appendChild(make('p','Set orbit and fly-by parameters on the Motion tab, and the gimbal of a mounted action cam in Behavior. Create airport views from the library + menu.','mc-note'));
     });
     $('mc-view-id').addEventListener('change', e => {
       const view = current();

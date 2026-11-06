@@ -205,12 +205,13 @@
 
   const FRAME_CONTRACT = 'FRD-camera-to-anchor-xyzw-v1';
   const C172 = { title: 'C172 Skyhawk', modelKey: 'asobo-c172sp-classic' };
-  const MODE_FROM_TYPE = { cockpit: 'aircraftCockpit', external: 'aircraftExterior', orbit: 'orbit', flyby: 'flyby', airport: 'airport', free: 'free' };
+  const MODE_FROM_TYPE = { cockpit: 'aircraftCockpit', external: 'aircraftExterior', orbit: 'orbit', flyby: 'flyby', airport: 'airport', free: 'free', mounted: 'mounted' };
   const NOT_AVAILABLE = 'Not available in this version - saved with the profile but cannot be activated.';
   const MODE_CAPS = {
     aircraftCockpit: { available: true, reason: null },
     aircraftExterior: { available: true, reason: 'Preview - exterior views keep cockpit sound in the current simulator build.' },
     orbit: { available: true, reason: null }, flyby: { available: true, reason: null },
+    mounted: { available: true, reason: 'Preview - mounted views keep cockpit sound and need live checking of the gimbal and vibration.' },
     airport: { available: false, reason: NOT_AVAILABLE }, free: { available: false, reason: NOT_AVAILABLE },
   };
   const MOTION_ACTIONS = new Set(['ActivateCamera', 'EnableCamera', 'BeginPeek', 'CycleCamera', 'NextCategory', 'ReturnToPilot', 'CaptureView', 'SeedFromDefinition', 'BakeTemporaryLook']);
@@ -238,7 +239,7 @@
     return { frameContract: FRAME_CONTRACT, anchor: { kind: 'sdkPilotEyepoint', seedDefinitionName: null, correctionMetersFRD: [0, 0, 0], correctionRotationXYZW: [0, 0, 0, 1] }, adapterContract: 'pending-qualification', simulatorBuild: null };
   }
   function makeProfile(spec) {
-    const profile = { schemaVersion: 3, profileId: M.uuid(), name: spec.name, aircraftMatch: spec.aircraftMatch, calibration: calibration(), requiredSchemaFeatures: [], defaultCameraId: null, categories: [], cameras: [], sequences: [] };
+    const profile = { schemaVersion: 4, profileId: M.uuid(), name: spec.name, aircraftMatch: spec.aircraftMatch, calibration: calibration(), requiredSchemaFeatures: [], defaultCameraId: null, categories: [], cameras: [], sequences: [] };
     spec.categories.forEach(group => {
       const category = { id: M.uuid(), name: group.name, cameraIds: [] };
       group.cameras.forEach(entry => {
@@ -297,7 +298,7 @@
   }
 
   function validateProfile(p) {
-    if (!p || p.schemaVersion !== 3) return 'This profile uses an unknown format.';
+    if (!p || p.schemaVersion !== 4) return 'This profile uses an unknown format.';
     const nameOk = n => typeof n === 'string' && n.trim().length >= 1 && n.length <= 60;
     if (!nameOk(p.name)) return 'Profile names need 1-60 characters.';
     if (!Array.isArray(p.categories) || !Array.isArray(p.cameras)) return 'The profile is incomplete.';
@@ -323,6 +324,8 @@
       if (!(n > 0) || Math.abs(n - 1) > 1e-3) return '"' + c.name + '" has an invalid orientation.';
       if (c.viewId) { if (views.has(c.viewId)) return 'View ID ' + c.viewId + ' is used twice.'; views.add(c.viewId); }
       if (c.followHorizon !== undefined && !(typeof c.followHorizon === 'number' && c.followHorizon >= 0 && c.followHorizon <= 1)) return '"' + c.name + '" needs a follow horizon from 0 to 1.';
+      if (c.gimbal !== undefined && ['locked', 'horizon', 'yaw'].indexOf(c.gimbal) < 0) return '"' + c.name + '" needs a gimbal of locked, horizon or yaw.';
+      if (c.mountVibration !== undefined && !(typeof c.mountVibration === 'number' && c.mountVibration >= 0 && c.mountVibration <= 1)) return '"' + c.name + '" needs an airframe vibration from 0 to 1.';
     }
     if (seen.size !== p.cameras.length) return 'A category lists a camera that does not exist.';
     if (!p.cameras.some(c => c.id === p.defaultCameraId)) return 'Choose a default camera.';
@@ -337,7 +340,7 @@
     profile.defaultCameraId = remap(profile.defaultCameraId);
     return profile;
   }
-  /** Schema 1 > 2 > 3 migration (sec. 2.1). */
+  /** Schema 1 > 2 > 3 > 4 migration (sec. 2.1). */
   function migrate(input) {
     const p = clone(input);
     if (p && p.schemaVersion === 1) {
@@ -360,6 +363,11 @@
         delete c.levelHorizon;
       });
     }
+    // Schema 3 > 4: no field changes; 4 adds the mounted camera mode, which schema 3 readers reject.
+    if (p && p.schemaVersion === 3) p.schemaVersion = 4;
+    (p && p.cameras || []).forEach(c => {
+      if (c && c.mode === 'mounted') { if (c.gimbal === undefined) c.gimbal = 'locked'; if (c.mountVibration === undefined) c.mountVibration = 0.3; }
+    });
     return p;
   }
   function applyOps(target, ops) {
