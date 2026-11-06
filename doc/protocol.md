@@ -78,6 +78,10 @@ There is no desktop application, tray app or external process.
   defaults .35/.5/.35/.5/.35/.2). Applied to `aircraftCockpit` at full strength and to `aircraftExterior` / `orbit`
   at half strength; `airport`, `flyby` and `free` ignore them. The editor's Off/Subtle/Realistic/Action presets are
   derived from these values (no stored preset name).
+  Optional head-model strengths (0–1, `aircraftCockpit` only, scaled by `intensity`): `headLag` (neck spring-damper:
+  the head trails G and acceleration and settles in about a second), `turnLean` (a few degrees of lean with sustained
+  lateral acceleration), `taxiBob` (low-frequency bob with ground speed on the ground) and `idleSway` (very slight
+  sway while parked); defaults .5/.5/.5/0. Profiles written before these existed load with the defaults.
 * `mouseLookOnRelease`: optional `retain` (default) | `reset`. Per camera: keep temporary native right-drag look, or recenter it on button release. Does not overwrite the saved pose.
 * `temporaryLookPolicy`: `resetOnRecall` | `retain`.
 * `followHorizon`: number 0–1, default 1 (finite; outside the range is rejected). How much of the aircraft's bank the

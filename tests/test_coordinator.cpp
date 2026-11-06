@@ -1408,7 +1408,7 @@ TEST_CASE("airports: global category heights preserve position offsets and allow
     camera["airportOverrides"].erase("heightMeters");r.setProfile();r.advance(.02);CHECK_NEAR(r.backend.submitted.back().z,180,1e-9);
 }
 TEST_CASE("effects: cockpit full strength, exterior and orbit reduced, world-fixed views excluded") {
-    struct Result { fscs::core::Vec3 offset, submittedMinusBase, base; std::size_t submissions = 0; };
+    struct Result { fscs::core::Vec3 offset, head, submittedMinusBase, base; double headRollDeg = 0; std::size_t submissions = 0; };
     const auto run=[](const std::string& mode, bool tracking) {
         Rig r;std::string id=r.pilot;
         if (mode=="airport") id=addAutoZoomAirport(r);
@@ -1420,10 +1420,11 @@ TEST_CASE("effects: cockpit full strength, exterior and orbit reduced, world-fix
         if (!tracking) {fscs::profiles::HostSettings settings;settings.globalAircraftTracking="off";r.c.setSettings(settings,r.t);}
         if (mode=="flyby" || mode=="airport") r.c.setAircraftPosition(40,-89.999,120,r.t,90);
         r.activate(id);r.grant();
-        fscs::core::FlightMotion motion;motion.forwardAcceleration=5;
+        fscs::core::FlightMotion motion;motion.forwardAcceleration=5;motion.lateralAcceleration=2;
         for (int i=0;i<60;++i) {r.deliver(be::MotionTelemetry{motion});r.advance(.02);}
         CHECK_EQ(r.c.activeCameraId(),id);
         Result result;result.offset=r.c.effects().offset();result.base=r.c.engine().sample().pose.positionFRD;
+        result.head=r.c.effects().head().offset;result.headRollDeg=r.c.effects().head().rollDeg;
         result.submissions=r.backend.submitted.size();
         if (!r.backend.submitted.empty() && r.backend.submitted.back().referential!=Referential::World)
             result.submittedMinusBase=fromSdk(r.backend.submitted.back(),r.qual.contract).positionFRD-result.base;
@@ -1431,19 +1432,41 @@ TEST_CASE("effects: cockpit full strength, exterior and orbit reduced, world-fix
     };
     const auto cockpit=run("aircraftCockpit",true);
     CHECK(cockpit.offset.x< -1e-3);
-    CHECK_NEAR(cockpit.submittedMinusBase.x,cockpit.offset.x,1e-6);
+    // Cockpit views add the head model (default strengths from validation) on top of the vehicle effects.
+    CHECK(cockpit.head.x< -1e-3);CHECK(cockpit.headRollDeg>.1);
+    CHECK_NEAR(cockpit.submittedMinusBase.x,cockpit.offset.x+cockpit.head.x,1e-6);
     const auto exterior=run("aircraftExterior",false);
     CHECK_NEAR(exterior.offset.x,cockpit.offset.x*fscs::core::kExteriorEffectsScale,1e-9);
     // The reduced offset reaches the submitted aircraft-relative pose; the saved base is unchanged.
     CHECK_NEAR(exterior.submittedMinusBase.x,exterior.offset.x,1e-6);CHECK_NEAR(exterior.base.x,-20,1e-9);
+    CHECK_NEAR(exterior.head.length(),0,1e-12);CHECK_NEAR(exterior.headRollDeg,0,1e-12);
     CHECK_NEAR(run("aircraftExterior",true).offset.x,exterior.offset.x,1e-9);
     // Orbit keeps animating its base; the effect is layered on top at exterior strength.
     const auto orbit=run("orbit",true);
-    CHECK_NEAR(orbit.offset.x,exterior.offset.x,1e-9);
+    CHECK_NEAR(orbit.offset.x,exterior.offset.x,1e-9);CHECK_NEAR(orbit.head.length(),0,1e-12);
     CHECK(orbit.base.length()>1);
     for (const auto* mode : {"flyby","airport"}) {
         const auto fixed=run(mode,true);
         CHECK(fixed.submissions>0);
-        CHECK_NEAR(fixed.offset.length(),0,1e-12);
+        CHECK_NEAR(fixed.offset.length(),0,1e-12);CHECK_NEAR(fixed.head.length(),0,1e-12);
     }
+}
+TEST_CASE("effects: the head model runs only on live cockpit views with fresh telemetry") {
+    Rig r;
+    for (auto& cam : r.profile["cameras"]) {cam["effects"]={{"enabled",true}};cam["transition"]["kind"]="cut";}
+    auto& exterior=r.profile["cameras"][1];
+    exterior["mode"]="aircraftExterior";exterior["positionMetersFRD"]={-20,0,-5};exterior["orientationCameraToAnchorXYZW"]={0,0,0,1};
+    r.connect();
+    fscs::core::FlightMotion motion;motion.onGround=0;motion.lateralAcceleration=3;motion.gForce=1.5;
+    const auto fly=[&](int frames){for (int i=0;i<frames;++i) {r.deliver(be::MotionTelemetry{motion});r.advance(.02);}};
+    const auto& head=r.c.effects().head();
+    r.activate(r.pilot);r.grant();fly(60);
+    CHECK(head.offset.length()>1e-3);CHECK(head.rollDeg>.1);
+    // Stale telemetry: the head returns to rest with the other effects.
+    r.advance(.02,40);CHECK_NEAR(head.offset.length(),0,1e-12);CHECK_NEAR(head.rollDeg,0,1e-12);
+    fly(60);CHECK(head.offset.length()>1e-3);
+    r.activate(r.pfd);fly(60);
+    CHECK_EQ(r.c.activeCameraId(),r.pfd);
+    CHECK(r.c.effects().offset().length()>1e-4);  // exterior keeps the vehicle effects at half strength
+    CHECK_NEAR(head.offset.length(),0,1e-12);CHECK_NEAR(head.rollDeg,0,1e-12);CHECK_NEAR(head.pitchDeg,0,1e-12);
 }

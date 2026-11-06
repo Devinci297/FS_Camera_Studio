@@ -1567,14 +1567,19 @@
     renderDetails();
   }
 
-  // Keep EFFECT_DEFAULTS in step with fscs::core::EffectsSettings (src/CameraCore/include/fscs/core/effects.hpp).
-  const EFFECT_DEFAULTS = { enabled: false, intensity: .35, turbulence: .5, groundRoll: .35, touchdown: .5, acceleration: .35, engine: .2 };
+  // Keep EFFECT_DEFAULTS in step with fscs::core::EffectsSettings (src/CameraCore/include/fscs/core/effects.hpp)
+  // and the validateProfile fallbacks (src/Profiles/src/profile.cpp). Head-model fields are optional in saved profiles.
+  const EFFECT_DEFAULTS = { enabled: false, intensity: .35, turbulence: .5, groundRoll: .35, touchdown: .5, acceleration: .35, engine: .2,
+    headLag: .5, turnLean: .5, taxiBob: .5, idleSway: 0 };
   // Presets are complete effect settings. The selector shows whichever preset the camera's values match, otherwise Custom.
+  // Idle sway is optional: no preset turns it on.
   const EFFECT_PRESETS = {
     off: Object.assign({}, EFFECT_DEFAULTS),
-    subtle: { enabled: true, intensity: .18, turbulence: .25, groundRoll: .18, touchdown: .25, acceleration: .18, engine: .1 },
+    subtle: { enabled: true, intensity: .18, turbulence: .25, groundRoll: .18, touchdown: .25, acceleration: .18, engine: .1,
+      headLag: .25, turnLean: .25, taxiBob: .25, idleSway: 0 },
     realistic: Object.assign({}, EFFECT_DEFAULTS, { enabled: true }),
-    action: { enabled: true, intensity: .63, turbulence: .9, groundRoll: .63, touchdown: .9, acceleration: .63, engine: .36 }
+    action: { enabled: true, intensity: .63, turbulence: .9, groundRoll: .63, touchdown: .9, acceleration: .63, engine: .36,
+      headLag: .9, turnLean: .9, taxiBob: .9, idleSway: 0 }
   };
   // Views that move with the aircraft. World-fixed airport and fly-by views never shake.
   const EFFECT_MODES = { aircraftCockpit: 'cockpit', aircraftExterior: 'exterior', orbit: 'exterior' };
@@ -1584,11 +1589,18 @@
     ['groundRoll', 'Runway & taxi bumps', 'Speed-based vibration while rolling'],
     ['touchdown', 'Touchdown', 'A brief dip based on landing vertical speed'],
     ['acceleration', 'Acceleration & braking', 'Camera movement under forward and lateral acceleration'],
-    ['engine', 'Engine vibration', 'Fine vibration driven by engine 1 RPM']
+    ['engine', 'Engine vibration', 'Fine vibration driven by engine 1 RPM'],
+    // Biomechanical head model: shown and applied for cockpit views only.
+    ['headLag', 'Head lag', 'The head trails G and acceleration, then settles', 'cockpit'],
+    ['turnLean', 'Lean into turns', 'A few degrees of lean with sustained sideways force', 'cockpit'],
+    ['taxiBob', 'Taxi head bob', 'Slow bob with ground speed while taxiing', 'cockpit'],
+    ['idleSway', 'Idle sway', 'Very slight breathing and posture drift while parked', 'cockpit']
   ];
-  function effectPreset(fx) {
+  // Fields that apply to a view kind; presets are matched only on these, so hidden head values cannot show Custom.
+  const effectFields = kind => EFFECT_FIELDS.filter(field => !field[3] || field[3] === kind);
+  function effectPreset(fx, kind) {
     if (!fx.enabled) return 'off';
-    const same = preset => EFFECT_FIELDS.every(([key]) => Math.round(fx[key] * 100) === Math.round(preset[key] * 100));
+    const same = preset => effectFields(kind).every(([key]) => Math.round(fx[key] * 100) === Math.round(preset[key] * 100));
     return ['subtle', 'realistic', 'action'].find(name => same(EFFECT_PRESETS[name])) || 'custom';
   }
   function editEffects(patch) {
@@ -1597,22 +1609,28 @@
     saveCamera(view); renderEffects(view, false);
   }
   function buildEffects() {
-    EFFECT_FIELDS.forEach(([key, label, description]) => {
+    const head = make('div', undefined, 'mc-effects-head'); head.id = 'mc-effects-head';
+    const heading = make('div', undefined, 'mc-section-heading');
+    add(heading, add(make('div'), make('h4', 'Head movement'), make('span', 'Natural pilot head motion in this cockpit view', 'mc-unit-label')));
+    head.appendChild(heading);
+    EFFECT_FIELDS.forEach(([key, label, description, scope]) => {
       const row = make('label', undefined, 'mc-effect-row');
       const text = make('span'); add(text, make('strong', label), make('small', description));
       const range = make('input'); range.type = 'range'; range.min = '0'; range.max = '100'; range.step = '1';
       range.setAttribute('data-effect', key); range.setAttribute('aria-label', label);
       const value = make('output'); value.id = 'mc-effect-value-' + key;
       range.addEventListener('input', () => { const patch = {}; patch[key] = Number(range.value) / 100; editEffects(patch); });
-      add(row, text, range, value); $('mc-effects-controls').appendChild(row);
+      add(row, text, range, value); (scope === 'cockpit' ? head : $('mc-effects-controls')).appendChild(row);
     });
+    $('mc-effects-controls').appendChild(head);
     $('mc-effects-enabled').addEventListener('change', e => editEffects({ enabled: e.target.checked }));
     $('mc-effects-preset').addEventListener('change', e => { const preset = EFFECT_PRESETS[e.target.value]; if (preset) editEffects(Object.assign({}, preset)); });
   }
   function renderEffects(view, ro) {
     const fx = Object.assign({}, EFFECT_DEFAULTS, view.effects || {}), kind = EFFECT_MODES[view.mode], locked = ro || !kind;
     $('mc-effects-enabled').checked = fx.enabled; $('mc-effects-enabled').disabled = locked;
-    $('mc-effects-preset').value = effectPreset(fx); $('mc-effects-preset').disabled = locked;
+    $('mc-effects-preset').value = effectPreset(fx, kind); $('mc-effects-preset').disabled = locked;
+    $('mc-effects-head').hidden = kind !== 'cockpit';
     const strength = kind === 'exterior' ? ' Exterior and orbit views use half strength.' : '';
     $('mc-effects-status').textContent = !kind ? 'Effects are available for cockpit, exterior and orbit cameras. Airport and fly-by views stay fixed.' : !fx.enabled ? 'Effects are off for this camera.' : (isLive(view.id) ? 'Enabled for this live view. Motion responds when flight telemetry is available.' : 'Ready. Select View in sim to use these effects.') + strength;
     $$('[data-effect]').forEach(control => { const key = control.getAttribute('data-effect'); control.value = String(Math.round(fx[key] * 100)); control.disabled = locked; $('mc-effect-value-' + key).textContent = control.value + '%'; });

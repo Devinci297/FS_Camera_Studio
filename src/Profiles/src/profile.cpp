@@ -350,7 +350,10 @@ ValidationResult validateProfile(json& doc) {
             else {
                 if (!fx.contains("enabled")) fx["enabled"] = false;
                 if (!fx["enabled"].is_boolean()) c.error(p + ".effects.enabled", "must be true or false");
-                const std::pair<const char*, double> amounts[] = {{"intensity", .35}, {"turbulence", .5}, {"groundRoll", .35}, {"touchdown", .5}, {"acceleration", .35}, {"engine", .2}};
+                // Fallbacks match core::EffectsSettings and ui/app.js EFFECT_DEFAULTS. The head-model strengths
+                // are optional (added without a schema bump): older profiles get the defaults here.
+                const std::pair<const char*, double> amounts[] = {{"intensity", .35}, {"turbulence", .5}, {"groundRoll", .35}, {"touchdown", .5}, {"acceleration", .35}, {"engine", .2},
+                                                                  {"headLag", .5}, {"turnLean", .5}, {"taxiBob", .5}, {"idleSway", 0.}};
                 for (const auto& [key, fallback] : amounts) {
                     if (!fx.contains(key)) fx[key] = fallback;
                     const double value = js::num(fx, key, -1.);
@@ -512,7 +515,8 @@ ProfileSnapshot toSnapshot(const json& doc) {
         e.resetMouseLookOnRelease = js::str(cam, "mouseLookOnRelease", "retain") == "reset";
         const auto& fx = js::object(cam, "effects");
         e.effects = {js::boolean(fx, "enabled", false), js::num(fx, "intensity", .35), js::num(fx, "turbulence", .5),
-                     js::num(fx, "groundRoll", .35), js::num(fx, "touchdown", .5), js::num(fx, "acceleration", .35), js::num(fx, "engine", .2)};
+                     js::num(fx, "groundRoll", .35), js::num(fx, "touchdown", .5), js::num(fx, "acceleration", .35), js::num(fx, "engine", .2),
+                     js::num(fx, "headLag", .5), js::num(fx, "turnLean", .5), js::num(fx, "taxiBob", .5), js::num(fx, "idleSway", 0.)};
         e.followHorizon = core::clamp(js::num(cam, "followHorizon", 1.0), 0., 1.);
         e.seedDefinitionName = js::str(cam, "seedDefinitionName");
         s.cameras.push_back(std::move(e));

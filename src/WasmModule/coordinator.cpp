@@ -53,6 +53,8 @@ double effectsScaleFor(profiles::CameraMode mode) {
     }
     return 0.;
 }
+// The biomechanical head model belongs to the pilot's eye: cockpit views only.
+bool headModelFor(profiles::CameraMode mode) { return mode == profiles::CameraMode::AircraftCockpit; }
 
 
 }  // namespace
@@ -1338,7 +1340,8 @@ void Coordinator::tick(double now) {
         const auto* effectCamera = activeEntry();
         const double effectsScale = effectCamera ? effectsScaleFor(effectCamera->mode) : 0.;
         effects_.tick(dt, flightMotion_, effectCamera ? effectCamera->effects : core::EffectsSettings{},
-                      effectsScale > 0 && motionReceivedAt_ >= 0 && now - motionReceivedAt_ < .5, effectsScale);
+                      effectsScale > 0 && motionReceivedAt_ >= 0 && now - motionReceivedAt_ < .5, effectsScale,
+                      effectCamera && headModelFor(effectCamera->mode));
         if (mouseHeld_ && !mouseBlocked_ && mouseCameraId_ == activeCameraId_) {
             ++mouseFrames_;
             mouseMaxFrameGap_ = std::max(mouseMaxFrameGap_, dt);

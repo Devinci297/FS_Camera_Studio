@@ -1,5 +1,6 @@
 #include "test.hpp"
 
+#include <algorithm>
 #include "adapter.hpp"
 #include "fscs/core/engine.hpp"
 #include "fscs/core/effects.hpp"
@@ -340,6 +341,132 @@ TEST_CASE("effects: scale reduces offsets and pitch proportionally for exterior 
     CHECK_NEAR(run(0.).offset().length(),0.,1e-12);
     CHECK_NEAR(run(std::numeric_limits<double>::quiet_NaN()).offset().length(),0.,1e-12);
     CHECK_NEAR(run(4.).offset().x,full.offset().x,1e-12);
+}
+namespace {
+// Head-model settings with a single term at full strength.
+EffectsSettings headOnly(double headLag, double turnLean, double taxiBob, double idleSway) {
+    EffectsSettings s; s.enabled = true; s.intensity = 1;
+    s.headLag = headLag; s.turnLean = turnLean; s.taxiBob = taxiBob; s.idleSway = idleSway;
+    return s;
+}
+}  // namespace
+TEST_CASE("head model: neck spring lags a sustained G step, settles in about a second and returns to rest") {
+    HeadModel head; const auto settings = headOnly(1, 0, 0, 0); FlightMotion motion; motion.onGround = 0;
+    const double dt = .005, steady = HeadModel::kLagVerticalM;  // 2 G: one g of extra load
+    motion.gForce = 2;
+    double peak = 0, settled = -1;
+    for (int i = 1; i * dt <= 2.5; ++i) {
+        head.tick(dt, motion, settings, 1);
+        const double z = head.pose().offset.z;
+        if (i * dt <= .1 + 1e-9) CHECK(z < .5 * steady);  // the head lags behind the load
+        peak = std::max(peak, z);
+        if (std::abs(z - steady) > .02 * steady) settled = -1; else if (settled < 0) settled = i * dt;
+    }
+    CHECK(settled > .6); CHECK(settled < 1.2);
+    CHECK(peak > steady); CHECK(peak < 1.1 * steady);  // slightly under-damped
+    CHECK_NEAR(head.pose().offset.z, steady, 1e-4);
+    CHECK(head.pose().pitchDeg < 0);  // extra G nods the head down
+    motion.gForce = 1;
+    for (int i = 0; i < 240; ++i) head.tick(dt, motion, settings, 1);
+    CHECK(std::abs(head.pose().offset.z) < .02 * steady);
+    for (int i = 0; i < 1000; ++i) head.tick(dt, motion, settings, 1);
+    CHECK_NEAR(head.pose().offset.length(), 0, 1e-7); CHECK_NEAR(head.pose().pitchDeg, 0, 1e-5);
+}
+TEST_CASE("head model: lean into turns, low-frequency taxi bob and optional idle sway") {
+    FlightMotion turn; turn.onGround = 0; turn.lateralAcceleration = 2;  // right turn, ~0.2 g
+    HeadModel lean;
+    for (int i = 0; i < 300; ++i) lean.tick(.01, turn, headOnly(0, 1, 0, 0), 1);
+    CHECK(lean.pose().rollDeg > 2); CHECK(lean.pose().rollDeg < HeadModel::kMaxLeanDeg);  // rolls right, a few degrees
+    CHECK(lean.pose().offset.y > 0);
+    turn.lateralAcceleration = 50;
+    for (int i = 0; i < 300; ++i) lean.tick(.01, turn, headOnly(0, 1, 0, 0), 1);
+    CHECK(lean.pose().rollDeg <= HeadModel::kMaxLeanDeg);
+    // Taxi bob: on the ground, ~1-2 Hz, absent when stopped or airborne.
+    const auto crossings = [](FlightMotion m, const EffectsSettings& s, double* amplitude) {
+        HeadModel head; int count = 0; double last = 0, peak = 0;
+        for (int i = 0; i < 100; ++i) head.tick(.01, m, s, 1);  // fade in
+        for (int i = 0; i < 500; ++i) {
+            head.tick(.01, m, s, 1);
+            const double z = head.pose().offset.z;
+            if ((z > 0) != (last > 0) && i > 0) ++count;
+            last = z; peak = std::max(peak, std::abs(z));
+        }
+        *amplitude = peak; return count;
+    };
+    FlightMotion taxi; taxi.groundSpeed = 10; double amplitude = 0;
+    const int count = crossings(taxi, headOnly(0, 0, 1, 0), &amplitude);
+    CHECK(count >= 2 * 5 * 1); CHECK(count <= 2 * 5 * 2 + 2);  // 1..2 Hz over 5 s
+    CHECK(amplitude > .01); CHECK(amplitude <= HeadModel::kBobM + 1e-9);
+    taxi.groundSpeed = 0; crossings(taxi, headOnly(0, 0, 1, 0), &amplitude); CHECK_NEAR(amplitude, 0, 1e-12);
+    taxi.groundSpeed = 10; taxi.onGround = 0; crossings(taxi, headOnly(0, 0, 1, 0), &amplitude); CHECK_NEAR(amplitude, 0, 1e-12);
+    // Idle sway is off by default, very small when enabled while parked, and fades once rolling.
+    FlightMotion parked; HeadModel sway; EffectsSettings defaults; defaults.intensity = 1;
+    CHECK_NEAR(defaults.idleSway, 0, 1e-12);
+    for (int i = 0; i < 500; ++i) sway.tick(.02, parked, defaults, 1);
+    CHECK_NEAR(sway.pose().offset.length(), 0, 1e-12);
+    double peak = 0;
+    for (int i = 0; i < 1000; ++i) { sway.tick(.02, parked, headOnly(0, 0, 0, 1), 1); peak = std::max(peak, sway.pose().offset.length()); }
+    CHECK(peak > 1e-3); CHECK(peak < .01);
+    CHECK(std::abs(sway.pose().rollDeg) < .5);
+    parked.groundSpeed = 40;  // above taxi-bob range: only the fading sway remains
+    for (int i = 0; i < 500; ++i) sway.tick(.02, parked, headOnly(0, 0, 0, 1), 1);
+    CHECK(sway.pose().offset.length() < 1e-5);
+}
+TEST_CASE("head model: output stays bounded and within pose limits for extreme input") {
+    CameraEffects fx; EffectsSettings settings = headOnly(1, 1, 1, 1); settings.acceleration = 1; settings.turbulence = 1;
+    const CameraPose base = pose({.4, -.3, -.8}, {5, 0, 30}, 1.);
+    double maxOffset = 0, maxAngle = 0;
+    for (int i = 0; i < 4000; ++i) {
+        FlightMotion m; const double s = std::sin(i * .37), c = std::cos(i * .91);
+        m.onGround = (i / 300) % 2; m.groundSpeed = 60 * std::abs(s); m.gForce = 1 + 20 * c;
+        m.forwardAcceleration = 400 * s; m.lateralAcceleration = -300 * c; m.verticalSpeed = -50 * s; m.engineRpm = 3000;
+        fx.tick(.001 + .099 * std::abs(std::sin(i * 1.3)), m, settings, true, 1, true);
+        const auto& h = fx.head();
+        maxOffset = std::max({maxOffset, std::abs(h.offset.x), std::abs(h.offset.y), std::abs(h.offset.z)});
+        maxAngle = std::max({maxAngle, std::abs(h.pitchDeg), std::abs(h.rollDeg)});
+        const auto out = fx.apply(base);
+        CHECK(out.withinLimits());
+        CHECK((out.positionFRD - (base.positionFRD + fx.offset() + h.offset)).length() < 1e-12);  // not the fallback
+        CHECK_NEAR(out.fovRad, base.fovRad, 1e-12);
+    }
+    CHECK(maxOffset > .01); CHECK(maxOffset <= HeadModel::kMaxOffsetM);
+    CHECK(maxAngle > 1); CHECK(maxAngle <= HeadModel::kMaxAngleDeg);
+    CHECK_NEAR(base.positionFRD.x, .4, 1e-12);
+}
+TEST_CASE("head model: frame rate independent within tolerance for frames up to 0.1 s") {
+    const auto run = [](double dt) {
+        HeadModel head; const auto settings = headOnly(1, 1, 1, 0);
+        FlightMotion m; m.groundSpeed = 8; m.gForce = 1.4; m.forwardAcceleration = 2; m.lateralAcceleration = 3;
+        const int steps = static_cast<int>(std::lround(.7 / dt));  // mid-transient
+        for (int i = 0; i < steps; ++i) head.tick(dt, m, settings, 1);
+        return head.pose();
+    };
+    const auto reference = run(.001);
+    for (const double dt : {1. / 144, 1. / 60, 1. / 30, .07, .1}) {
+        const auto p = run(dt);
+        CHECK((p.offset - reference.offset).length() < .02 * reference.offset.length() + 2e-4);
+        CHECK_NEAR(p.pitchDeg, reference.pitchDeg, .05);
+        CHECK_NEAR(p.rollDeg, reference.rollDeg, .05);
+    }
+}
+TEST_CASE("head model: runs only when requested and resets on ineligible frames") {
+    CameraEffects fx; EffectsSettings settings; settings.enabled = true;
+    FlightMotion motion; motion.onGround = 0; motion.lateralAcceleration = 3; motion.gForce = 1.5;
+    const auto moved = [&] { return fx.head().offset.length() > 1e-4 && std::abs(fx.head().rollDeg) > 1e-3; };
+    const auto still = [&] { return fx.head().offset.length() == 0 && fx.head().rollDeg == 0 && fx.head().pitchDeg == 0; };
+    const auto run = [&](int n, bool eligible, bool head) { for (int i = 0; i < n; ++i) fx.tick(.02, motion, settings, eligible, 1, head); };
+    run(50, true, false); CHECK(still());  // exterior/orbit: vehicle effects only
+    CHECK(fx.offset().length() > 1e-4);
+    run(50, true, true); CHECK(moved());
+    run(1, true, false); CHECK(still());
+    run(50, true, true); CHECK(moved()); run(1, false, true); CHECK(still());
+    run(50, true, true); fx.tick(.5, motion, settings, true, 1, true); CHECK(still());
+    run(50, true, true); settings.enabled = false; run(1, true, true); CHECK(still()); settings.enabled = true;
+    run(50, true, true); motion.gForce = NAN; run(1, true, true); CHECK(still()); motion.gForce = 1.5;
+    run(50, true, true); fx.reset(); CHECK(still());
+    // With every head strength at 0 the head stays at rest.
+    settings.headLag = settings.turnLean = settings.taxiBob = settings.idleSway = 0;
+    run(100, true, true); CHECK(still());
 }
 TEST_CASE("adapter: automatic mapping ignores accumulated visual wizard corrections") {
     fscs::host::AdapterContract wrong;wrong.pitchSign=1;wrong.headingSign=-1;wrong.axisSign={-1,1,1};

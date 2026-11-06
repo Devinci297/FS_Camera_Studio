@@ -560,6 +560,34 @@ TEST_CASE("profiles: camera effects round trip and reject invalid strengths") {
     doc["cameras"][0]["effects"]["groundRoll"]=2.; CHECK(!validateProfile(doc).ok());
     doc["cameras"][0]["effects"]="invalid"; CHECK(!validateProfile(doc).ok());
 }
+TEST_CASE("profiles: head-model effect strengths are optional, default for older profiles and validated") {
+    auto doc = makeStarterProfile("Head", "test", "Test");
+    // A profile saved before the head model existed: only the original six strengths.
+    doc["cameras"][0]["effects"] = {{"enabled",true},{"intensity",.35},{"turbulence",.5},{"groundRoll",.35},{"touchdown",.5},{"acceleration",.35},{"engine",.2}};
+    CHECK(validateProfile(doc).ok());
+    const auto& fx = doc["cameras"][0]["effects"];
+    CHECK_NEAR(fx["headLag"].get<double>(),.5,1e-12); CHECK_NEAR(fx["turnLean"].get<double>(),.5,1e-12);
+    CHECK_NEAR(fx["taxiBob"].get<double>(),.5,1e-12); CHECK_NEAR(fx["idleSway"].get<double>(),0,1e-12);
+    const fscs::core::EffectsSettings defaults;
+    const auto older = toSnapshot(doc).cameras[0].effects;
+    CHECK_NEAR(older.headLag,defaults.headLag,1e-12); CHECK_NEAR(older.turnLean,defaults.turnLean,1e-12);
+    CHECK_NEAR(older.taxiBob,defaults.taxiBob,1e-12); CHECK_NEAR(older.idleSway,defaults.idleSway,1e-12);
+    CHECK_NEAR(older.engine,.2,1e-12);
+    // Snapshot fallbacks for a document that skipped validation agree with the struct defaults.
+    json bare = doc; bare["cameras"][0]["effects"] = {{"enabled",true}};
+    const auto unvalidated = toSnapshot(bare).cameras[0].effects;
+    CHECK_NEAR(unvalidated.headLag,defaults.headLag,1e-12); CHECK_NEAR(unvalidated.idleSway,defaults.idleSway,1e-12);
+    // Explicit values round trip.
+    doc["cameras"][0]["effects"]["headLag"]=.1; doc["cameras"][0]["effects"]["turnLean"]=0; doc["cameras"][0]["effects"]["taxiBob"]=1; doc["cameras"][0]["effects"]["idleSway"]=.4;
+    CHECK(validateProfile(doc).ok());
+    const auto custom = toSnapshot(doc).cameras[0].effects;
+    CHECK_NEAR(custom.headLag,.1,1e-12); CHECK_NEAR(custom.turnLean,0,1e-12); CHECK_NEAR(custom.taxiBob,1,1e-12); CHECK_NEAR(custom.idleSway,.4,1e-12);
+    for (const char* key : {"headLag","turnLean","taxiBob","idleSway"}) {
+        for (const json bad : {json(1.5), json(-.1), json("high"), json(nullptr)}) {
+            auto copy = doc; copy["cameras"][0]["effects"][key] = bad; CHECK(!validateProfile(copy).ok());
+        }
+    }
+}
 TEST_CASE("profiles: corrected lateral calibration preserves saved physical poses once") {
     StoreState state; state.txn=1;
     auto doc = makeStarterProfile("Saved", "test", "Test");
