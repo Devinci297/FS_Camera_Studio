@@ -1196,3 +1196,16 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 /* Mid-width mini docks keep one toolbar row: the spotting buttons show icons only (their names stay in aria-label). */
 @media(max-width:1500px){#mc-sim[data-surface="mini"] .mc-dock-tools .mc-spot-toggle>span,#mc-sim[data-surface="mini"] .mc-dock-tools .mc-spot-next>span{display:none}}
 @media(max-width:620px){#mc-sim .mc-traffic-figures{flex-basis:100%}}
+/* Mini Traffic tab: view choice on top, nearby aircraft below; the pane scrolls inside the dock's fixed height. */
+#mc-sim[data-surface="mini"] .mc-dock-categories .mc-dock-traffic-count{margin-left:auto;font-size:10px;min-width:14px;height:15px;padding:0 3px}
+#mc-sim[data-surface="mini"] .mc-dock-favorites>.mc-dock-traffic{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-views,#mc-sim[data-surface="mini"] .mc-dock-traffic-list{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-dock-traffic-views button{min-width:0;min-height:22px;padding:2px 7px;font-size:10px;gap:4px;background:transparent}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-dock-traffic-views button[aria-pressed="true"]{outline:0;box-shadow:none;color:var(--mc-accent);background:var(--mc-active);border-color:var(--mc-accent)}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-dock-traffic-views .mc-dock-traffic-stop{margin-left:auto}
+#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-dock-traffic-aircraft{min-width:0;max-width:220px;gap:5px;white-space:nowrap}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft strong{font-weight:600;overflow:hidden;text-overflow:ellipsis}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft small{color:var(--mc-muted);font-size:10px;font-variant-numeric:tabular-nums}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[aria-pressed="true"] small{color:inherit}
+#mc-sim[data-surface="mini"] .mc-dock-traffic>.mc-note{font-size:10px;line-height:13px}
+#mc-sim[data-surface="mini"][data-name-display="icons"] .mc-dock-traffic-views button>span{display:none}
