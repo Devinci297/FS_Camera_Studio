@@ -221,6 +221,9 @@
       'mc-nav-bindings':'Assign and manage keyboard and controller inputs.',
       'mc-nav-profiles':'Create, import, export and manage camera profiles.',
       'mc-nav-settings':'Customize appearance, mouse look and camera controls.',
+      'mc-nav-traffic':'Follow other aircraft from the tower, the runway, a chase or a fly-by camera.',
+      'mc-traffic-search':'Show aircraft whose airline, flight number or callsign matches.',
+      'mc-traffic-distance':'Hide aircraft farther away than this. Settings > Spotting sets how far Camera Studio looks.',
       'mc-tab-position':'Move, rotate and zoom the selected camera.',
       'mc-tab-motion':'Configure transitions and camera motion effects.',
       'mc-effects-preset':'Set every flight effect at once. Off disables effects; Custom shows after you adjust a slider.',
@@ -349,8 +352,15 @@
   ];
   const MANUAL = [['lookLeft', 'Look left'], ['lookRight', 'Look right'], ['lookUp', 'Look up'], ['lookDown', 'Look down'], ['moveForward', 'Move forward'], ['moveBack', 'Move back'], ['moveLeft', 'Move left'], ['moveRight', 'Move right'], ['moveUp', 'Move up'], ['moveDown', 'Move down'], ['zoomIn', 'Zoom in'], ['zoomOut', 'Zoom out'], ['moveFast', 'Faster movement (hold)'],
     ['binoculars', 'Binoculars (hold)', 'Hold to zoom to the binoculars field of view in Settings; release to return']];
+  // Spotting: follow other aircraft from airport, chase or fly-by views. The module picks and flies the camera.
+  const SPOTTING = [
+    ['spotNext', 'Next spotting target', 'Follow the next aircraft by distance in the current spotting view (chase if none)'],
+    ['spotPrevious', 'Previous spotting target', 'Step back to the previous aircraft by distance'],
+    ['spotReturn', 'Return to own aircraft', 'Stop spotting and go back to the view you had before'],
+    ['toggleAutoSpot', 'Auto-spot on/off', 'Follow arriving and departing traffic at the loaded airport automatically'],
+  ];
   const ACTION_NAMES = {};
-  COMMANDS.concat(MANUAL, GLANCE).forEach(entry => { ACTION_NAMES[entry[0]] = entry[1]; });
+  COMMANDS.concat(MANUAL, GLANCE, SPOTTING).forEach(entry => { ACTION_NAMES[entry[0]] = entry[1]; });
   const actionName = (action, viewId) => (action === 'selectView' ? 'Select view ID ' + viewId : action === 'peekView' ? 'Peek at view ID ' + viewId : (ACTION_NAMES[action] || action));
 
   /* ------------- State (mirror of the module) ------------- */
@@ -369,6 +379,7 @@
     queue: [], inflight: null, flushTimer: 0, lastFlush: 0, idleWaiters: [], commitWaiters: {}, completedCommits: {},
     snapshotWaiters: [], pendingCapture: null, dismissedAircraftKey: null, miniPicking: false, editTimer: 0,
     assign: null, manualOpen: false, peekToken: null,
+    traffic: { aircraft: [], at: null }, spotting: null, trafficFilter: { status: 'all', query: '', maxNm: 0 },
   };
   const W = () => S.working;
   const P = () => (S.working ? S.working.profile : null);
@@ -540,6 +551,8 @@
       if (S.working.settings.ui.miniPinned && !IS_MINI) setMiniPinned(true, false);
     }
     S.cinematic = p.cinematic || S.cinematic;
+    S.traffic = p.traffic || S.traffic;
+    S.spotting = p.spotting || S.spotting;
     applySettings();
     render();
     renderVisiblePage();
@@ -619,7 +632,10 @@
     ControllerCaptureStatus: onControllerCaptureStatus,
     BinocularsChanged(p) { S.binoculars = p && p.active ? { fovDeg: p.fovDeg } : null; renderBinoculars(); },
     CinematicChanged(p) { S.cinematic = p || null; renderCameraTools(); },
+    TrafficChanged(p) { S.traffic = p && Array.isArray(p.aircraft) ? p : { aircraft: [], at: null }; renderSpotting(); },
+    SpottingChanged(p) { S.spotting = p || null; renderSpotting(); },
     PanicReleased(p) {
+      if (p.spottingStopped) S.spotting = Object.assign({}, spotting(), { targetId: null, view: null, autoSpot: false, state: 'off' });
       S.userReleased = true;
       if (p.state === 'Observing' || p.state === 'Releasing') announceReleased();
       render();
@@ -1060,6 +1076,7 @@
     if (S.page === 'profiles') { renderProfiles(); renderAirportSummary(); }
     if (S.page === 'bindings') renderBindings();
     if (S.page === 'settings') renderSettings();
+    if (S.page === 'traffic') renderTraffic();
   }
   function setTab(tab) {
     S.tab = tab;
@@ -2353,6 +2370,7 @@
       automatic.disabled=!S.snapshot||(!S.airports.autoSwitch&&(!cameras().some(c=>c.mode==='airport')||!S.airports.positionKnown));
       automatic.title=automatic.disabled?'Load or generate cameras for a nearby airport first.':'Global: select the nearest airport camera automatically. Camera changes and manual movement pause switching for 3 seconds; releasing camera control pauses it until a camera is active again.';
       renderCinematicToggle(prefix,globalTools,automatic);
+      if(!editor)renderSpotTools(prefix,globalTools);
       const tour=ensure('walkaround','Walkaround',walkaroundDialog);setIcon(tour,'view-wheel');tour.hidden=!walkaroundAvailable(view);tour.setAttribute('aria-pressed',String(S.walkaround.running));tour.title='Start, stop or configure an automatic tour of exterior cameras';
       let effective=$(prefix+'effective');
       if(!effective){effective=make('span',undefined,'mc-effective-tracking');effective.id=prefix+'effective';anchor.parentNode.insertBefore(effective,anchor);}
@@ -2372,12 +2390,12 @@
         ['mc-mini-pin','mc-expand','mc-dock-release'].forEach(id=>{if($(id).parentNode!==panelTools)panelTools.appendChild($(id));});
         if(IS_MINI){
           const dock=$('mc-mini-panel'),tools=globalTools.parentNode,body=dock.querySelector('.mc-dock-body');
-          [head,tracking,tour,anchor,drone].forEach(b=>b.classList.add('mc-mini-secondary'));
+          [head,tracking,tour,anchor,drone,$(prefix+'autospot'),$(prefix+'spotnext')].forEach(b=>b.classList.add('mc-mini-secondary'));
           let more=$(prefix+'more');
           if(!more){
             more=button('More',()=>{
               const menu=openDialog('Mini panel controls');
-              const sections=[['Global settings',[prefix+'head',prefix+'aircraft']],['Camera',[prefix+'walkaround',anchorId,prefix+'drone']],['Panel',['mc-mini-pin','mc-expand','mc-dock-release']]];
+              const sections=[['Global settings',[prefix+'head',prefix+'aircraft']],['Spotting',[prefix+'autospot',prefix+'spotnext']],['Camera',[prefix+'walkaround',anchorId,prefix+'drone']],['Panel',['mc-mini-pin','mc-expand','mc-dock-release']]];
               sections.forEach(([label,ids])=>{
                 const available=ids.map($).filter(b=>b&&!b.hidden);if(!available.length)return;
                 menu.appendChild(make('div',label,'mc-section-label'));
@@ -2394,6 +2412,7 @@
         }
       }
     });
+    if (S.page === 'traffic' && !IS_MINI) renderTraffic();
     const select=$('mc-tracking');if(select){select.hidden=true;let b=$('mc-head-tracking-options');if(!b){b=button('Global head-tracking options',trackingOptions,'mc-secondary');b.id='mc-head-tracking-options';select.parentNode.insertBefore(b,select);}const note=select.parentNode.querySelector('small');if(note)note.textContent='Shared by every camera and profile. Head tracking is off by default.';b.disabled=!S.working;}
     const id=$('mc-view-id');if(id){id.max='2147483647';const note=id.parentNode.querySelector('small');if(note)note.textContent='0 = unassigned. Each camera can have its own binding slot.';}
   }
@@ -2785,6 +2804,222 @@
     $('mc-setting-cinematic-drift').checked = host.cinematicDrift !== false;
   }
 
+  /* ------------- Spotting (other aircraft; the module picks the view and flies the camera) ------------- */
+  const SPOT_VIEWS = [['tower', 'Tower', 'view-tower'], ['runway', 'Runway', 'view-runway'], ['chase', 'Chase', 'view-tail'], ['flyby', 'Fly-by', 'view-orbit'], ['track', 'Track', 'crosshair']];
+  const SPOT_VIEW_NAMES = { tower: 'Tower', runway: 'Runway', chase: 'Chase', flyby: 'Fly-by', track: 'Track' };
+  const TRAFFIC_STATUS = { parked: 'Parked', taxi: 'Taxiing', takeoff: 'Takeoff', departing: 'Departing', arriving: 'Arriving', landing: 'Landing', cruise: 'Cruise' };
+  const TRAFFIC_FILTERS = {
+    all: () => true, ground: a => Boolean(a.onGround),
+    arriving: a => a.status === 'arriving' || a.status === 'landing',
+    departing: a => a.status === 'departing' || a.status === 'takeoff',
+  };
+  const SPOTTING_OFF = { targetId: null, view: null, autoSpot: false, state: 'off', targetLabel: '', reason: null };
+  const spotting = () => Object.assign({}, SPOTTING_OFF, S.spotting || {});
+  // TrafficChanged is sorted by the module; sort again so a list from any source reads nearest first.
+  const trafficAircraft = () => (S.traffic && Array.isArray(S.traffic.aircraft) ? S.traffic.aircraft : []).slice().sort((a, b) => (Number(a.distanceNm) || 0) - (Number(b.distanceNm) || 0));
+  const spottingRadius = () => { const host = S.working ? S.working.settings.host : {}; return host.spottingRadiusNm == null ? 20 : host.spottingRadiusNm; };
+  const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+  const thousands = n => String(Math.round(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const searchKey = text => String(text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  function trafficLabel(a) {
+    const flight = a.airline && a.flightNumber ? a.airline + ' ' + a.flightNumber : '';
+    return flight || a.atcId || a.title || a.model || 'Aircraft ' + a.objectId;
+  }
+  function trafficDetail(a) {
+    const label = trafficLabel(a);
+    return [a.model || a.title, a.atcId && label.indexOf(a.atcId) < 0 ? a.atcId : ''].filter(Boolean).join(' · ');
+  }
+  function trafficFigures(a) {
+    const nm = Number(a.distanceNm) || 0, altitude = Number(a.altitudeFt) || 0;
+    return [(nm < 10 ? nm.toFixed(1) : String(Math.round(nm))) + ' NM', (altitude < 0 ? '-' : '') + thousands(altitude) + ' ft', Math.round(Number(a.groundSpeedKt) || 0) + ' kt'];
+  }
+  // Airline, flight number and callsign, with spaces and dashes ignored ("DLH 4AB" finds DLH4AB, "DAIBL" finds D-AIBL).
+  const trafficMatches = (a, query) => [a.atcId, a.airline, a.flightNumber, (a.airline || '') + (a.flightNumber || ''), trafficLabel(a)].some(value => searchKey(value).indexOf(query) >= 0);
+  // Tower and runway views come from the loaded airport camera set (saved or temporary).
+  function airportViewsLoaded() {
+    const code = S.airports && S.airports.loaded;
+    if (!code || !P()) return false;
+    return cameras().some(c => c.mode === 'airport' && c.airportIcao === code) || P().categories.some(g => g.airportIcao === code && g.cameraIds.length > 0);
+  }
+  // Track keeps a world-referential view (airport or free camera) and only aims it at the aircraft.
+  function spotTrackable() {
+    const sp = spotting();
+    if (sp.state !== 'off' && sp.view) return sp.view === 'tower' || sp.view === 'runway' || sp.view === 'track';
+    const view = S.ownership.state === 'Active' ? camIn(S.active.cameraId) : null;
+    return Boolean(view && (view.mode === 'airport' || view.mode === 'free'));
+  }
+  function spotViewReason(view) {
+    if (!S.snapshot) return statusText();
+    if (!S.caps.canActivate) return S.caps.blockReason || 'Camera control is not available right now.';
+    if ((view === 'tower' || view === 'runway') && !airportViewsLoaded()) return 'Tower and runway views need airport cameras. Load or generate cameras for a nearby airport first.';
+    if (view === 'track' && !spotTrackable()) return 'Track aims the current airport or free camera at the aircraft. Show one of those views first.';
+    return null;
+  }
+  function applySpottingAck(ack) {
+    if (ack && ack.result && ack.result.spotting) { S.spotting = ack.result.spotting; renderSpotting(); }
+    return ack;
+  }
+  const spotTarget = (objectId, view) => command('SpotTarget', { objectId, view }).then(applySpottingAck);
+  const setAutoSpot = enabled => command('SetAutoSpot', { enabled: Boolean(enabled) }).then(applySpottingAck);
+  const stopSpotting = () => command('StopSpotting', {}).then(applySpottingAck);
+  /** The aircraft after the current target by distance (the nearest one when nothing is followed yet). */
+  function nextSpotTarget() {
+    const list = trafficAircraft(), id = spotting().targetId;
+    if (!list.length) return null;
+    const index = list.map(a => a.objectId).indexOf(id);
+    return list[(index + 1) % list.length];
+  }
+  function spotStateText() {
+    const sp = spotting(), label = sp.targetLabel || 'the aircraft';
+    if (sp.state === 'tracking') return 'Spotting ' + label + (sp.view ? ' · ' + (SPOT_VIEW_NAMES[sp.view] || sp.view) : '') + (sp.autoSpot ? ' · Auto-spot' : '');
+    if (sp.state === 'lost') return 'Lost ' + label + (sp.reason ? ': ' + sp.reason : '');
+    if (sp.state === 'waiting') return 'Auto-spot is waiting for arriving or departing traffic' + (sp.reason ? ': ' + sp.reason : '.');
+    return 'Not spotting. Choose a view for an aircraft below.';
+  }
+  function miniSpotText() {
+    const sp = spotting(), label = sp.targetLabel || 'aircraft';
+    return sp.state === 'tracking' ? 'Spotting: ' + label : sp.state === 'lost' ? 'Spotting: lost ' + label : sp.state === 'waiting' ? 'Spotting: Auto-spot waiting' : '';
+  }
+  const autoSpotTitle = disabled => (disabled ? (S.caps.blockReason || 'Load a flight to use Auto-spot.')
+    : 'Global: follow arriving and departing traffic at the loaded airport automatically. Stop, Release or Panic ends it.');
+  // Display only, safe at the 1 Hz TrafficChanged rate: updates the dock controls and the Traffic page in place.
+  function renderSpotting() {
+    renderSpotTools('mc-mouse-look-', $('mc-mouse-look-global'));
+    if (S.page === 'traffic' && !IS_MINI) renderTraffic();
+  }
+  // Dock: Auto-spot and Next target next to Cinematic, and a one-line "Spotting: <label>" while it runs.
+  function renderSpotTools(prefix, group) {
+    if (!group) return;
+    const sp = spotting(), list = trafficAircraft();
+    let auto = $(prefix + 'autospot'), next = $(prefix + 'spotnext'), status = $(prefix + 'spotting');
+    if (!auto) {
+      auto = button('Auto-spot', () => setAutoSpot(!spotting().autoSpot), 'mc-secondary mc-airport-auto mc-spot-toggle');
+      auto.id = prefix + 'autospot';
+      next = button('Next target', () => { const target = nextSpotTarget(); if (target) spotTarget(target.objectId, 'chase'); }, 'mc-secondary mc-spot-next');
+      next.id = prefix + 'spotnext';
+      auto.setAttribute('aria-label', 'Auto-spot'); next.setAttribute('aria-label', 'Next target');
+      status = make('span', undefined, 'mc-effective-tracking mc-spotting-status');
+      status.id = prefix + 'spotting';
+    }
+    const after = $(prefix + 'cinematic') || group.lastChild;
+    if (auto.parentNode !== group || auto.previousSibling !== after) group.insertBefore(auto, after.nextSibling);
+    if (next.parentNode !== group || next.previousSibling !== auto) group.insertBefore(next, auto.nextSibling);
+    setIcon(auto, 'radio'); setIcon(next, 'chevron-right');
+    auto.setAttribute('aria-pressed', String(sp.autoSpot));
+    auto.disabled = !S.snapshot || (!sp.autoSpot && !S.caps.canActivate);
+    auto.title = autoSpotTitle(auto.disabled);
+    const blocked = spotViewReason('chase'), target = nextSpotTarget();
+    next.disabled = Boolean(blocked) || !target;
+    next.title = blocked || (target ? 'Chase the next aircraft by distance: ' + trafficLabel(target) : 'No traffic nearby.');
+    const body = $('mc-mini-panel').querySelector('.mc-dock-body');
+    if (status.parentNode !== body) body.insertBefore(status, $('mc-dock-favorites'));
+    const text = miniSpotText();
+    status.hidden = !text;
+    setText(status, text);
+  }
+  function trafficRow(id) {
+    const row = make('div', undefined, 'mc-traffic-row');
+    row.dataset.objectId = id;
+    row.setAttribute('role', 'group');
+    const name = make('div', undefined, 'mc-traffic-name'), views = make('div', undefined, 'mc-traffic-views');
+    add(name, make('strong'), make('small'));
+    SPOT_VIEWS.forEach(([view, label, iconName]) => {
+      const choose = button(label, () => spotTarget(row.objectId, view), 'mc-secondary', iconName);
+      choose.dataset.view = view;
+      choose.setAttribute('data-focus-key', 'spot:' + id + ':' + view);
+      views.appendChild(choose);
+    });
+    add(row, name, make('span', undefined, 'mc-pill mc-traffic-status'), make('span', undefined, 'mc-traffic-figures'), views);
+    return row;
+  }
+  function updateTrafficRow(row, a, sp, reasons) {
+    const label = trafficLabel(a), tracked = sp.state !== 'off' && sp.targetId === a.objectId, figures = trafficFigures(a);
+    row.objectId = a.objectId;
+    row.setAttribute('aria-label', label);
+    row.dataset.status = a.status || '';
+    row.dataset.onGround = String(Boolean(a.onGround));
+    row.dataset.tracking = String(tracked);
+    setText(row.querySelector('.mc-traffic-name strong'), label);
+    setText(row.querySelector('.mc-traffic-name small'), trafficDetail(a));
+    const chip = row.querySelector('.mc-traffic-status');
+    setText(chip, TRAFFIC_STATUS[a.status] || a.status || '');
+    chip.dataset.status = a.status || '';
+    const numbers = row.querySelector('.mc-traffic-figures');
+    setText(numbers, figures.join(' · '));
+    numbers.title = 'Distance ' + figures[0] + ', altitude ' + figures[1] + ', ground speed ' + figures[2];
+    $$('button[data-view]', row).forEach(choose => {
+      const view = choose.dataset.view, reason = reasons[view];
+      choose.disabled = Boolean(reason);
+      choose.title = reason || SPOT_VIEW_NAMES[view] + ' view of ' + label;
+      choose.setAttribute('aria-label', SPOT_VIEW_NAMES[view] + ' view of ' + label);
+      choose.setAttribute('aria-pressed', String(tracked && sp.view === view));
+    });
+  }
+  function renderTraffic() {
+    const list = $('mc-traffic-list');
+    if (!list) return;
+    const sp = spotting(), filter = S.trafficFilter, all = trafficAircraft(), radius = spottingRadius();
+    $('mc-spot-state').dataset.state = sp.state;
+    setText($('mc-spot-state-text'), spotStateText());
+    const auto = $('mc-spot-auto'), stop = $('mc-spot-stop');
+    auto.setAttribute('aria-pressed', String(sp.autoSpot));
+    auto.disabled = !S.snapshot || (!sp.autoSpot && !S.caps.canActivate);
+    auto.title = autoSpotTitle(auto.disabled);
+    stop.disabled = !S.snapshot || (sp.state === 'off' && !sp.autoSpot);
+    stop.title = 'Stop spotting and return to the view you had before';
+    $$('[data-value]', $('mc-traffic-filter')).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.value === filter.status)));
+    const query = searchKey(filter.query), keep = TRAFFIC_FILTERS[filter.status] || TRAFFIC_FILTERS.all;
+    const shown = all.filter(a => keep(a) && (!filter.maxNm || Number(a.distanceNm) <= filter.maxNm) && (!query || trafficMatches(a, query)));
+    $('mc-traffic-empty').hidden = !S.snapshot || all.length > 0;
+    setText($('mc-traffic-empty-text'), 'No other aircraft are within ' + radius + ' NM. AI traffic appears here as soon as the simulator places it. VATSIM and IVAO traffic appears when your network client injects it into the simulator. Microsoft Flight Simulator\'s own multiplayer aircraft are not visible to add-ons, so they cannot be listed or followed.');
+    setText($('mc-traffic-count'), all.length ? (shown.length === all.length ? all.length : shown.length + ' of ' + all.length) + ' aircraft within ' + radius + ' NM, nearest first' : '');
+    const reasons = {};
+    SPOT_VIEWS.forEach(([view]) => { reasons[view] = spotViewReason(view); });
+    // Rows are kept and updated in place, so a click or keyboard focus survives the once-a-second refresh.
+    const focused = list.contains(document.activeElement) ? document.activeElement : null, wanted = {};
+    shown.forEach((a, index) => {
+      const id = String(a.objectId);
+      wanted[id] = true;
+      const row = $$('.mc-traffic-row', list).filter(r => r.dataset.objectId === id)[0] || trafficRow(id);
+      updateTrafficRow(row, a, sp, reasons);
+      if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+    });
+    $$('.mc-traffic-row', list).forEach(row => { if (!wanted[row.dataset.objectId]) list.removeChild(row); });
+    let none = $('mc-traffic-none');
+    if (!none) { none = make('p', 'No aircraft match these filters.', 'mc-empty'); none.id = 'mc-traffic-none'; list.parentNode.insertBefore(none, list.nextSibling); }
+    none.hidden = !all.length || shown.length > 0;
+    if (focused && focused.isConnected && document.activeElement !== focused) focused.focus();
+  }
+  function renderSpottingSettings() {
+    if (!S.working || !$('mc-settings-navigation')) return;
+    let pane = $('mc-settings-section-spotting');
+    if (!pane) {
+      pane = make('section', undefined, 'mc-settings-pane'); pane.id = 'mc-settings-section-spotting'; pane.setAttribute('aria-labelledby', 'mc-settings-link-spotting'); pane.hidden = true;
+      add(pane, make('h4', 'Spotting', 'mc-settings-heading'), make('p', 'Follow other aircraft from the Traffic page, the mini panel or the spotting bindings.', 'mc-note'));
+      const link = button('Spotting', () => showSettingsSection('spotting'), 'mc-secondary'); link.id = 'mc-settings-link-spotting'; link.setAttribute('aria-controls', pane.id);
+      const nav = $('mc-settings-navigation'), after = $('mc-settings-link-cinematic') || $('mc-settings-link-airport'), afterPane = $('mc-settings-section-cinematic') || $('mc-settings-section-airport');
+      const content = nav.parentNode.querySelector('.mc-settings-content');
+      if (after) nav.insertBefore(link, after.nextSibling); else nav.appendChild(link);
+      if (afterPane) content.insertBefore(pane, afterPane.nextSibling); else content.appendChild(pane);
+      const host = () => S.working.settings.host;
+      [['mc-setting-spotting-radius', 'Traffic radius', 'List aircraft within this distance of yours (1-100 NM)', 1, 100, 'NM', 'spottingRadiusNm', 20],
+        ['mc-setting-autospot-hold', 'Auto-spot hold time', 'Stay on each aircraft at least this long before Auto-spot moves on (10-300 s)', 10, 300, 's', 'autoSpotHoldSeconds', 30]].forEach(([id, label, help, min, max, unit, key, fallback]) => {
+        const row = make('label', undefined, 'mc-inline-field'), copy = make('span', label), input = make('input'), box = make('span', undefined, 'mc-unit');
+        Object.assign(input, { type: 'number', id, min, max, step: 1 }); input.dataset.key = key; input.dataset.fallback = fallback; copy.appendChild(make('small', help));
+        input.addEventListener('change', () => {
+          const n = Number(input.value);
+          if (input.value.trim() !== '' && isFinite(n)) host()[key] = M.clamp(Math.round(n), min, max);
+          input.value = String(host()[key] == null ? fallback : host()[key]);
+          settingChanged();
+        });
+        add(box, input, document.createTextNode(unit)); add(row, copy, box); pane.appendChild(row);
+      });
+      pane.appendChild(make('p', 'Tower and runway views use the loaded airport cameras; Track aims the current airport or free camera. Auto-spot picks arriving and departing aircraft at the loaded airport. Release, Panic, Cinematic mode and airport Auto switch stop spotting.', 'mc-note'));
+    }
+    const host = S.working.settings.host;
+    $$('input[data-key]', pane).forEach(input => { if (document.activeElement !== input) input.value = String(host[input.dataset.key] == null ? input.dataset.fallback : host[input.dataset.key]); });
+  }
+
   /* ------------- Save / revert ------------- */
   // Local work IO can complete before the Pending ack's promise handler runs.
   function waitForCommit(requestId) {
@@ -2874,6 +3109,7 @@
       ['Peek - hold to look, release to return', unique(used.concat(bound('peekView'))).map(n => ({ action: 'peekView', viewId: n, peek: true, name: 'Peek at ' + (camFor(n) ? camFor(n).name : 'view ID ' + n), detail: 'View ID ' + n + ' - hold to look - release to return' }))],
       ['Camera commands', COMMANDS.map(c => ({ action: c[0], viewId: 0, name: c[1], detail: c[2] }))],
       ['Glance - instrument close-ups', GLANCE.map(c => ({ action: c[0], viewId: 0, name: c[1], detail: c[2] }))],
+      ['Spotting - other aircraft', SPOTTING.map(c => ({ action: c[0], viewId: 0, name: c[1], detail: c[2] }))],
     ];
   }
   function updateBindingToggle() {
@@ -4017,6 +4253,7 @@
     renderGlobalTrackingSettings();
     renderSettingsLayout();
     renderCinematicSettings();
+    renderSpottingSettings();
   }
   function settingChanged() { saveSettings(); applySettings(); renderSettings(); }
 
@@ -4335,6 +4572,11 @@
       renderTree();
     });
     ['mc-binding-search','mc-binding-status','mc-binding-kind'].forEach(id => $(id).addEventListener(id === 'mc-binding-search' ? 'input' : 'change', renderBindings));
+    $$('[data-value]', $('mc-traffic-filter')).forEach(b => b.addEventListener('click', () => { S.trafficFilter.status = b.dataset.value; renderTraffic(); }));
+    $('mc-traffic-search').addEventListener('input', () => { S.trafficFilter.query = $('mc-traffic-search').value; renderTraffic(); });
+    $('mc-traffic-distance').addEventListener('change', () => { S.trafficFilter.maxNm = Number($('mc-traffic-distance').value) || 0; renderTraffic(); });
+    $('mc-spot-auto').addEventListener('click', () => setAutoSpot(!spotting().autoSpot));
+    $('mc-spot-stop').addEventListener('click', stopSpotting);
     $('mc-favorite').addEventListener('click', () => { const v = current(); if (v) setFavorite(v); });
     $('mc-camera-menu').addEventListener('click', cameraActions);
     $('mc-camera-name').addEventListener('change', () => {

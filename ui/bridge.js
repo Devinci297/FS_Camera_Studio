@@ -318,6 +318,10 @@
     list.push({ action: 'glanceNext', input: ctrlAlt('I', 'I') });
     list.push({ action: 'glanceReturn', input: ctrlAlt('U', 'U') });
     list.push({ action: 'toggleCinematic', input: ctrlAlt('K', 'K') });
+    list.push({ action: 'spotNext', input: ctrlAlt('T', 'T') });
+    list.push({ action: 'spotPrevious', input: ctrlAlt('Y', 'Y') });
+    list.push({ action: 'spotReturn', input: ctrlAlt('O', 'O') });
+    list.push({ action: 'toggleAutoSpot', input: ctrlAlt('J', 'J') });
     [['moveForward','W'],['moveBack','S'],['moveLeft','A'],['moveRight','D'],['moveUp','Q'],['moveDown','E'],['moveFast','VK_SHIFT']].forEach(entry => list.push({action:entry[0],input:{kind:'key',definition:entry[1],label:entry[1]==='VK_SHIFT'?'Shift':entry[1]}}));
     [['zoomIn','sim:ZOOM_IN','Mouse wheel up / MSFS zoom in'],['zoomOut','sim:ZOOM_OUT','Mouse wheel down / MSFS zoom out']].forEach(entry => list.push({action:entry[0],input:{kind:'simZoom',definition:entry[1],label:entry[2]}}));
     list.push({action:'saveViews',input:{kind:'key',definition:'VK_LCONTROL+S',label:'Ctrl + S'}});
@@ -478,6 +482,7 @@
     addRepo(airport, 1);
     repo.settings = { schemaVersion: 2, ui: { shortcuts: true, contrast: false, backups: true, remember: true, precision: 'normal', theme: 'dark', reducedMotion: false, miniEnabled: true, miniHover: true, miniPinned: false, miniOpacity: 0.65, nameDisplay: 'both' }, host: { allowUnqualifiedAdapter: false, lookSpeedDegPerSec: 60, moveSpeedMetersPerSec: 0.5, binocularsFovDeg: 10 } };
     Object.assign(repo.settings.host, { cinematicMinSeconds: 8, cinematicMaxSeconds: 20, cinematicCockpitWeight: 0.15, cinematicCuts: true, cinematicDrift: true });
+    Object.assign(repo.settings.host, { spottingRadiusNm: 20, autoSpotHoldSeconds: 30 });
     repo.bindings = seedBindings();
 
     const m = {
@@ -489,6 +494,8 @@
       active: { profileId: null, cameraId: null, peeking: false, transitioning: false, fromDraft: false },
       live: null, look: NEUTRAL_LOOK(), peek: null, pendingCommit: null, instances: new Map(), timers: new Set(),
       working: null, selection: { profileId: null, cameraId: null },
+      traffic: { aircraft: [], at: 0 }, trafficEnabled: true, trafficTime: null, trafficShown: 0,
+      spot: { state: 'off', targetId: null, view: null, autoSpot: false, targetLabel: '', reason: null, before: null, since: 0 },
     };
     const assembler = new Assembler();
     // The demo aircraft starts away from the airport; FSCDemo.arriveAtAirport() (or ?demoAirport=1) parks it at KDEM.
@@ -573,6 +580,8 @@
         pendingCommit: m.pendingCommit ? { requestId: m.pendingCommit.requestId, revisions: m.pendingCommit.revisions } : null,
         look: clone(m.look),
         cinematic: cinematicState(),
+        traffic: trafficPayload(),
+        spotting: spottingState(),
         airports: airportsPayload(),
       };
     }
@@ -637,6 +646,7 @@
       clearMotion();
       m.glance = null;
       if (!opts.cinematic) stopCinematic('A camera was selected manually.');
+      if (!opts.spotting) endSpotting('A camera was selected manually.');
       if (!opts.peeking) { m.peek = null; if (m.selection.cameraId !== cameraId) select(cameraId); }
       if (m.ownership.state !== 'Active') {
         setOwnership('Acquiring');
@@ -648,6 +658,7 @@
       clearMotion();
       setBinoculars(false);  // releasing the camera (or Panic) cancels the zoom immediately
       stopCinematic(reason === 'Panic release: the simulator has control' ? 'Panic release.' : 'Camera control was released.');
+      endSpotting(reason === 'Panic release: the simulator has control' ? 'Panic release.' : 'Camera control was released.');
       m.peek = null;
       m.glance = null;
       if (m.ownership.state === 'Observing') return;
@@ -702,12 +713,214 @@
       const caps = capabilities();
       if (!caps.canActivate) return ack(env, 'Rejected', caps.blockReason, { cinematic: cinematicState() });
       m.cinematic = { enabled: true, reason: null };
+      endSpotting('Cinematic mode started.');
       if (!cinematicNext({ uiInstanceId: env.uiInstanceId, requestId: env.requestId + ':cinematic' })) {
         m.cinematic = { enabled: false, reason: null };
         return ack(env, 'Rejected', 'No views are included in Cinematic mode. Turn on Include in Cinematic mode for exterior, airport or cockpit views.', { cinematic: cinematicState() });
       }
       event('CinematicChanged', cinematicState());
       return ack(env, 'Completed', null, { cinematic: cinematicState() });
+    }
+    /* Spotting: AI and network traffic around the demo field, reported at most once a second as the module does.
+       Local meters about the demo aircraft (x east, y north); runway 09/27 runs east-west 600 m north of it. Each
+       aircraft flies a repeating path, so the list keeps moving: parked, taxiing, taking off, departing, arriving,
+       landing and cruising traffic. FSCDemo.traffic({ enabled, time }) empties the list or freezes the clock. */
+    const NM = 1852, KT = 0.514444, FT = 0.3048, GLIDE = Math.tan(3 * Math.PI / 180);
+    const FIELD = { x: 0, y: 600, elevationFt: 1417 }, THRESHOLD_09 = -1200;
+    const phase = (t, period) => ((t % period) + period) % period;
+    const ground = (x, y, gsKt, hdg) => ({ x, y, altFt: FIELD.elevationFt, gsKt, vsFpm: 0, hdg, onGround: true });
+    const air = (x, y, altFt, gsKt, vsFpm, hdg) => ({ x, y, altFt, gsKt, vsFpm, hdg, onGround: false });
+    const DEMO_TRAFFIC = [
+      { objectId: 101, title: 'Airbus A320neo Lufthansa', atcId: 'D-AINB', airline: 'Lufthansa', flightNumber: '441', model: 'A320', at: () => ground(150, 150, 0, 0) },
+      { objectId: 102, title: 'Cessna 172 Skyhawk', atcId: 'N172DM', airline: '', flightNumber: '', model: 'C172', at: () => ground(-300, 120, 0, 180) },
+      { objectId: 103, title: 'Airbus A220-300 Swiss', atcId: 'HB-JCA', airline: 'Swiss', flightNumber: '1084', model: 'A220', at: t => {
+        const s = phase(t, 518) * 15 * KT; return s < 2000 ? ground(-1000 + s, 450, 15, 90) : ground(1000 - (s - 2000), 450, 15, 270);
+      } },
+      { objectId: 104, title: 'Airbus A319 easyJet', atcId: 'G-EZBA', airline: 'easyJet', flightNumber: '2914', model: 'A319', period: 240, at: t => {
+        const p = phase(t, 240);
+        if (p < 35) return ground(THRESHOLD_09 + (40 * p + 1.5 * p * p) * KT, FIELD.y, 40 + 3 * p, 90);
+        const q = p - 35; return air(THRESHOLD_09 + 3237.5 * KT + q * 160 * KT, FIELD.y, FIELD.elevationFt + q * 2000 / 60, 160, 2000, 90);
+      } },
+      { objectId: 105, title: 'Boeing 737-800 KLM', atcId: 'PH-BXA', airline: 'KLM', flightNumber: '1956', model: 'B738', at: t => {
+        const q = phase(t + 120, 300); return air(THRESHOLD_09 - 2000 - q * 200 * KT, FIELD.y, FIELD.elevationFt + 1500 + q * 1800 / 60, 200, 1800, 270);
+      } },
+      { objectId: 106, title: 'Airbus A321 British Airways', atcId: 'G-EUXC', airline: 'British Airways', flightNumber: '710', model: 'A321', period: 300, offset: 60, at: t => {
+        const p = phase(t + 60, 300);
+        if (p >= 270) { const r = p - 270; return ground(THRESHOLD_09 + (130 * r - 1.5 * r * r) * KT, FIELD.y, 130 - 3 * r, 90); }
+        const d = (270 - p) * 140 * KT; return air(THRESHOLD_09 - d, FIELD.y, FIELD.elevationFt + 50 + d * GLIDE / FT, 140, -140 * KT * GLIDE / FT * 60, 90);
+      } },
+      { objectId: 107, title: 'Piper PA-28 Cherokee', atcId: 'N456AB', airline: '', flightNumber: '', model: 'PA28', at: t => {
+        const p = phase(t + 30, 200); return air(THRESHOLD_09 - 1500, FIELD.y + (200 - p) * 90 * KT, FIELD.elevationFt + 400 + (200 - p) * 500 / 60, 90, -500, 180);
+      } },
+      { objectId: 108, title: 'Boeing 787-9 United', atcId: 'N36962', airline: 'United', flightNumber: '15', model: 'B789', at: t => {
+        const p = phase(t, 330); return air(-20 * NM + p * 480 * KT, FIELD.y + 9 * NM, 35000, 480, 0, 90);
+      } },
+    ];
+    const trafficStart = Date.now();
+    const trafficClock = () => (m.trafficTime !== null ? m.trafficTime : (Date.now() - trafficStart) / 1000);
+    // The module's status rules, against the demo field (the loaded or nearest airport).
+    function trafficStatus(def, s, t) {
+      if (s.onGround) {
+        if (s.gsKt < 1) return 'parked';
+        if (s.gsKt < 40) return 'taxi';
+        // Airborne in the last 60 s of this pass (a path's previous pass does not count).
+        const since = def.period ? phase(t + (def.offset || 0), def.period) : 60;
+        for (let k = 5; k <= Math.min(60, since); k += 5) if (!def.at(t - k).onGround) return 'landing';
+        return 'takeoff';
+      }
+      const near = Math.hypot(s.x - FIELD.x, s.y - FIELD.y) <= 15 * NM;
+      if (near && s.vsFpm > 300) return 'departing';
+      if (near && s.vsFpm < -300) return 'arriving';
+      return 'cruise';
+    }
+    function trafficPayload() {
+      const t = trafficClock(), host = m.working ? m.working.settings.host : {}, radius = host.spottingRadiusNm == null ? 20 : host.spottingRadiusNm;
+      const at = Math.round(t * 1000);
+      if (!m.trafficEnabled || !m.aircraft || !m.aircraft.modelKey) { m.traffic = { aircraft: [], at }; return clone(m.traffic); }
+      const o = DEMO_AIRCRAFT_ORIGIN, perLon = 111320 * Math.cos(o.lat * Math.PI / 180);
+      const list = DEMO_TRAFFIC.map(def => {
+        const s = def.at(t), distance = Math.hypot(s.x, s.y);
+        return { objectId: def.objectId, title: def.title, atcId: def.atcId, airline: def.airline, flightNumber: def.flightNumber, model: def.model,
+          latitude: round(o.lat + s.y / 111320, 6), longitude: round(o.lon + s.x / perLon, 6), altitudeFt: Math.round(s.altFt), groundSpeedKt: Math.round(s.gsKt),
+          verticalSpeedFpm: Math.round(s.vsFpm), headingDeg: Math.round(s.hdg), onGround: s.onGround, distanceNm: round(distance / NM, 2),
+          bearingDeg: Math.round((Math.atan2(s.x, s.y) * 180 / Math.PI + 360) % 360), status: trafficStatus(def, s, t) };
+      }).filter(a => a.distanceNm <= radius).sort((a, b) => a.distanceNm - b.distanceNm);
+      m.traffic = { aircraft: list, at };
+      return clone(m.traffic);
+    }
+    const SPOT_VIEWS = ['tower', 'runway', 'chase', 'flyby', 'track'];
+    const AUTO_STATUSES = ['arriving', 'landing', 'takeoff', 'departing'];
+    const AUTO_VIEWS = { arriving: 'runway', landing: 'runway', takeoff: 'runway', taxi: 'tower', departing: 'chase' };
+    const NO_AIRPORT_VIEWS = 'Tower and runway views need airport cameras. Load or generate cameras for a nearby airport first.';
+    const spotLabel = a => ((a.airline && a.flightNumber ? a.airline + ' ' + a.flightNumber : '') || a.atcId || a.title) + (a.model ? ' · ' + a.model : '');
+    const spottingState = () => ({ targetId: m.spot.targetId, view: m.spot.view, autoSpot: m.spot.autoSpot, state: m.spot.state, targetLabel: m.spot.targetLabel || '', reason: m.spot.reason || null });
+    const spotEnv = () => ({ uiInstanceId: 'module', requestId: 'spotting-' + (++m.seq) });
+    function spotAirportCamera(view, target) {
+      if (!airportLoaded()) return null;
+      const list = demoAirport.profile.cameras.map(c => workingCamera(c.id)).filter(Boolean);
+      if (view === 'tower') return list.find(c => c.generatedKey === 'tower' || /tower/i.test(c.name)) || null;
+      // The runway or spotting view nearest the target (FRD north/east about the field).
+      const rad = target.bearingDeg * Math.PI / 180, east = target.distanceNm * NM * Math.sin(rad), north = target.distanceNm * NM * Math.cos(rad) - FIELD.y;
+      const runway = list.filter(c => /^(runway|spot):/.test(c.generatedKey || '') || /runway|threshold|approach|fence/i.test(c.name));
+      runway.sort((a, b) => Math.hypot(a.positionMetersFRD[0] - north, a.positionMetersFRD[1] - east) - Math.hypot(b.positionMetersFRD[0] - north, b.positionMetersFRD[1] - east));
+      return runway[0] || null;
+    }
+    /** Validates a spotting request; returns { error } or what spotApply needs. */
+    function spotCheck(objectId, view) {
+      if (SPOT_VIEWS.indexOf(view) < 0) return { error: 'Choose a tower, runway, chase, fly-by or track view.' };
+      const caps = capabilities();
+      if (!caps.canActivate) return { error: caps.blockReason };
+      trafficPayload();
+      const target = m.traffic.aircraft.find(a => a.objectId === objectId);
+      if (!target) return { error: 'That aircraft is no longer nearby.' };
+      let camera = null;
+      if (view === 'tower' || view === 'runway') {
+        camera = spotAirportCamera(view, target);
+        if (!camera) return { error: airportLoaded() ? 'The loaded airport has no ' + view + ' view.' : NO_AIRPORT_VIEWS };
+      }
+      if (view === 'track') {
+        const shown = m.ownership.state === 'Active' && workingCamera(m.active.cameraId);
+        const world = m.spot.state !== 'off' && m.spot.view ? ['tower', 'runway', 'track'].indexOf(m.spot.view) >= 0 : Boolean(shown && (shown.mode === 'airport' || shown.mode === 'free'));
+        if (!world) return { error: 'Track aims the current airport or free camera at the aircraft. Show one of those views first.' };
+      }
+      return { target, camera, view };
+    }
+    // Takes control if needed. Chase and fly-by views have no saved camera; tower and runway show the airport camera.
+    function spotApply(check, auto) {
+      const s = m.spot, target = check.target;
+      stopCinematic('Spotting started.');
+      if (s.state === 'off' || s.state === 'waiting') s.before = m.ownership.state === 'Active' || m.ownership.state === 'Acquiring' ? m.active.cameraId : null;
+      Object.assign(s, { state: 'tracking', targetId: target.objectId, view: check.view, targetLabel: spotLabel(target), reason: null, since: trafficClock(), autoSpot: Boolean(auto) });
+      clearMotion();
+      m.glance = null; m.peek = null;
+      const cameraId = check.view === 'track' ? m.active.cameraId : check.camera ? check.camera.id : null;
+      if (check.camera) m.live = clone(check.camera);
+      const shown = () => { m.active = { profileId: m.working.profile.profileId, cameraId, peeking: false, transitioning: false, fromDraft: false }; sendActive(); };
+      if (m.ownership.state !== 'Active') { setOwnership('Acquiring'); later(() => { setOwnership('Active'); shown(); }, 450); } else shown();
+      event('SpottingChanged', spottingState());
+    }
+    function spotTarget(env, objectId, view) {
+      const check = spotCheck(objectId, view);
+      if (check.error) return ack(env, 'Rejected', check.error, { spotting: spottingState() });
+      spotApply(check, false);
+      return ack(env, 'Completed', null, { spotting: spottingState() });
+    }
+    /** Ends spotting (and Auto-spot). restore: back to the camera shown before spotting began, or release. */
+    function endSpotting(reason, restore) {
+      const s = m.spot, was = s.state, before = s.before;
+      if (was === 'off' && !s.autoSpot) return false;
+      m.spot = { state: 'off', targetId: null, view: null, autoSpot: false, targetLabel: '', reason: reason || null, before: null, since: 0 };
+      event('SpottingChanged', spottingState());
+      if (restore && (was === 'tracking' || was === 'lost')) {
+        const camera = before && workingCamera(before);
+        if (camera && activatable(camera)) activate(spotEnv(), before, { spotting: true });
+        else release(null, 'spottingStopped');
+      }
+      return true;
+    }
+    function autoCandidate(exclude) {
+      const rank = a => (a.status === 'arriving' || a.status === 'landing' ? 0 : 1) * 1000 + a.distanceNm;
+      return m.traffic.aircraft.filter(a => AUTO_STATUSES.indexOf(a.status) >= 0 && a.objectId !== exclude).sort((a, b) => rank(a) - rank(b))[0] || null;
+    }
+    function autoSpotTo(target) {
+      let check = spotCheck(target.objectId, AUTO_VIEWS[target.status] || 'chase');
+      if (check.error && check.view !== 'chase') check = spotCheck(target.objectId, 'chase');
+      if (check.error) return false;
+      spotApply(check, true);
+      return true;
+    }
+    function setAutoSpot(env, enabled) {
+      const s = m.spot;
+      if (!enabled) {
+        if (s.autoSpot) { s.autoSpot = false; if (s.state === 'waiting') s.state = 'off'; event('SpottingChanged', spottingState()); }
+        return ack(env, 'Completed', null, { spotting: spottingState() });
+      }
+      if (s.autoSpot) return ack(env, 'Completed', null, { spotting: spottingState() });
+      const caps = capabilities();
+      if (!caps.canActivate) return ack(env, 'Rejected', caps.blockReason, { spotting: spottingState() });
+      stopCinematic('Auto-spot started.');
+      trafficPayload();
+      const target = autoCandidate(null);
+      if (!target || !autoSpotTo(target)) {
+        Object.assign(s, { autoSpot: true, state: s.state === 'tracking' ? 'tracking' : 'waiting', reason: s.state === 'tracking' ? null : 'No arriving or departing traffic near the airport yet.', since: trafficClock() });
+        event('SpottingChanged', spottingState());
+      }
+      return ack(env, 'Completed', null, { spotting: spottingState() });
+    }
+    // Once a second: follow the target, report it lost when it leaves the radius, and let Auto-spot move on.
+    function spottingTick() {
+      const s = m.spot;
+      if (s.state === 'off') return;
+      const target = s.targetId !== null ? m.traffic.aircraft.find(a => a.objectId === s.targetId) : null;
+      let changed = false;
+      if (s.state === 'tracking' && s.targetId !== null && !target) {
+        const host = m.working.settings.host;
+        Object.assign(s, { state: 'lost', reason: 'It left the ' + (host.spottingRadiusNm == null ? 20 : host.spottingRadiusNm) + ' NM traffic radius.' }); changed = true;
+      } else if (s.state === 'lost' && target) { Object.assign(s, { state: 'tracking', reason: null }); changed = true; }
+      if (s.autoSpot) {
+        const hold = m.working.settings.host.autoSpotHoldSeconds == null ? 30 : m.working.settings.host.autoSpotHoldSeconds;
+        const good = Boolean(target) && AUTO_STATUSES.indexOf(target.status) >= 0;
+        // Holds each aircraft at least autoSpotHoldSeconds, then moves on to the next arrival or departure.
+        if (s.state === 'waiting' || s.state === 'lost' || trafficClock() - s.since >= hold) {
+          const next = autoCandidate(s.targetId);
+          if (next && autoSpotTo(next)) return;
+          if (s.state === 'lost' || (s.state === 'tracking' && !good)) {
+            Object.assign(s, { state: 'waiting', targetId: null, view: null, targetLabel: '', reason: 'No arriving or departing traffic near the airport.' }); changed = true;
+          }
+        }
+      }
+      if (changed) event('SpottingChanged', spottingState());
+    }
+    function trafficTick(force) {
+      if (!m.instances.size && !force) return;
+      const payload = trafficPayload();
+      spottingTick();
+      if (payload.aircraft.length || m.trafficShown || force) event('TrafficChanged', payload);
+      m.trafficShown = payload.aircraft.length;
+    }
+    {
+      const timer = setInterval(() => trafficTick(false), 1000);
+      if (timer && typeof timer.unref === 'function') timer.unref(); // never keeps a Node test process alive
     }
     function cycle(env, delta) {
       const current = m.active.cameraId || m.selection.cameraId || m.working.profile.defaultCameraId;
@@ -746,6 +959,7 @@
     function glanceBlock() {
       const camera = m.active.cameraId && workingCamera(m.active.cameraId);
       if (m.ownership.state !== 'Active' || !camera || !m.live) return 'Show a cockpit view first: a glance returns to the view you are in.';
+      if (m.spot.state !== 'off') return 'Glance views are not available while spotting. Stop spotting first.';
       if (camera.mode !== 'aircraftCockpit') return 'Glance views work from cockpit views.';
       return null;
     }
@@ -825,8 +1039,9 @@
         case 'panicRelease':
           // Same hand-back as releaseCamera, and idempotent: a press while Observing still reports.
           m.cinematicStoppedByPanic = Boolean(m.cinematic && m.cinematic.enabled);
+          m.spottingStoppedByPanic = m.spot.state !== 'off' || m.spot.autoSpot;
           release(null, 'Panic release: the simulator has control');
-          event('PanicReleased', { state: m.ownership.state, reason: m.ownership.reason, airportAutoStopped: false, cinematicStopped: Boolean(m.cinematicStoppedByPanic) });
+          event('PanicReleased', { state: m.ownership.state, reason: m.ownership.reason, airportAutoStopped: false, cinematicStopped: Boolean(m.cinematicStoppedByPanic), spottingStopped: Boolean(m.spottingStoppedByPanic) });
           message = 'Camera released and simulator settings restored.';
           break;
         case 'nextCamera': case 'previousCamera': case 'returnToPilot': case 'nextCategory':
@@ -841,6 +1056,19 @@
           event('SurfaceRequest', { target: action === 'toggleEditor' ? 'main' : 'mini', op: 'toggle' });
           break;
         case 'recenterLook': m.look = NEUTRAL_LOOK(); event('TemporaryLookChanged', m.look); break;
+        case 'spotNext': case 'spotPrevious': {
+          const list = (trafficPayload(), m.traffic.aircraft), n = list.length;
+          if (!n) { message = 'No traffic nearby.'; break; }
+          const step = action === 'spotNext' ? 1 : -1, i = list.findIndex(a => a.objectId === m.spot.targetId);
+          const target = list[i < 0 ? (step > 0 ? 0 : n - 1) : (i + step + n) % n];
+          let check = spotCheck(target.objectId, m.spot.state !== 'off' && m.spot.view ? m.spot.view : 'chase');
+          if (check.error && check.view !== 'chase') check = spotCheck(target.objectId, 'chase');
+          if (check.error) { message = blocked(check.error); break; }
+          spotApply(check, false); recalled = true; message = 'Spotting ' + spotLabel(target) + '.';
+          break;
+        }
+        case 'spotReturn': recalled = endSpotting('Spotting was stopped.', true); message = recalled ? 'Back to your own aircraft.' : 'Not spotting.'; break;
+        case 'toggleAutoSpot': setAutoSpot(internal(env, 'dispatch'), !m.spot.autoSpot); recalled = m.spot.autoSpot; message = recalled ? 'Auto-spot is on.' : 'Auto-spot is off.'; break;
         case 'toggleCinematic': setCinematic(internal(env, 'dispatch'), !(m.cinematic && m.cinematic.enabled)); recalled = Boolean(m.cinematic && m.cinematic.enabled); message = recalled ? 'Cinematic mode is on.' : 'Cinematic mode is off.'; break;
         case 'glanceHold': case 'glanceNext': case 'glanceReturn': message = glance(action); recalled = Boolean(m.active.glance) || action === 'glanceReturn'; break;
         default: message = m.ownership.state === 'Active' ? 'Command sent - the camera moved briefly.' : 'Command sent. Take camera control to see it move.';
@@ -882,6 +1110,9 @@
         case 'NextCategory': return nextCategory(env);
         case 'ReturnToPilot': return activate(env, m.working.profile.defaultCameraId);
         case 'SetCinematic': return setCinematic(env, Boolean(payload.enabled));
+        case 'SpotTarget': return spotTarget(env, payload.objectId, payload.view);
+        case 'StopSpotting': endSpotting('Spotting was stopped.', true); return ack(env, 'Completed', null, { spotting: spottingState() });
+        case 'SetAutoSpot': return setAutoSpot(env, Boolean(payload.enabled));
         case 'StartWalkaround': event('WalkaroundChanged',Object.assign({running:true},payload)); return ack(env,'Accepted');
         case 'StopWalkaround': event('WalkaroundChanged',{running:false,categoryId:null,intervalSeconds:5,loop:true}); return ack(env,'Completed');
         case 'RecenterLook': m.look = NEUTRAL_LOOK(); event('TemporaryLookChanged', m.look); return ack(env, 'Completed');
@@ -1214,6 +1445,14 @@
         return airportsPayload();
       },
       binoculars(down) { setBinoculars(Boolean(down) && m.ownership.state === 'Active'); return Boolean(m.binoculars); },
+      // Spotting traffic: { enabled: false } empties the list; { time: seconds } freezes the paths, { time: null } resumes.
+      traffic(options) {
+        const o = options || {};
+        if (o.enabled !== undefined) m.trafficEnabled = Boolean(o.enabled);
+        if (o.time !== undefined) m.trafficTime = o.time === null ? null : Number(o.time);
+        trafficTick(true);
+        return clone(m.traffic);
+      },
       raiseFault(code, message) { clearMotion(); setOwnership('Faulted', code || 'adapterError'); event('FaultRaised', { code: code || 'adapterError', message: message || 'The simulator rejected a camera update.' }); },
       get state() { return clone({ session: m.session, ownership: m.ownership, active: m.active, selection: m.selection, draftRevision: m.working.draftRevision, dirty: dirty(), instances: Array.from(m.instances.keys()) }); },
     };

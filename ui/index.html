@@ -34,6 +34,7 @@
         <button type="button" role="tab" id="mc-nav-cameras" data-page="cameras" aria-selected="true" aria-controls="mc-page-cameras"><i data-icon="camera"></i>Cameras</button>
         <button type="button" role="tab" id="mc-nav-bindings" data-page="bindings" aria-selected="false" aria-controls="mc-page-bindings"><i data-icon="keyboard"></i>Bindings</button>
         <button type="button" role="tab" id="mc-nav-profiles" data-page="profiles" aria-selected="false" aria-controls="mc-page-profiles"><i data-icon="folder-open"></i>Profiles</button>
+        <button type="button" role="tab" id="mc-nav-traffic" data-page="traffic" aria-selected="false" aria-controls="mc-page-traffic"><i data-icon="radio"></i>Traffic</button>
         <button type="button" role="tab" id="mc-nav-settings" data-page="settings" aria-selected="false" aria-controls="mc-page-settings"><i data-icon="settings-2"></i>Settings</button>
         <span class="mc-status"><span class="mc-status-dot"></span><span id="mc-control-state" role="status">Starting Camera Studio...</span><button type="button" id="mc-fault-details" hidden>Details</button></span>
       </nav>
@@ -120,6 +121,14 @@
         <div class="mc-profile-actions"><button type="button" class="mc-secondary" id="mc-create-profile"><i data-icon="folder-plus"></i>New profile</button><button type="button" class="mc-secondary" id="mc-import-profile"><i data-icon="download"></i>Import profile</button><button type="button" class="mc-secondary" id="mc-export-profile"><i data-icon="upload"></i><span>Export current</span></button><button type="button" class="mc-secondary" id="mc-backups"><i data-icon="history"></i>Backups</button></div>
         <div id="mc-airports-summary" class="mc-airports-summary"></div>
         <p class="mc-note">Profiles are stored with Camera Studio in the simulator. Import, export and restore use in-panel dialogs.</p>
+      </section>
+      <section class="mc-page" id="mc-page-traffic" role="tabpanel" aria-labelledby="mc-nav-traffic" hidden>
+        <div class="mc-page-header"><div><div class="mc-eyebrow">SPOTTING</div><h3>Traffic</h3><p>Watch other aircraft from the tower, the runway, a chase or a fly-by camera.</p></div></div>
+        <div class="mc-spot-state" id="mc-spot-state" data-state="off"><i data-icon="radio"></i><span id="mc-spot-state-text" role="status">Not spotting</span><button type="button" id="mc-spot-auto" class="mc-secondary mc-airport-auto" aria-pressed="false"><i data-icon="auto-switch"></i><span>Auto-spot</span></button><button type="button" id="mc-spot-stop" class="mc-secondary" disabled><i data-icon="circle-stop"></i><span>Stop</span></button></div>
+        <div class="mc-binding-filters mc-traffic-filters"><div class="mc-setting-choices" id="mc-traffic-filter" role="group" aria-label="Show traffic"><button type="button" data-value="all" aria-pressed="true">All</button><button type="button" data-value="ground" aria-pressed="false">On ground</button><button type="button" data-value="arriving" aria-pressed="false">Arriving</button><button type="button" data-value="departing" aria-pressed="false">Departing</button></div><label class="mc-search"><i data-icon="search"></i><input type="search" id="mc-traffic-search" placeholder="Airline or callsign" aria-label="Filter by airline or callsign"></label><select id="mc-traffic-distance" aria-label="Maximum distance"><option value="0">Any distance</option><option value="2">Within 2 NM</option><option value="5">Within 5 NM</option><option value="10">Within 10 NM</option><option value="20">Within 20 NM</option><option value="50">Within 50 NM</option></select></div>
+        <div id="mc-traffic-count" class="mc-note" role="status"></div>
+        <div class="mc-traffic-empty" id="mc-traffic-empty" hidden><h4>No traffic nearby</h4><p id="mc-traffic-empty-text"></p></div>
+        <div id="mc-traffic-list" class="mc-traffic-list" aria-label="Nearby aircraft"></div>
       </section>
       <section class="mc-page" id="mc-page-settings" role="tabpanel" aria-labelledby="mc-nav-settings" hidden>
         <div class="mc-page-header"><div><div class="mc-eyebrow">MAKE THE PANEL YOURS</div><h3>Settings</h3><p>Preferences apply across your camera profiles.</p></div></div>
