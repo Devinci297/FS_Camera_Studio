@@ -25,3 +25,17 @@ Panic works with both panels closed (once a flight is loaded), while a panel tex
 * discards a camera recall queued behind an earlier release, so nothing re-activates. Use **Enable** or select a view to take control again.
 
 Release Camera already does all of this except two things: it leaves Auto switch on (paused until a camera is active again), and it keeps remembered looks so a retained look returns on the next recall. A panic while already released changes nothing and still succeeds. Each press sends a `PanicReleased` event (`state`, `reason`, `airportAutoStopped`). Both panels show "Camera released - simulator has control" for about 3 seconds after any release: the Release buttons, the Release or Panic binding, and automatic hand-backs (a change from Active, Paused by the simulator or Releasing to Observing). Coverage: `tests/test_coordinator.cpp`, `tests/test_module.cpp` and `ui/tests/panic-release.test.cjs`. Panic on a live simulator still needs verification.
+
+## Binoculars
+
+**Binoculars (hold)** (`binoculars`, under Manual look & move) zooms the active camera while its input is held and returns to the camera's own field of view when released. New installs get **Ctrl + Alt + Z**, following the Ctrl + Alt default convention; no other default uses Z. Saved bindings are not migrated, so an existing setup has no binoculars input until one is assigned on the Bindings page. It is hold-only; there is no toggle variant.
+
+* The zoom eases in and out over about 0.3 seconds, timed by the clock rather than by frame count. Releasing part-way through reverses from the current zoom.
+* The zoom level is **Settings → Movement → Binoculars zoom** (`host.binocularsFovDeg`, default 10°, 2–60°). It can go below the editor's 30° limit, because that limit is an editor choice and not a camera API limit (airport auto zoom already submits down to 2°). The binoculars never widen a view whose own field of view is already narrower.
+* While zoomed, right-drag mouse look, panel mouse look and keyboard or controller look slow down in proportion to the zoom (zoomed field of view divided by the camera's field of view), so aiming stays controllable.
+* It works with every camera type that can be activated. On airport cameras it overrides auto zoom while held. On release it eases back to whatever auto zoom is currently framing.
+* The zoom affects only what is shown. Saved poses, captures, **Save adjusted view** and the temporary look never include it. Release Camera, Panic, a camera handed back to the simulator, and a panel text field taking focus all cancel it immediately.
+* The mini panel shows a small "Binoculars 10°" badge while the zoom is held. The badge only displays state and never sends anything to the module.
+* The Bindings page **Test** button cannot hold an input, so it explains how to try the binding in the simulator instead.
+
+Coverage: `tests/test_coordinator.cpp`, `tests/test_profiles.cpp`, `tests/test_module.cpp` and `ui/tests/binoculars.test.cjs`. Very narrow FOVs, and how the zoom feels on a live simulator, still need verification.

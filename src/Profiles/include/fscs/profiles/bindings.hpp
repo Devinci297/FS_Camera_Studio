@@ -16,7 +16,8 @@ using json = nlohmann::json;
 enum class Action {
     SelectView, PeekView, NextCamera, PreviousCamera, NextCategory, ReturnToPilot, ReleaseCamera, RecenterLook,
     ToggleEditor, ToggleMini, ToggleMouseLook, LookLeft, LookRight, LookUp, LookDown, MoveForward, MoveBack, MoveLeft, MoveRight,
-    MoveUp, MoveDown, ZoomIn, ZoomOut, MoveFast, ToggleHeadTracking, ToggleAirportAuto, SaveViews, PanicRelease
+    MoveUp, MoveDown, ZoomIn, ZoomOut, MoveFast, ToggleHeadTracking, ToggleAirportAuto, SaveViews, PanicRelease,
+    Binoculars
 };
 const char* toString(Action a);
 std::optional<Action> parseAction(const std::string& s);
@@ -81,7 +82,11 @@ struct HostSettings {
     bool mouseInvertY = false;
     double moveSpeedMetersPerSec = 0.5;
     double movementPrecisionScale = 1.0;
+    // Hold-to-zoom FOV (presentation only, never saved into a pose). May go below the editor's 30-degree floor.
+    double binocularsFovDeg = 10;
 };
+constexpr double kBinocularsMinFovDeg = 2;
+constexpr double kBinocularsMaxFovDeg = 60;
 
 constexpr int kSettingsSchemaVersion = 2;
 HostSettings parseHostSettings(const json& settingsDoc);

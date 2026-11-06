@@ -14,6 +14,7 @@
 
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace fscs::host {
@@ -93,6 +94,12 @@ public:
     const core::CameraEffects& effects() const { return effects_; }
     const Aircraft& aircraft() const { return aircraft_; }
     std::uint64_t submissions() const { return submissions_; }
+    // Binoculars (hold-to-zoom): held while any binding hold is down; progress 0 = camera FOV, 1 = fully zoomed.
+    bool binocularsHeld() const { return !binocularsHolds_.empty(); }
+    double binocularsProgress() const { return binocularsProgress_; }
+    double binocularsLookScale() const { return binocularsLookScale_; }
+    // Time to ease fully in or out; reversing mid-way continues from the current zoom.
+    static constexpr double kBinocularsEaseSeconds = 0.3;
 
 private:
     enum class ReadPurpose { None, PreAcquire, Capture, Resume, Seed };
@@ -116,6 +123,11 @@ private:
     void updateAirportAutoZoom(double dt);
     void updateAirportTrackingPosition();
     void updateHorizon(double dt, double now);
+    std::string setBinoculars(bool pressed, std::uint64_t holdId);
+    void cancelBinoculars();
+    void updateBinoculars(double dt);
+    double binocularsFov(double shownFov, double cameraFov);
+    void emitBinoculars();
     core::CameraPose effectiveAirportPose(const profiles::CameraEntry& cam) const;
     void emitCapabilities(bool force = false);
     void emitActiveCamera();
@@ -191,6 +203,11 @@ private:
     // Submission-only zoom: never changes the saved pose or the user's manual FOV.
     std::optional<double> airportAutoZoomFov_;
     std::optional<core::Vec3> airportTrackingPosition_; // lat, lon, actual MSL meters; never saved
+    // Binoculars: submission-only FOV override, like airport auto zoom. Never written into the engine or a pose.
+    std::set<std::uint64_t> binocularsHolds_;
+    double binocularsProgress_ = 0;
+    double binocularsLookScale_ = 1;         // shown FOV / camera FOV (at most 1), from the last submission
+    double binocularsAppliedLookScale_ = 1;  // scale already applied to the keyboard look speed
     std::uint64_t submissions_ = 0;
     bool lastTransitioning_ = false;
     double lastLookEmit_ = 0;

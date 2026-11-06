@@ -138,6 +138,7 @@ void Coordinator::setState(Ownership s, const std::string& reason) {
     state_ = s;
     if (s != Ownership::Active && s != Ownership::Acquiring && s != Ownership::SimulatorSuspended) stopWalkaround();
     if (s != Ownership::Active) cancelMouseDrag();
+    if (s != Ownership::Active) cancelBinoculars();
     stateReason_ = reason;
     emit_("OwnershipChanged", {{"state", toString(s)}, {"gameControlled", gameControlled_}, {"reason", reason}});
     emitCapabilities();
@@ -249,6 +250,7 @@ void Coordinator::emitFullState() {
     emitCapabilities(true);
     emitActiveCamera();
     emitLook(0, true);
+    emitBinoculars();
 }
 
 void Coordinator::setProfile(std::optional<profiles::ProfileSnapshot> snapshot, double now) {
@@ -368,7 +370,7 @@ json Coordinator::handle(const protocol::Command& c, double now) {
         const double right = js::num(p, "rightMeters", 0), up = js::num(p, "upMeters", 0), forward = js::num(p, "forwardMeters", 0);
         if (!std::isfinite(right) || !std::isfinite(up) || !std::isfinite(forward) || std::abs(right) > .5 || std::abs(up) > .5 || std::abs(forward) > .5)
             return ack(c, AckStatus::Rejected, "Invalid mouse translation.");
-        engine_.offsetLook(heading, pitch);
+        engine_.offsetLook(heading * binocularsLookScale_, pitch * binocularsLookScale_);
         engine_.offsetPosition({forward, right, -up});
         emitLook(now);
         return ack(c, AckStatus::Completed);
@@ -674,6 +676,7 @@ std::string Coordinator::nextCategory(double now) {
 }
 
 void Coordinator::release(const std::string& reason, double now) {
+    cancelBinoculars();
     stopWalkaround();
     headTracking_.restore();
     if (!lookOwner_.empty()) rememberedLooks_[lookOwner_] = engine_.look();
@@ -821,7 +824,7 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                 // Live drags reached 126574; rejecting those samples caused movement gaps.
                 // Keep the measured small-step scale (642 counts ~= 0.118 degrees),
                 // with the existing bounded pending angle protecting against extreme input.
-                const double degrees = e.delta / 32768.0 * 6.0 * settings_.mouseSensitivity;
+                const double degrees = e.delta / 32768.0 * 6.0 * settings_.mouseSensitivity * binocularsLookScale_;
                 double& pending = e.horizontal ? mouseHeadingPending_ : mousePitchPending_;
                 pending = std::clamp(pending + (e.horizontal || settings_.mouseInvertY ? degrees : -degrees), -45.0, 45.0);
                 mouseMoved_ = true;
@@ -1127,6 +1130,64 @@ void Coordinator::updateHorizon(double dt, double now) {
     horizon_.tick(dt, fresh && relative ? core::horizonCounterRollDeg(aircraftBankDeg_, cam->followHorizon) : 0.0);
 }
 
+// Binoculars: while a hold is down the submitted FOV eases to the binoculars FOV, and back to the view's own FOV
+// (including airport auto zoom) on release. Presentation only: the engine, saved poses, captures and the temporary
+// look never see it. Releasing the camera, Panic and any loss of control cancel it immediately.
+std::string Coordinator::setBinoculars(bool pressed, std::uint64_t holdId) {
+    if (!pressed) {
+        if (binocularsHolds_.erase(holdId) && binocularsHolds_.empty()) emitBinoculars();
+        return {};
+    }
+    if (state_ != Ownership::Active || activeCameraId_.empty()) return "Select a camera before using binoculars.";
+    const bool wasHeld = !binocularsHolds_.empty();
+    binocularsHolds_.insert(holdId);
+    if (!wasHeld) emitBinoculars();
+    return {};
+}
+
+void Coordinator::cancelBinoculars() {
+    const bool wasHeld = !binocularsHolds_.empty();
+    binocularsHolds_.clear();
+    binocularsProgress_ = 0;
+    binocularsLookScale_ = 1;
+    updateBinoculars(0);  // restores the unscaled keyboard look speed
+    if (wasHeld) emitBinoculars();
+}
+
+void Coordinator::updateBinoculars(double dt) {
+    // Constant-rate progress shaped by smoothstep in binocularsFov(): time-based, frame-rate independent, and a
+    // release mid-way reverses from the current zoom without a jump.
+    const double target = binocularsHolds_.empty() ? 0.0 : 1.0;
+    if (dt > 0) {
+        const double step = dt / kBinocularsEaseSeconds;
+        binocularsProgress_ = target > binocularsProgress_ ? std::min(target, binocularsProgress_ + step)
+                                                           : std::max(target, binocularsProgress_ - step);
+    }
+    if (binocularsProgress_ <= 0) binocularsLookScale_ = 1;
+    // Keyboard/controller look slows with the zoom so aiming stays controllable.
+    if (binocularsProgress_ > 0 || binocularsAppliedLookScale_ != 1) {
+        engine_.setSpeeds({settings_.lookSpeedDegPerSec * binocularsLookScale_,
+                           settings_.moveSpeedMetersPerSec * settings_.movementPrecisionScale, 0.5, 6.0});
+        binocularsAppliedLookScale_ = binocularsLookScale_;
+    }
+}
+
+double Coordinator::binocularsFov(double shownFov, double cameraFov) {
+    if (binocularsProgress_ <= 0 || !(shownFov > 0) || !(cameraFov > 0)) {
+        binocularsLookScale_ = 1;
+        return shownFov;
+    }
+    // Never wider than the camera's own FOV. Airport auto zoom is overridden while held and resumes on release.
+    const double zoom = std::min(settings_.binocularsFovDeg * core::kDegToRad, cameraFov);
+    const double fov = shownFov + (zoom - shownFov) * core::ease(core::Easing::Smoothstep3, binocularsProgress_);
+    binocularsLookScale_ = core::clamp(fov / cameraFov, 0.01, 1.0);
+    return fov;
+}
+
+void Coordinator::emitBinoculars() {
+    emit_("BinocularsChanged", {{"active", !binocularsHolds_.empty()}, {"fovDeg", settings_.binocularsFovDeg}});
+}
+
 void Coordinator::submit(bool refreshTrackingPosition) {
     const CameraEntry* cam = activeEntry();
     if (!cam || !eligibleToSubmit()) return;
@@ -1191,6 +1252,7 @@ void Coordinator::submit(bool refreshTrackingPosition) {
         sdk.pitchDeg=-p.pitchDeg;sdk.bankDeg=p.bankDeg;sdk.headingDeg=p.headingDeg;
     }
     if (cam->mode==profiles::CameraMode::Airport && airportAutoZoomFov_) sdk.fovRad=*airportAutoZoomFov_;
+    sdk.fovRad = binocularsFov(sdk.fovRad, s.pose.fovRad);
     if (lastSubmitted_ && nearlyEqual(*lastSubmitted_, sdk)) return;
     if (backend_.submitPose(sdk)) {
         lastSubmitted_ = sdk;
@@ -1249,6 +1311,10 @@ void Coordinator::onAction(const ActionEvent& ev, double now) {
         case Action::PanicRelease:
             if (!ev.pressed) return;
             panicRelease(now);
+            break;
+        case Action::Binoculars:
+            if (!ev.pressed) { setBinoculars(false, ev.holdId); return; }
+            result = setBinoculars(true, ev.holdId);
             break;
         case Action::RecenterLook:
             if (!ev.pressed) return;
@@ -1390,6 +1456,7 @@ void Coordinator::tick(double now) {
         }
         updateAirportTrackingPosition();
         updateAirportAutoZoom(dt);
+        updateBinoculars(dt);
         updateHorizon(dt, now);
         submit(false);
         if (engine_.transitioning() != lastTransitioning_) emitActiveCamera();

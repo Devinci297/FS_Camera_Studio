@@ -24,7 +24,9 @@ There is no desktop application, tray app or external process.
 * **Authoring (screen) axes:** X = right, Y = up, Z = forward, meters. FRD = `[Z, X, −Y]` (design §4.2).
   The UI converts authoring ⇄ FRD; only the module converts FRD ⇄ SDK (two different conversions, two test sets).
 * **Projection:** stored as simulator FOV radians (`simulatorFovRadians`); the UI shows degrees 30–110
-  (presets 40/62/85), intersected with the qualified range from `CapabilitiesChanged`.
+  (presets 40/62/85), intersected with the qualified range from `CapabilitiesChanged`. The 30° floor is an editor
+  choice, not a camera API limit: validation allows 0.1–2.8 rad, and submission-only zooms (airport auto zoom down
+  to 2°, Binoculars 2–60°) go below it.
 * **IDs:** lower-case RFC 4122 UUID strings. `viewId` 1–2,147,483,647 is an optional recall slot (0 or null = none), unique per profile,
   not a camera-count limit.
 
@@ -108,9 +110,11 @@ There is no desktop application, tray app or external process.
 Actions: `selectView` (+`viewId`), `peekView` (+`viewId`), `nextCamera`, `previousCamera`, `nextCategory`,
 `returnToPilot`, `releaseCamera`, `recenterLook`, `toggleEditor`, `toggleMini`, `lookLeft`, `lookRight`, `lookUp`,
 `lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveFast`, `zoomIn`, `zoomOut`,
-`panicRelease`.
+`panicRelease`, `binoculars`.
 `panicRelease` ("Panic: release camera and restore simulator", default Ctrl + Alt + X) is a stronger `releaseCamera`;
 see [Panic release](dual-bindings.md#panic-release).
+`binoculars` ("Binoculars (hold)", default Ctrl + Alt + Z) zooms the active camera to `host.binocularsFovDeg` while held;
+see [Binoculars](dual-bindings.md#binoculars).
 An input definition and, for POVs, direction maps to at most one action. Bindings can carry
 `slot: "primary" | "secondary"`; each action has two independent UI slots. Legacy extra bindings are retained.
 Joystick `pov` is `up`, `right`, `down` or `left`; definitions use zero-based button and POV indices.
@@ -144,6 +148,7 @@ camera takeover suppress these pulses.
 `remember` keeps the last selected view per profile as navigation metadata (never dirties camera content).
 `ui.precision` also scales held-key translation: Fine 0.1x, Normal 1x, Coarse 10x of
 `host.moveSpeedMetersPerSec`; `moveFast` multiplies that by four while held. Mouse-look sensitivity is independent.
+`host.binocularsFovDeg` (default 10, clamped 2–60; missing in older files = 10) is the Binoculars field of view.
 `ui.miniPinned` is a global preference: changing it through `UpdateDraft` saves it immediately on its own and never
 marks settings as unsaved.
 
@@ -278,6 +283,7 @@ being edited.
 | `ControllerInputCaptured` | `input`, `captureId`; directed to requester, followed by stopped status |
 | `InputTest` | `definition`, `phase` (`down`\|`up`) |
 | `BindingTriggered` | `action`, `viewId`, `result` |
+| `BinocularsChanged` | `active` (a Binoculars hold is down on an active camera), `fovDeg` (the setting). Sent on press, release and cancellation; display only |
 | `PanicReleased` | `state` (ownership after the panic), `reason`, `airportAutoStopped` (bool). Sent for every panic press, including a no-op while Observing |
 | `SurfaceRequest` | `target`, `op` |
 | `FaultRaised` | `code`, `message` |

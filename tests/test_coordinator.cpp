@@ -1447,3 +1447,197 @@ TEST_CASE("effects: cockpit full strength, exterior and orbit reduced, world-fix
         CHECK_NEAR(fixed.offset.length(),0,1e-12);
     }
 }
+
+namespace {
+double submittedFov(const Rig& r) { return r.backend.submitted.back().fovRad; }
+void binoculars(Rig& r, bool down, std::uint64_t hold = 7) { r.c.onAction({Action::Binoculars, 0, down, hold}, r.t); }
+bool lastBinocularsActive(const Rig& r) {
+    bool active = false;
+    for (const auto& [name, payload] : r.events) if (name == "BinocularsChanged") active = payload["active"].get<bool>();
+    return active;
+}
+constexpr double kBinocularsFov = 10 * fscs::core::kDegToRad;  // default host setting
+}  // namespace
+
+TEST_CASE("binoculars: default binding is a hold with paired edges and is suppressed while typing") {
+    auto r = routerWithDefaults();
+    const auto i = indexOf(r, "VK_LCONTROL+VK_LMENU+Z");
+    CHECK(i < r.definitions().size());
+    auto down = r.onInput(i, true, 0);
+    CHECK_EQ(down.size(), std::size_t{1});
+    CHECK(down[0].action == Action::Binoculars && down[0].pressed);
+    auto up = r.onInput(i, false, 0);
+    CHECK_EQ(up.size(), std::size_t{1});
+    CHECK(!up[0].pressed && up[0].holdId == down[0].holdId);
+    r.onInput(i, true, 0);
+    const auto released = r.setTextFocus(true);  // a text field took focus mid-hold
+    CHECK_EQ(released.size(), std::size_t{1});
+    CHECK(released[0].action == Action::Binoculars && !released[0].pressed);
+    r.onInput(i, false, 0);
+    CHECK(r.onInput(i, true, 0).empty());
+    CHECK_EQ(std::string(fscs::profiles::toString(Action::Binoculars)), std::string("binoculars"));
+    CHECK(fscs::profiles::parseAction("binoculars") == Action::Binoculars);
+}
+
+TEST_CASE("binoculars: hold eases to the zoom FOV with time-based easing and back to the saved FOV") {
+    auto run = [](double dt, int steps) {
+        Rig r; r.connect(); r.activate(r.pilot); r.grant(); r.advance(.02);
+        binoculars(r, true); r.advance(dt, steps);
+        return std::pair{submittedFov(r), r.c.engine().sample().pose.fovRad};
+    };
+    // Half-way after 0.15 s at any frame rate; smoothstep(0.5) = 0.5.
+    const auto [fast, saved] = run(.01, 15);
+    const auto [slow, saved2] = run(.05, 3);
+    CHECK_NEAR(fast, saved + (kBinocularsFov - saved) * .5, 1e-9);
+    CHECK_NEAR(slow, fast, 1e-9);
+    CHECK_NEAR(saved, saved2, 1e-12);
+    CHECK(saved > 30 * fscs::core::kDegToRad);
+
+    Rig r; r.connect(); r.activate(r.pilot); r.grant(); r.advance(.02);
+    const double cameraFov = r.c.engine().sample().pose.fovRad;
+    r.events.clear();
+    binoculars(r, true);
+    CHECK(r.c.binocularsHeld());
+    CHECK(lastBinocularsActive(r));
+    for (const auto& [name, payload] : r.events) if (name == "BindingTriggered") CHECK(payload["result"].is_null());
+    r.advance(.02);
+    CHECK(submittedFov(r) < cameraFov);
+    CHECK(submittedFov(r) > kBinocularsFov);
+    r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);  // below the editor's 30-degree floor
+    // Presentation only: the engine, the saved camera and a capture keep the camera's FOV.
+    CHECK_NEAR(r.c.engine().sample().pose.fovRad, cameraFov, 1e-12);
+    CHECK_NEAR(r.c.profile()->camera(r.pilot)->pose.fovRad, cameraFov, 1e-12);
+    r.events.clear(); r.send("CaptureView");
+    CHECK(r.emitted("ViewCaptured"));
+    for (const auto& [name, payload] : r.events) if (name == "ViewCaptured") CHECK_NEAR(payload["fovRad"].get<double>(), cameraFov, 1e-12);
+    // Releasing mid-way reverses from the current zoom without a jump.
+    r.events.clear();
+    binoculars(r, false);
+    CHECK(!lastBinocularsActive(r));
+    CHECK(!r.emitted("BindingTriggered"));
+    r.advance(.03);
+    const double partway = submittedFov(r);
+    CHECK(partway > kBinocularsFov);
+    CHECK(partway < cameraFov);
+    binoculars(r, true, 8); r.advance(.01);
+    CHECK(submittedFov(r) < partway);
+    CHECK(submittedFov(r) > kBinocularsFov);
+    binoculars(r, false, 8); r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), cameraFov, 1e-12);
+    CHECK_NEAR(r.c.binocularsProgress(), 0, 1e-12);
+}
+
+TEST_CASE("binoculars: alternate inputs share one hold and the zoom never widens a narrower view") {
+    Rig r; r.connect(); r.activate(r.pilot); r.grant(); r.advance(.02);
+    binoculars(r, true, 1); binoculars(r, true, 2); r.advance(.02, 20);
+    binoculars(r, false, 1); r.advance(.02, 20);
+    CHECK(r.c.binocularsHeld());
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);
+    binoculars(r, false, 2); r.advance(.02, 20);
+    CHECK(!r.c.binocularsHeld());
+    auto settings = fscs::profiles::parseHostSettings(fscs::profiles::defaultSettingsDocument());
+    settings.binocularsFovDeg = 60; r.c.setSettings(settings, r.t);
+    for (int i = 0; i < 20; ++i) r.c.onAction({Action::ZoomIn, 0, true, 0, true}, r.t);  // 40 degrees narrower
+    r.advance(.02);
+    const double narrow = r.c.engine().sample().pose.fovRad;
+    CHECK(narrow < 60 * fscs::core::kDegToRad);
+    binoculars(r, true); r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), narrow, 1e-12);
+    CHECK_NEAR(r.c.binocularsLookScale(), 1, 1e-12);
+}
+
+TEST_CASE("binoculars: release, panic and loss of control cancel immediately; no zoom without a camera") {
+    Rig r; r.connect(); r.advance(.02);
+    r.events.clear();
+    binoculars(r, true);  // Observing: nothing to zoom
+    CHECK(!r.c.binocularsHeld());
+    CHECK(r.emitted("BindingTriggered"));
+    for (const auto& [name, payload] : r.events) if (name == "BindingTriggered") CHECK(payload["result"].is_string());
+    binoculars(r, false);
+    r.activate(r.pilot); r.grant(); r.advance(.02);
+    const double cameraFov = r.c.engine().sample().pose.fovRad;
+    binoculars(r, true); r.advance(.02, 20);
+    r.events.clear();
+    r.send("ReleaseCamera");
+    CHECK(!r.c.binocularsHeld());
+    CHECK_NEAR(r.c.binocularsProgress(), 0, 1e-12);
+    CHECK(r.emitted("BinocularsChanged"));
+    CHECK(!lastBinocularsActive(r));
+    r.deliver(be::CameraStatus{SdkAvailability::NotAcquired, false}); r.advance(.02);
+    binoculars(r, false);  // the physical release arriving later changes nothing
+    r.activate(r.pilot); r.grant(); r.advance(.02);
+    CHECK_NEAR(submittedFov(r), cameraFov, 1e-12);  // no ease-out from a cancelled zoom
+
+    binoculars(r, true); r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);
+    r.events.clear();
+    r.c.onAction({Action::PanicRelease, 0, true, 9}, r.t);
+    CHECK(!r.c.binocularsHeld());
+    CHECK_NEAR(r.c.binocularsProgress(), 0, 1e-12);
+    CHECK(!lastBinocularsActive(r));
+    CHECK(r.emitted("PanicReleased"));
+    r.deliver(be::CameraStatus{SdkAvailability::NotAcquired, false}); r.advance(.02);
+
+    r.activate(r.pilot); r.grant(); r.advance(.02);
+    binoculars(r, true, 10); r.advance(.02, 20);
+    r.deliver(be::CameraStatus{SdkAvailability::Acquired, true});  // the simulator takes over the view
+    CHECK(r.c.ownership() == Ownership::SimulatorSuspended);
+    CHECK(!r.c.binocularsHeld());
+    CHECK_NEAR(r.c.binocularsProgress(), 0, 1e-12);
+}
+
+TEST_CASE("binoculars: mouse and keyboard look scale by zoomed FOV over camera FOV") {
+    struct Result { double mouse, panel, keys, keysAfter, cameraFov; };
+    auto keys = [](Rig& r) {
+        const double before = r.c.engine().look().pitchDeg;
+        fscs::core::ManualInput in; in.lookUp = 1; r.c.setManualInput(in); r.advance(1.0 / 60, 30);
+        r.c.setManualInput({}); r.advance(1.0 / 60, 60);
+        return r.c.engine().look().pitchDeg - before;
+    };
+    auto run = [&](bool zoomed) {
+        Rig r; r.connect(); r.activate(r.pilot); r.grant(); r.advance(.02);
+        Result out{};
+        out.cameraFov = r.c.engine().sample().pose.fovRad;
+        if (zoomed) { binoculars(r, true); r.advance(.02, 20); CHECK_NEAR(r.c.binocularsLookScale(), kBinocularsFov / out.cameraFov, 1e-12); }
+        r.deliver(be::NativeMouseMapping{true}); r.deliver(be::NativeMouseButton{true});
+        r.deliver(be::NativeMouseAxis{true, 8192}); r.advance(.01, 150);
+        r.deliver(be::NativeMouseButton{false}); r.advance(.01);
+        out.mouse = r.c.engine().look().headingDeg;
+        const double heading = out.mouse;
+        CHECK_EQ(r.send("MouseLookDelta", {{"headingDeg", 2.0}, {"pitchDeg", 0.0}})["status"].get<std::string>(), std::string("Completed"));
+        out.panel = r.c.engine().look().headingDeg - heading;
+        out.keys = keys(r);
+        binoculars(r, false); r.advance(.02, 20);
+        CHECK_NEAR(r.c.binocularsLookScale(), 1, 1e-12);
+        out.keysAfter = keys(r);
+        return out;
+    };
+    const auto normal = run(false), zoomed = run(true);
+    const double scale = kBinocularsFov / normal.cameraFov;
+    CHECK_NEAR(normal.mouse, 1.5, 1e-6);
+    CHECK_NEAR(zoomed.mouse, 1.5 * scale, 1e-6);
+    CHECK_NEAR(normal.panel, 2.0, 1e-9);
+    CHECK_NEAR(zoomed.panel, 2.0 * scale, 1e-9);
+    CHECK(normal.keys > 5);
+    CHECK_NEAR(zoomed.keys, normal.keys * scale, 1e-9);
+    CHECK_NEAR(zoomed.keysAfter, normal.keysAfter, 1e-9);  // full speed again once the zoom has eased out
+}
+
+TEST_CASE("binoculars: override airport auto zoom while held and hand back to it on release") {
+    Rig r; const auto id = addAutoZoomAirport(r); r.connect();
+    fscs::profiles::HostSettings settings; settings.airportAutoZoomEnabled = true; settings.airportAutoZoomResponseSeconds = .1;
+    r.c.setSettings(settings, r.t); autoZoomTarget(r, 100); r.activate(id); r.grant(); r.advance(.02, 100);
+    const double framed = 2 * std::atan2(40., 200.);
+    CHECK_NEAR(submittedFov(r), framed, 1e-5);
+    CHECK(framed > kBinocularsFov);
+    binoculars(r, true); r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);
+    autoZoomTarget(r, 1); r.advance(.02, 100);  // auto zoom keeps following underneath
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);
+    binoculars(r, false); r.advance(.02);
+    CHECK(submittedFov(r) > kBinocularsFov);
+    r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), 90 * fscs::core::kDegToRad, 1e-6);  // the current auto-zoom value, not the old one
+    CHECK_NEAR(r.c.engine().sample().pose.fovRad, r.c.profile()->camera(id)->pose.fovRad, 1e-12);
+}
