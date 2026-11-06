@@ -6,6 +6,7 @@
 #include "backend.hpp"
 #include "head_tracking.hpp"
 #include "input_router.hpp"
+#include "traffic.hpp"
 #include "fscs/core/drift.hpp"
 #include "fscs/core/engine.hpp"
 #include "fscs/core/horizon.hpp"
@@ -146,6 +147,39 @@ public:
     const core::Vec3& freeOffset() const { return freeOffset_; }
     // Terrain height used for the active free camera at `drone` (meters MSL); NAN when none is available.
     double freeTerrainAltitude(const profiles::airport::Geo& drone, double now) const;
+
+    // Spotting (traffic cameras). The traffic picture comes from SimConnect polls (Traffic events). spotTarget() shows
+    // one aircraft in a tower, runway, chase, fly-by or track view, presented every frame from its predicted pose, and
+    // takes control if needed; it returns why it cannot ("" when shown, or shown once the simulator hands over).
+    // Tower and runway views recall the loaded airport's own views and aim them at the target; track aims the world
+    // view on screen; chase and fly-by are computed world poses over the view that was on screen. Any other recall,
+    // Release, Panic and a loss of control end spotting.
+    static constexpr double kSpotLostHoldSeconds = 5;      // a lost target holds the last view this long
+    static constexpr double kSpotRunwayRecheckSeconds = 1;  // runway view: the nearest runway view is re-checked
+    static constexpr double kSpotRunwayDwellSeconds = 6;    // ... no more often than this, with a 15 % margin
+    std::string spotTarget(std::uint32_t objectId, traffic::SpotView view, double now);
+    // StopSpotting: back to the view shown before spotting began, or release when there was none.
+    void stopSpotting(const std::string& reason, double now);
+    // Ends spotting and keeps whatever world or aircraft view is underneath (another automatic mode takes over).
+    void endSpotting(const std::string& reason) { endSpot(reason, false, false); }
+    bool spotting() const { return spot_.has_value(); }
+    // Chase and fly-by show no profile camera: ActiveCameraChanged / Snapshot report cameraId null meanwhile.
+    bool spotOverlay() const { return spot_ && spot_->overlay; }
+    std::uint32_t spotTargetId() const { return spot_ ? spot_->targetId : 0; }
+    std::optional<traffic::SpotView> spotView() const { return spot_ ? std::optional<traffic::SpotView>(spot_->view) : std::nullopt; }
+    bool spotLost() const { return spot_ && spot_->lost; }
+    double spotLostSeconds(double now) const { return spot_ && spot_->lost ? now - spot_->lostAt : 0.0; }
+    const std::string& spotLabel() const { static const std::string none; return spot_ ? spot_->label : none; }
+    const std::string& spotReason() const { return spotReason_; }
+    // The target pose the view aims at (held while lost) and, for chase / fly-by / held track, the camera position.
+    traffic::Pose spotPose() const { return spot_ ? spot_->target : traffic::Pose{}; }
+    std::optional<profiles::airport::Geo> spotCameraPosition() const;
+    // Whether a view type can be shown for `objectId` now (tower and runway need the loaded airport's views).
+    bool spotViewAvailable(traffic::SpotView view, std::uint32_t objectId, double now) const;
+    // Auto-spot (driven by the host): a lost target then waits for the host to pick the next one.
+    void setAutoSpot(bool on) { autoSpot_ = on; }
+    void setTrafficAirport(const profiles::airport::Geo& airport) { traffic_.setAirport(airport); }
+    const traffic::Model& traffic() const { return traffic_; }
 
 private:
     enum class ReadPurpose { None, PreAcquire, Capture, Resume, Seed };
@@ -333,6 +367,36 @@ private:
     json dronePlacement(const profiles::airport::Geo& drone, const core::Quat& orientation, double fovRad) const;
     json droneHere(double now, std::string& error) const;
     json bakeFreeCamera(const protocol::Command& c, const profiles::CameraEntry& cam, const core::CameraPose& shown, double now);
+
+    // Spotting. Overlay views (chase, fly-by, a track held where an overlay was) submit a computed world pose instead of
+    // the active camera, which stays underneath as the base; tower, runway and track aim a world camera at the target.
+    struct Spot {
+        std::uint32_t targetId = 0;
+        traffic::SpotView view = traffic::SpotView::Chase;
+        std::string label;
+        traffic::Pose target;          // predicted pose, held while lost
+        bool lost = false;
+        double lostAt = 0;
+        std::string returnCameraId;    // shown before spotting began; empty: release on stop
+        std::string cameraId;          // tower / runway / track: the world camera aimed at the target
+        bool overlay = false, fixed = false, aboveGround = false;
+        profiles::airport::Geo position{NAN, NAN, NAN};  // overlay camera
+        core::Vec3 chaseOffset{NAN, NAN, NAN};
+        double fovRad = NAN;
+        double runwayCheckAt = 0, cameraSince = 0;
+    };
+    std::optional<Spot> spot_;
+    bool spotActivating_ = false, autoSpot_ = false;
+    std::string spotReason_;
+    traffic::Model traffic_;
+    bool spotAims(const profiles::CameraEntry& cam) const;
+    const profiles::CameraEntry* spotCamera(traffic::SpotView view, const traffic::Pose& target) const;
+    std::string spotActivate(const std::string& cameraId, double now);
+    void updateSpot(double dt, double now);
+    void placeSpotOverlay(double dt, double now);
+    void submitSpotOverlay();
+    // Drops spotting and tells the host (SpotStopped): `manual` for another recall, `released` for a loss of control.
+    void endSpot(const std::string& reason, bool manual, bool released);
 };
 
 }  // namespace fscs::host

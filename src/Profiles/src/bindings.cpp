@@ -12,7 +12,7 @@ namespace fscs::profiles {
 
 namespace {
 
-constexpr std::array<std::pair<Action, const char*>, 33> kActions{{
+constexpr std::array<std::pair<Action, const char*>, 37> kActions{{
     {Action::SaveViews, "saveViews"},
     {Action::ToggleHeadTracking, "toggleHeadTracking"}, {Action::ToggleAirportAuto, "toggleAirportAuto"},
     {Action::SelectView, "selectView"},       {Action::PeekView, "peekView"},
@@ -30,6 +30,8 @@ constexpr std::array<std::pair<Action, const char*>, 33> kActions{{
     {Action::Binoculars, "binoculars"},
     {Action::GlanceHold, "glanceHold"}, {Action::GlanceNext, "glanceNext"}, {Action::GlanceReturn, "glanceReturn"},
     {Action::ToggleCinematic, "toggleCinematic"},
+    {Action::SpotNext, "spotNext"}, {Action::SpotPrevious, "spotPrevious"}, {Action::SpotReturn, "spotReturn"},
+    {Action::ToggleAutoSpot, "toggleAutoSpot"},
 }};
 
 const char* povName(PovDirection d) {
@@ -264,7 +266,8 @@ json defaultBindingsDocument() {
         {"panicRelease", {"X", "X"}},
         {"binoculars", {"Z", "Z"}},
         {"glanceHold", {"G", "G"}}, {"glanceNext", {"I", "I"}}, {"glanceReturn", {"U", "U"}},
-        {"toggleCinematic", {"K", "K"}}};
+        {"toggleCinematic", {"K", "K"}},
+        {"spotNext", {"T", "T"}}, {"spotPrevious", {"Y", "Y"}}, {"spotReturn", {"O", "O"}}, {"toggleAutoSpot", {"J", "J"}}};
     for (const auto& [action, k] : rest) list.push_back({{"action", action}, {"input", key(k.first, k.second)}});
     return upgradeMovementBindings({{"schemaVersion", kBindingsSchemaVersion}, {"bindings", list}});
 }
@@ -278,6 +281,7 @@ json defaultSettingsDocument() {
     doc["host"].update({{"cinematicMinSeconds", cinematic.cinematicMinSeconds}, {"cinematicMaxSeconds", cinematic.cinematicMaxSeconds},
                         {"cinematicCockpitWeight", cinematic.cinematicCockpitWeight}, {"cinematicCuts", cinematic.cinematicCuts},
                         {"cinematicDrift", cinematic.cinematicDrift}});
+    doc["host"].update({{"spottingRadiusNm", cinematic.spottingRadiusNm}, {"autoSpotHoldSeconds", cinematic.autoSpotHoldSeconds}});
     return doc;
 }
 
@@ -308,6 +312,7 @@ json normalizeSettings(const json& doc) {
                         {"cinematicCockpitWeight", h.cinematicCockpitWeight}, {"cinematicCuts", h.cinematicCuts},
                         {"cinematicDrift", h.cinematicDrift}});
     out["host"]["airportAutoGenerate"] = h.airportAutoGenerate;
+    out["host"].update({{"spottingRadiusNm", h.spottingRadiusNm}, {"autoSpotHoldSeconds", h.autoSpotHoldSeconds}});
     return out;
 }
 
@@ -342,6 +347,8 @@ HostSettings parseHostSettings(const json& doc) {
     s.cinematicCockpitWeight = std::clamp(js::num(host, "cinematicCockpitWeight", .15), 0.0, 1.0);
     s.cinematicCuts = js::boolean(host, "cinematicCuts", true);
     s.cinematicDrift = js::boolean(host, "cinematicDrift", true);
+    s.spottingRadiusNm = std::clamp(js::num(host, "spottingRadiusNm", 20.0), kSpottingMinRadiusNm, kSpottingMaxRadiusNm);
+    s.autoSpotHoldSeconds = std::clamp(js::num(host, "autoSpotHoldSeconds", 30.0), kAutoSpotMinHoldSeconds, kAutoSpotMaxHoldSeconds);
     return s;
 }
 

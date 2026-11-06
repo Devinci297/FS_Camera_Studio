@@ -81,6 +81,8 @@ public:
     std::vector<std::pair<std::string,std::uint32_t>> airportRequests;
     bool requestNearbyAirports() override { ++nearbyRequests; return true; }
     bool requestAirport(const std::string& code,std::uint32_t id) override {airportRequests.emplace_back(code,id);return true;}
+    std::vector<double> trafficRequests;  // radius (meters) of each spotting traffic poll
+    bool requestTraffic(double radiusMeters) override { trafficRequests.push_back(radiusMeters); return true; }
     bool nativeMouseEnabled = false;
     std::vector<bool> mouseEnableChanges;
     void setNativeMouseEnabled(bool enabled) override {

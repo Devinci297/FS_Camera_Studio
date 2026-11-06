@@ -159,7 +159,8 @@ There is no desktop application, tray app or external process.
 Actions: `selectView` (+`viewId`), `peekView` (+`viewId`), `nextCamera`, `previousCamera`, `nextCategory`,
 `returnToPilot`, `releaseCamera`, `recenterLook`, `toggleEditor`, `toggleMini`, `lookLeft`, `lookRight`, `lookUp`,
 `lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveFast`, `zoomIn`, `zoomOut`,
-`panicRelease`, `binoculars`, `glanceHold`, `glanceNext`, `glanceReturn`, `toggleCinematic`.
+`panicRelease`, `binoculars`, `glanceHold`, `glanceNext`, `glanceReturn`, `toggleCinematic`, `spotNext`,
+`spotPrevious`, `spotReturn`, `toggleAutoSpot`.
 `panicRelease` ("Panic: release camera and restore simulator", default Ctrl + Alt + X) is a stronger `releaseCamera`;
 see [Panic release](dual-bindings.md#panic-release).
 `binoculars` ("Binoculars (hold)", default Ctrl + Alt + Z) zooms the active camera to `host.binocularsFovDeg` while held;
@@ -169,6 +170,10 @@ smart-view bindings; see [smart views](dual-bindings.md#smart-views-glance). `Te
 without a release, so the glance stays until `glanceReturn`.
 `toggleCinematic` ("Toggle Cinematic mode", default Ctrl + Alt + K) turns the session-wide Cinematic mode on or off,
 like `SetCinematic`; see [Cinematic mode](dual-bindings.md#cinematic-mode).
+`spotNext` / `spotPrevious` (defaults Ctrl + Alt + T / Y) spot the next / previous aircraft by distance, keeping the
+current spotting view (chase when not spotting, or when that view is not available for the new target);
+`spotReturn` (Ctrl + Alt + O) acts as `StopSpotting`; `toggleAutoSpot` (Ctrl + Alt + J) acts as `SetAutoSpot`. See
+[Spotting](dual-bindings.md#spotting).
 An input definition and, for POVs, direction maps to at most one action. Bindings can carry
 `slot: "primary" | "secondary"`; each action has two independent UI slots. Legacy extra bindings are retained.
 Joystick `pov` is `up`, `right`, `down` or `left`; definitions use zero-based button and POV indices.
@@ -207,6 +212,8 @@ Cinematic mode: `host.cinematicMinSeconds` and `host.cinematicMaxSeconds` (defau
 least min) bound each view's random dwell; `host.cinematicCockpitWeight` (default 0.15, 0–1) is the share of picks
 that are cockpit views; `host.cinematicCuts` (default true) cuts to world-referential (airport, fly-by) views and moves
 smoothly otherwise; `host.cinematicDrift` (default true) turns the Commercial drift on. Missing in older files = defaults.
+Spotting: `host.spottingRadiusNm` (default 20, clamped 1–100; polled within at most 200 km) is the traffic radius;
+`host.autoSpotHoldSeconds` (default 30, clamped 10–300) is how long auto-spot stays on one target. Missing = defaults.
 `ui.miniPinned` is a global preference: changing it through `UpdateDraft` saves it immediately on its own and never
 marks settings as unsaved.
 
@@ -311,6 +318,9 @@ Rules:
 | `RelaySurface` | `target` (`main`\|`mini`), `op` (`expand`\|`compact`\|`show`) | Broadcast `SurfaceRequest`; e.g. mini "Edit" → main expands on Cameras |
 | `GetDiagnostics` | — | `result.text` preview for in-panel export |
 | `SetCinematic` | `enabled` (bool) | Turns the session-wide Cinematic mode on or off (not saved). On: takes control if needed and shows the first view; Completed, or Rejected with a plain reason. `result.cinematic` is the new state (as `CinematicChanged`) |
+| `SpotTarget` | `objectId` (from `TrafficChanged`), `view` (`tower`, `runway`, `chase`, `flyby`, `track`) | Spots that aircraft with that view (not saved): takes control if needed. Completed, or Rejected with a plain reason (target out of range, `tower`/`runway` without a loaded airport set that has such views, `track` without an airport or free camera on screen). Turns auto-spot off. `result.spotting` is the new state (as `SpottingChanged`) |
+| `StopSpotting` | — | Ends spotting and auto-spot and returns to the view shown before spotting began (or gives the camera back to the simulator when there was none). Completed; `result.spotting` |
+| `SetAutoSpot` | `enabled` (bool) | Session-wide auto-spot (not saved): picks landing, then departing / arriving traffic near the airport, holds each target `host.autoSpotHoldSeconds`, waits when there is none. Stops Cinematic mode and Airport Auto switch. Completed or Rejected; `result.spotting` |
 | `TextFocus` | `focused` (bool) | A panel text field has focus: bindings other than Release Camera and Panic release are suppressed |
 | `QualificationStart` | — | Begins the in-panel axis check; live control is allowed on an unqualified build while it runs. `result`: `simVersion`, `contract`, `axes` |
 | `QualificationProbe` | `axis` (`forward\|right\|up\|pitch\|heading\|bank`) | Offsets the active view by 30 cm / 15°; `result.expect` describes what should be seen |
@@ -340,12 +350,12 @@ being edited.
 
 | Name | Payload |
 | --- | --- |
-| `Snapshot` | everything below in one object: `moduleBootId`, `sessionEpoch`, `session`, `aircraft`, `ownership`, `capabilities`, `activeCamera`, `selection`, `profiles`, `working` {`profile`, `settings`, `bindings`, `draftRevision`, `dirty` {`profile`,`settings`,`bindings`}, `committedRevision`, `hasCommittedVersion` {cameraId: bool}}, `pendingCommit`, `look` |
+| `Snapshot` | everything below in one object: `moduleBootId`, `sessionEpoch`, `session`, `aircraft`, `ownership`, `capabilities`, `activeCamera`, `selection`, `profiles`, `working` {`profile`, `settings`, `bindings`, `draftRevision`, `dirty` {`profile`,`settings`,`bindings`}, `committedRevision`, `hasCommittedVersion` {cameraId: bool}}, `pendingCommit`, `look`, `traffic` (as `TrafficChanged`), `spotting` (as `SpottingChanged`) |
 | `SessionChanged` | `moduleBootId`, `sessionEpoch`, `session` (`Initializing\|Discovering\|Ready\|Suspended\|Faulted`), `reason` |
 | `AircraftChanged` | `title`, `modelKey`, `matchProfileId`, `matchReason` (plain text, e.g. "Matched by aircraft package") |
 | `OwnershipChanged` | `state` (`Observing, Acquiring, Active, SimulatorSuspended, OtherClient, UserDisabled, Releasing, Faulted`), `gameControlled`, `reason` |
 | `CapabilitiesChanged` | `adapterQualified`, `adapterContract`, `captureQualified`, `allowUnqualifiedAdapter`, `canActivate`, `blockReason`, `simVersion`, `fovRangeDeg` [min,max], `levelHorizon` (bool, legacy name) and `followHorizon` (bool): per-camera follow horizon is applied, `modes` {mode: {available, preview, reason}} |
-| `ActiveCameraChanged` | `profileId`, `cameraId`, `peeking`, `transitioning`, `fromDraft`, `glance` (null, or `cameraId`, `returnCameraId`, `held` while a glance view is shown; also in `Snapshot.activeCamera`) |
+| `ActiveCameraChanged` | `profileId`, `cameraId`, `peeking`, `transitioning`, `fromDraft`, `glance` (null, or `cameraId`, `returnCameraId`, `held` while a glance view is shown; also in `Snapshot.activeCamera`). While spotting, `cameraId` is null for chase and fly-by (and for track held where a chase or fly-by left the camera), the airport view for tower and runway, and the camera on screen for track |
 | `SelectionChanged` | `profileId`, `cameraId` |
 | `DraftChanged` | `draftRevision`, `dirty`, `ops` (as applied, so mirrors update without a snapshot), `origin` (uiInstanceId) |
 | `CommitCompleted` | `requestId`, `kind`, `status` (`Committed\|Failed`), `revisions`, `message`, `report`; kind `qualification` adds `g01`, `g03` (bool) |
@@ -359,8 +369,10 @@ being edited.
 | `InputTest` | `definition`, `phase` (`down`\|`up`) |
 | `BindingTriggered` | `action`, `viewId`, `result` |
 | `BinocularsChanged` | `active` (a Binoculars hold is down on an active camera), `fovDeg` (the setting). Sent on press, release and cancellation; display only |
-| `PanicReleased` | `state` (ownership after the panic), `reason`, `airportAutoStopped` (bool), `cinematicStopped` (bool). Sent for every panic press, including a no-op while Observing |
+| `PanicReleased` | `state` (ownership after the panic), `reason`, `airportAutoStopped` (bool), `cinematicStopped` (bool), `spottingStopped` (bool: spotting or auto-spot was on). Sent for every panic press, including a no-op while Observing |
 | `CinematicChanged` | `enabled`, `state` (`off`, `starting`, `running`, `paused` after manual input, `suspended` by glance, binoculars or a simulator pause), `phase` (`parked`, `taxi`, `takeoffClimb`, `cruise`, `approach`, `landingRoll`), `cameraId` (the view it chose, or null), `dwellSeconds`, `reason` (why it last stopped, or null). Coalesced latest state; also `Snapshot.cinematic` |
+| `TrafficChanged` | `aircraft` [{`objectId`, `title`, `atcId`, `airline`, `flightNumber`, `model`, `latitude`, `longitude`, `altitudeFt`, `groundSpeedKt`, `verticalSpeedFpm`, `headingDeg`, `onGround`, `distanceNm` and `bearingDeg` (from the user aircraft, null when unknown), `status` (`parked`, `taxi`, `takeoff`, `departing`, `arriving`, `landing`, `cruise`)}], nearest first, at most 64, the user aircraft excluded; `at` (session time, integer milliseconds). AI and multiplayer aircraft within `host.spottingRadiusNm`, polled about every 1.5 s while a panel is visible or spotting is on; sent at most once a second while a panel is visible; also `Snapshot.traffic` |
+| `SpottingChanged` | `targetId` (null when off), `view` (null when off), `autoSpot` (bool), `state` (`off`, `waiting` for auto-spot traffic, `tracking`, `lost`: the target is out of range and the view holds 5 s), `targetLabel` (e.g. `DLH4AB · A320`, null when off), `reason` (why spotting last stopped, or null). Coalesced latest state; also `Snapshot.spotting` |
 | `SurfaceRequest` | `target`, `op` |
 | `FaultRaised` | `code`, `message` |
 

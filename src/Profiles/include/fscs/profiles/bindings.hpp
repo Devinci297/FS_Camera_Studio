@@ -19,7 +19,8 @@ enum class Action {
     MoveUp, MoveDown, ZoomIn, ZoomOut, MoveFast, ToggleHeadTracking, ToggleAirportAuto, SaveViews, PanicRelease,
     Binoculars,
     GlanceHold, GlanceNext, GlanceReturn,
-    ToggleCinematic
+    ToggleCinematic,
+    SpotNext, SpotPrevious, SpotReturn, ToggleAutoSpot
 };
 const char* toString(Action a);
 std::optional<Action> parseAction(const std::string& s);
@@ -93,11 +94,18 @@ struct HostSettings {
     double cinematicMinSeconds = 8, cinematicMaxSeconds = 20;
     double cinematicCockpitWeight = .15;
     bool cinematicCuts = true, cinematicDrift = true;
+    // Spotting: traffic within this radius of the user aircraft; auto-spot shows each aircraft at least this long.
+    double spottingRadiusNm = 20;
+    double autoSpotHoldSeconds = 30;
 };
 constexpr double kBinocularsMinFovDeg = 2;
 constexpr double kBinocularsMaxFovDeg = 60;
 constexpr double kCinematicMinDwellSeconds = 3;
 constexpr double kCinematicMaxDwellSeconds = 300;
+constexpr double kSpottingMinRadiusNm = 1;
+constexpr double kSpottingMaxRadiusNm = 100;
+constexpr double kAutoSpotMinHoldSeconds = 10;
+constexpr double kAutoSpotMaxHoldSeconds = 300;
 
 constexpr int kSettingsSchemaVersion = 2;
 HostSettings parseHostSettings(const json& settingsDoc);

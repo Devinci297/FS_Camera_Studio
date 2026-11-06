@@ -276,6 +276,7 @@ bool ModuleApp::setCinematic(bool enabled, double now, std::string* why) {
     if (state == Ownership::Releasing || state == Ownership::Acquiring)
         return fail("Camera Studio is changing camera control. Try again in a moment.");
     if (airportAuto_) setAirportAuto(false, now);  // one automatic mode at a time
+    yieldSpotting("Cinematic mode was turned on.");
     cinematic_.reset();
     cinematicReason_.clear();
     cinematicSuspended_ = false;

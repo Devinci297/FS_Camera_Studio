@@ -15,8 +15,8 @@ namespace fscs::host {
 namespace {
 
 enum : DWORD { kEvtAircraftLoaded = 1, kEvtFlightLoaded, kEvtSim, kEvtPause, kEvtMouseRight, kEvtMouseX, kEvtMouseY, kEvtTest = 900, kEvtTestPovRelease = 901, kEvtInputBase = 1000, kEvtPovReleaseBase = 4000 };
-enum : DWORD { kReqAircraftState = 1, kReqTitle, kReqTitleOnce, kReqMotion, kReqPosition, kReqGround };
-enum : DWORD { kDefTitle = 1, kDefMotion, kDefPosition, kDefGround };
+enum : DWORD { kReqAircraftState = 1, kReqTitle, kReqTitleOnce, kReqMotion, kReqPosition, kReqGround, kReqTraffic };
+enum : DWORD { kDefTitle = 1, kDefMotion, kDefPosition, kDefGround, kDefTraffic };
 enum : DWORD { kInputGroup = 1, kTestInputGroup = 2, kMouseInputGroup = 3, kMouseAxesGroup = 4, kCaptureInputGroup = 5 };
 enum : DWORD { kNotifyInput = 1 };
 enum : DWORD { kEvtZoomIn = 800, kEvtZoomOut, kEvtZoomPlus, kEvtZoomMinus };
@@ -30,6 +30,15 @@ constexpr DWORD kFirstCaptureEvent = 10000;
 constexpr int kCaptureButtons = 32;
 constexpr int kCaptureInputs = kCaptureButtons + 1;
 constexpr int kCaptureEvents = kCaptureInputs + 1; // Separate POV release event.
+
+// Spotting: one aircraft of a SIMOBJECT_TYPE_AIRCRAFT poll, in kDefTraffic order (SimConnect packs it tightly).
+#pragma pack(push, 1)
+struct TrafficData {
+    double lat, lon, altitude, heading, pitch, bank, groundSpeed, verticalSpeed, onGround, groundAltitude;
+    char title[256], atcId[32], airline[64], flightNumber[8], model[32];
+};
+#pragma pack(pop)
+std::string fixedText(const char* text, std::size_t size) { return std::string(text, strnlen(text, size)); }
 
 std::string captureDefinition(int device, int input) {
     return "joystick:" + std::to_string(device) + (input < kCaptureButtons ? ":button:" + std::to_string(input) : ":POV:0");
@@ -95,6 +104,19 @@ void SimSession::setup() {
     SimConnect_AddToDataDefinition(h, kDefGround, "GROUND ALTITUDE", "meters", SIMCONNECT_DATATYPE_FLOAT64);
     SimConnect_RequestDataOnSimObject(h, kReqGround, kDefGround, SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD_SIM_FRAME,
                                     SIMCONNECT_DATA_REQUEST_FLAG_DEFAULT, 0, 15);
+    // Spotting: AI and multiplayer aircraft. Read-only; requested by the module about every 1.5 s (requestTraffic).
+    const std::pair<const char*, const char*> trafficVars[] = {
+        {"PLANE LATITUDE", "degrees"}, {"PLANE LONGITUDE", "degrees"}, {"PLANE ALTITUDE", "meters"},
+        {"PLANE HEADING DEGREES TRUE", "degrees"}, {"PLANE PITCH DEGREES", "degrees"}, {"PLANE BANK DEGREES", "degrees"},
+        {"GROUND VELOCITY", "meters per second"}, {"VERTICAL SPEED", "meters per second"}, {"SIM ON GROUND", "Bool"},
+        {"GROUND ALTITUDE", "meters"}};
+    for (const auto& [name, unit] : trafficVars) SimConnect_AddToDataDefinition(h, kDefTraffic, name, unit, SIMCONNECT_DATATYPE_FLOAT64);
+    const std::pair<const char*, SIMCONNECT_DATATYPE> trafficText[] = {
+        {"TITLE", SIMCONNECT_DATATYPE_STRING256}, {"ATC ID", SIMCONNECT_DATATYPE_STRING32}, {"ATC AIRLINE", SIMCONNECT_DATATYPE_STRING64},
+        {"ATC FLIGHT NUMBER", SIMCONNECT_DATATYPE_STRING8}, {"ATC MODEL", SIMCONNECT_DATATYPE_STRING32}};
+    for (const auto& [name, type] : trafficText) SimConnect_AddToDataDefinition(h, kDefTraffic, name, nullptr, type);
+    trafficPending_.clear();
+    userObjectId_ = 0;
 
     for (const DWORD id : {kEvtTest, kEvtTestPovRelease}) {
         SimConnect_MapClientEventToSimEvent(h, id, "");
@@ -322,6 +344,13 @@ void SimSession::requestTitle() {
     if (handle_) SimConnect_RequestDataOnSimObject(asHandle(handle_), kReqTitleOnce, kDefTitle, SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD_ONCE);
 }
 
+bool SimSession::requestTraffic(double radiusMeters) {
+    if (!handle_ || !(radiusMeters >= 0)) return false;
+    // One answer per call (one message per aircraft, the user's included): the module re-issues it on a timer.
+    const DWORD radius = static_cast<DWORD>((std::min)(radiusMeters, 200000.0));
+    return SUCCEEDED(SimConnect_RequestDataOnSimObjectType(asHandle(handle_), kReqTraffic, kDefTraffic, radius, SIMCONNECT_SIMOBJECT_TYPE_AIRCRAFT));
+}
+
 bool SimSession::enumerateControllers() { return handle_ && SUCCEEDED(SimConnect_EnumerateControllers(asHandle(handle_))); }
 
 void SimSession::onRecv(const void* raw, unsigned long size) {
@@ -426,6 +455,7 @@ void SimSession::onRecv(const void* raw, unsigned long size) {
         }
         case SIMCONNECT_RECV_ID_SIMOBJECT_DATA: {
             const auto* d = static_cast<const SIMCONNECT_RECV_SIMOBJECT_DATA*>(data);
+            if(d->dwRequestID==kReqPosition)userObjectId_=static_cast<std::uint32_t>(d->dwObjectID); // the user aircraft is never a spotting target
             if(d->dwRequestID==kReqPosition && d->dwDefineCount==4 && data->dwSize>=offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA,dwData)+4*sizeof(double)){
                 double v[4];std::memcpy(v,&d->dwData,sizeof(v));staged_.push_back(backend_event::AircraftPosition{v[0],v[1],v[2],v[3]});
             }
@@ -442,6 +472,32 @@ void SimSession::onRecv(const void* raw, unsigned long size) {
             if (d->dwRequestID == kReqTitle || d->dwRequestID == kReqTitleOnce) {
                 const char* title = reinterpret_cast<const char*>(&d->dwData);
                 staged_.push_back(backend_event::AircraftTitle{std::string(title, strnlen(title, 256))});
+            }
+            break;
+        }
+        case SIMCONNECT_RECV_ID_SIMOBJECT_DATA_BYTYPE: {
+            const auto* d = static_cast<const SIMCONNECT_RECV_SIMOBJECT_DATA_BYTYPE*>(data);
+            if (d->dwRequestID != kReqTraffic) break;
+            // One message per aircraft, numbered 1..dwoutof: collect them, then stage the whole poll as one event.
+            if (d->dwentrynumber <= 1) trafficPending_.clear();
+            if (d->dwDefineCount == 15 && data->dwSize >= offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA, dwData) + sizeof(TrafficData) &&
+                trafficPending_.size() < 512) {
+                TrafficData v;
+                std::memcpy(&v, &d->dwData, sizeof(v));
+                backend_event::TrafficAircraft a;
+                a.objectId = static_cast<std::uint32_t>(d->dwObjectID);
+                a.lat = v.lat; a.lon = v.lon; a.altitude = v.altitude; a.headingDeg = v.heading;
+                // As for the user aircraft: SimConnect pitch is positive nose down and bank positive left; FRD is the reverse.
+                a.pitchDeg = -v.pitch; a.bankDeg = -v.bank;
+                a.groundSpeed = v.groundSpeed; a.verticalSpeed = v.verticalSpeed; a.onGround = v.onGround != 0; a.groundAltitude = v.groundAltitude;
+                a.title = fixedText(v.title, sizeof(v.title)); a.atcId = fixedText(v.atcId, sizeof(v.atcId));
+                a.airline = fixedText(v.airline, sizeof(v.airline)); a.flightNumber = fixedText(v.flightNumber, sizeof(v.flightNumber));
+                a.model = fixedText(v.model, sizeof(v.model));
+                trafficPending_.push_back(std::move(a));
+            }
+            if (d->dwentrynumber >= d->dwoutof) {
+                staged_.push_back(backend_event::Traffic{std::move(trafficPending_), userObjectId_});
+                trafficPending_.clear();
             }
             break;
         }

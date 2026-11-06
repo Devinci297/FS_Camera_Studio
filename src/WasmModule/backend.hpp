@@ -30,6 +30,17 @@ struct MotionTelemetry { core::FlightMotion motion; double bankDeg = NAN; double
 // Terrain elevation under the user aircraft (SimConnect GROUND ALTITUDE, meters MSL): free-camera altitude floor and
 // height-above-ground speed scaling near the aircraft.
 struct GroundElevation { double meters = NAN; };
+// Spotting: AI and multiplayer aircraft within the spotting radius, one SimConnect poll (SIMOBJECT_TYPE_AIRCRAFT).
+// Meters, degrees true and m/s; pitch/bank FRD (nose up, right wing down > 0); groundAltitude is the terrain under it.
+// userObjectId: the user aircraft's object id from its own data requests (0 while unknown), never a target.
+struct TrafficAircraft {
+    std::uint32_t objectId = 0;
+    double lat = NAN, lon = NAN, altitude = NAN, headingDeg = NAN, pitchDeg = 0, bankDeg = 0;
+    double groundSpeed = 0, verticalSpeed = 0, groundAltitude = NAN;
+    bool onGround = false;
+    std::string title, atcId, airline, flightNumber, model;
+};
+struct Traffic { std::vector<TrafficAircraft> aircraft; std::uint32_t userObjectId = 0; };
 struct Connected { std::string simVersion; };
 struct Disconnected { std::string reason; };
 struct CameraStatus { SdkAvailability state = SdkAvailability::NotAcquired; bool gameControlled = false; };
@@ -61,7 +72,7 @@ using BackendEvent = std::variant<backend_event::Connected, backend_event::Disco
                                   backend_event::CameraData, backend_event::DefinitionList, backend_event::AircraftLoaded,
                                   backend_event::AircraftTitle, backend_event::FlightLoaded, backend_event::SimRunning,
                                   backend_event::Paused, backend_event::CameraException,
-                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::ControllerButton, backend_event::ControllerHat, backend_event::ControllerCaptureMappingStatus, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity, backend_event::GroundElevation>;
+                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::ControllerButton, backend_event::ControllerHat, backend_event::ControllerCaptureMappingStatus, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity, backend_event::GroundElevation, backend_event::Traffic>;
 
 enum class CameraFlag { Interaction, AboveGround };
 
@@ -117,6 +128,9 @@ public:
     virtual void resolveAirportIdentities(const nlohmann::json&) {}
     // Airport, runways and parking only, without the taxi network: for automatic temporary airport sets.
     virtual bool requestAirportSummary(const std::string& code, std::uint32_t id) { return requestAirport(code, id); }
+    // Spotting: one poll for aircraft within `radiusMeters` of the user aircraft (SimConnect caps it at 200 km). The
+    // answer arrives as a Traffic event; re-issued by the host about every 1.5 s.
+    virtual bool requestTraffic(double radiusMeters) { (void)radiusMeters; return false; }
 };
 
 }  // namespace fscs::host

@@ -48,6 +48,13 @@ public:
     const cinematic::Director& cinematicDirector() const { return cinematic_; }
     cinematic::Phase cinematicPhase() const { return cinematicPhase_.phase(); }
     void setCinematicRandom(cinematic::Director::Random random) { cinematic_.setRandom(std::move(random)); }
+    // Spotting (spotting.cpp): the traffic feed, SpotTarget / StopSpotting / SetAutoSpot and session-wide auto-spot.
+    static constexpr double kTrafficPollSeconds = 1.5;      // SimConnect answers each type request once: re-issued
+    static constexpr double kTrafficEmitSeconds = 1.0;      // TrafficChanged at most once a second
+    static constexpr double kTrafficMaxRadiusMeters = 200000;  // SimConnect's limit for a type request
+    static constexpr double kAutoSpotCheckSeconds = .5;
+    static constexpr double kAutoSpotViewSeconds = 5;       // a status-driven view change at most this often
+    bool autoSpotEnabled() const { return autoSpot_; }
 
 private:
     struct Working {
@@ -141,6 +148,28 @@ private:
     void cinematicEvent(const BackendEvent& ev, double now);
     bool handleCinematic(const protocol::Command& c, double now);
     void cinematicPanic(json& payload, double now);
+    // Spotting (spotting.cpp). Like Cinematic mode and airport Auto switch, auto-spot is module state, never saved.
+    bool handleSpotting(const protocol::Command& c, double now);
+    bool spottingEvent(const std::string& name, json& payload);
+    void updateSpotting(double now);
+    std::string spot(std::uint32_t objectId, traffic::SpotView view, double now);
+    bool setAutoSpot(bool enabled, double now, std::string* why = nullptr);
+    void stopAutoSpot(const std::string& reason);
+    void yieldSpotting(const std::string& reason);  // another automatic mode was turned on
+    void spotCycle(int delta, double now);
+    void updateAutoSpot(double now);
+    std::optional<std::uint32_t> autoSpotPick(std::uint32_t exclude, double now) const;
+    traffic::SpotView autoSpotView(std::uint32_t objectId, traffic::SpotView fallback, double now) const;
+    bool autoSpotShow(std::uint32_t objectId, double now);
+    profiles::airport::Geo trafficAirport() const;
+    json trafficState() const;
+    json spottingState() const;
+    void emitSpotting(bool force = false);
+    bool autoSpot_ = false, pendingSpotReturn_ = false, pendingAutoSpotToggle_ = false;
+    int pendingSpotCycle_ = 0;
+    std::string spotReason_, spottingEmitted_;
+    double nextTrafficPoll_ = 0, lastTrafficEmit_ = -100, lastAutoSpotCheck_ = -100, autoSpotSince_ = 0, autoSpotViewAt_ = 0;
+    std::uint64_t trafficEmitted_ = 0;
     json cinematicState() const;
     void emitCinematic(bool force = false);
     cinematic::Director cinematic_;

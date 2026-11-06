@@ -136,6 +136,7 @@ void ModuleApp::update(double now) {
         lastAutoSwitch_ = now; // Manual movement pauses the shared mode; it does not turn it off.
     updateAirportAuto(now);
     updateCinematic(now, manual.moveForward || manual.moveRight || manual.moveUp || manual.lookRight || manual.lookUp || manual.zoomIn || autoMouseDown_);
+    updateSpotting(now);
 
     if (!testDefinition_.empty() && now > testUntil_) {
         services_.mapTestInput("");
@@ -243,6 +244,7 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
     }
     if (std::holds_alternative<backend_event::FlightLoaded>(ev) || std::holds_alternative<backend_event::Disconnected>(ev)) {
         stopControllerCapture("disconnected");
+        stopAutoSpot("A new flight was loaded.");
         for (const auto& a : router_.releaseAll()) coord_.onAction(a, now);
     }
     coord_.onBackendEvent(ev, now);
@@ -335,7 +337,7 @@ json ModuleApp::snapshot() const {
     const char* session = !repo_.loaded() ? "Initializing" : coord_.blockReason().find("not running") != std::string::npos ? "Discovering"
                           : !coord_.aircraft().known() ? "Discovering" : !simRunning_ ? "Suspended" : "Ready";
     json active{{"profileId", coord_.profile() ? json(coord_.profile()->profileId) : json(nullptr)},
-                {"cameraId", coord_.activeCameraId().empty() ? json(nullptr) : json(coord_.activeCameraId())},
+                {"cameraId", coord_.activeCameraId().empty() || coord_.spotOverlay() ? json(nullptr) : json(coord_.activeCameraId())},
                 {"peeking", false},
                 {"transitioning", coord_.engine().transitioning()},
                 {"glance", coord_.glanceJson()}};
@@ -361,6 +363,8 @@ json ModuleApp::snapshot() const {
             {"pendingCommit", pendingCommit_ ? json(pendingCommit_->requestId) : json(nullptr)},
             {"airports", airportState()},
             {"cinematic", cinematicState()},
+            {"traffic", trafficState()},
+            {"spotting", spottingState()},
             {"controllers", [this] {
                  json list = json::array();
                  for (const auto& [id, name] : controllers_) list.push_back({{"deviceId", id}, {"name", name}});
@@ -444,6 +448,7 @@ void ModuleApp::handle(const Command& c, double now) {
 
     if(handleAirport(c,now))return;
     if (handleCinematic(c, now)) return;
+    if (handleSpotting(c, now)) return;
 
     // Navigation and camera control -------------------------------------------------------------------------
     if (a == "SelectCamera") {
@@ -822,6 +827,7 @@ void ModuleApp::importProfileCode(const protocol::Command& c, const std::string&
 // Coordinator events
 
 void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
+    if (spottingEvent(name, payload)) return;
     if (name == "SaveViewsRequested") { saveViewsRequested_=true; return; }
     if (name == "AirportAutoToggleRequested") { setAirportAuto(!airportAuto_,now_); return; }
     if (name == "CinematicToggleRequested") { setCinematic(!cinematicOn_, now_); return; }

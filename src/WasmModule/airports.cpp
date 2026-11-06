@@ -68,7 +68,9 @@ bool ModuleApp::setAirportAuto(bool enabled,double now) {
    const double d=profiles::airport::local(position_,world).length();
    if(d<best){best=d;nearest=cam.id;}
   }
-  if(nearest.empty()||!coord_.selectAutomaticCamera(nearest,now,true))return false;
+  if(nearest.empty())return false;
+  yieldSpotting("Airport Auto switch was turned on.");  // one automatic mode at a time
+  if(!coord_.selectAutomaticCamera(nearest,now,true))return false;
  }
  airportAuto_=enabled;autoCameraId_=nearest;lastAutoSwitch_=now;lastAutoCheck_=now;
  emitState("AirportsChanged",airportState());return true;

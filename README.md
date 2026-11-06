@@ -53,6 +53,10 @@ state held in the module, so the editor and the mini panel always agree.
 * **Cinematic mode:** **Cinematic** next to Auto switch, or **Ctrl + Alt + K**, plays an automatic playlist of views
   chosen for the flight phase, with smooth moves, cuts and an optional slow Commercial drift. Manual movement pauses
   it; Release, Panic or selecting a view stops it. See [Cinematic mode](doc/dual-bindings.md#cinematic-mode).
+* **Spotting:** a live list of AI and multiplayer traffic (VATSIM / IVAO aircraft included) with tower, runway,
+  chase, fly-by and track views of any aircraft, **Ctrl + Alt + T / Y** for the next / previous aircraft, **Ctrl + Alt
+  + O** to return and **Ctrl + Alt + J** for auto-spot, which follows landings and departures at the airport. See
+  [Spotting](doc/dual-bindings.md#spotting).
 * **Library layout:** category headers contain indented, single-line camera rows, with inline shortcuts and a
   distinct active-view indicator. The main editor shows every camera with its icon and name; the wide bottom mini
   panel shows starred cameras. Its Icons/Labels/Both preference applies only to categories.

@@ -74,3 +74,45 @@ Coverage: `tests/test_glance.cpp` (defaults, nearest-view selection, hold/releas
 * **Stopping.** Release Camera, Panic, any manual camera recall (a view binding or button, Next/Previous camera, Return to default view, peek, walkaround), turning on Auto switch, and pressing the toggle again stop it; it does not come back on its own. Turning it on turns Auto switch off.
 
 Each change is reported as a `CinematicChanged` event (`enabled`, `state`, `phase`, `cameraId`, `dwellSeconds`, `reason`); `PanicReleased` carries `cinematicStopped`. Coverage: `tests/test_cinematic.cpp` (phase detection, weighting with a seeded random source, dwell timing, no immediate repeats, pause and resume, stopping on release, panic and manual recall, drift bounds and presentation only) and `ui/tests/cinematic-mode.test.cjs`. How the playlist, transitions and drift look in a live simulator still needs verification.
+
+## Spotting
+
+The traffic list shows AI and multiplayer aircraft within **Spotting radius** (Settings, `host.spottingRadiusNm`, default 20 NM, 1–100). VATSIM and IVAO traffic arrives in the simulator as AI aircraft, so it is listed too. The module polls SimConnect about every 1.5 s while a panel is visible or spotting is on. It never lists the user's own aircraft, and it drops an aircraft 6 s after it was last reported. Between polls each aircraft is dead-reckoned along its turn. Each new report is blended in over 1.2 s, so a camera aimed at the aircraft does not jump when the report arrives. A correction over 300 m (slew, warp) is applied at once.
+
+Each aircraft gets a status:
+
+* **parked**: on the ground below 1 kt.
+* **taxi**: on the ground below 40 kt.
+* **takeoff** or **landing**: rolling at 40 kt or more. It counts as landing when the aircraft was airborne in the last 60 s.
+* **departing** or **arriving**: airborne within 15 NM of the loaded or nearest airport, climbing above 300 fpm or descending faster than 300 fpm.
+* **cruise**: anything else.
+
+* **Views.**
+  * **Tower** aims the loaded airport set's tower view at the target.
+  * **Runway** aims the runway or spotting view nearest the target. As the target rolls it switches to a nearer view when one is clearly nearer, at most every 6 s.
+  * Tower and Runway need a loaded airport set with such views. Both zoom to frame the target with the Airport auto zoom frame size and limits (`host.airportAutoZoom*`).
+  * **Chase** follows 60 m behind and 15 m above the target, along its track, and eases round turns.
+  * **Fly-by** places a still camera 400 m ahead of the target and 30 m to the right of its track, at the height the target will have when it passes. Once the target is 300 m past, the camera moves ahead again.
+  * **Track** keeps the camera where it is and only aims it: an airport or free camera, or wherever a chase or fly-by left it.
+  * Chase and fly-by stay at least 2 m above the terrain under the target, and above the terrain under the user's aircraft when the camera is near it.
+  * Binoculars work while spotting. Glance does not.
+* **Bindings.** New installs get these defaults. T, Y, O and J were not used by any other default. Saved bindings are not migrated.
+  * **Ctrl + Alt + T** (`spotNext`) and **Ctrl + Alt + Y** (`spotPrevious`) spot the next or previous aircraft by distance and keep the current view. They use chase when spotting is off or the current view is not available for the new target.
+  * **Ctrl + Alt + O** (`spotReturn`) stops spotting.
+  * **Ctrl + Alt + J** (`toggleAutoSpot`) turns auto-spot on or off.
+* **Lost target.** When the target is no longer reported, the view holds for 5 s (`state: lost`). Spotting then returns to the view shown before it began, or gives the camera back to the simulator when there was none. With auto-spot on, the next target is picked instead.
+* **Auto-spot.** A session-wide mode, not saved.
+  * It picks traffic within 15 NM of the airport in this order: landing, takeoff, arriving, departing. Among aircraft with the same status, the one nearest the airport goes first.
+  * Arriving, landing and takeoff traffic gets the runway view, taxiing traffic the tower view, and departing traffic the chase. When a view is missing it uses the other airport view, then chase.
+  * It stays on a target for **Auto-spot hold** (`host.autoSpotHoldSeconds`, default 30 s, 10–300). It changes the view when the status changes, at most every 5 s.
+  * When nothing qualifies it waits (`state: waiting`).
+* **Stopping.**
+  * Spotting stops on: Stop spotting, the Return binding, any manual camera recall, Release, Panic, a lost camera claim and a new flight.
+  * Auto-spot turns off on: a manual target choice, Stop spotting, Release, Panic and a new flight.
+  * Spotting stops Cinematic mode and Auto switch, and turning either of them on stops spotting.
+
+Changes are reported as `TrafficChanged` (at most once a second) and `SpottingChanged`; `PanicReleased` carries `spottingStopped`.
+
+Coverage: `tests/test_spotting.cpp` covers classification, smooth prediction in a turn at 60 fps, stale removal and exclusion, view geometry and the terrain floor, the lost hold, the commands, bindings, auto-spot and mutual exclusion. `ui/tests/spotting.test.cjs` covers the panel side.
+
+Not yet verified in a live simulator: the traffic data layout, the ATC strings and how the views look.
