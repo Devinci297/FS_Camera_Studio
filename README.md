@@ -53,6 +53,9 @@ state held in the module, so the editor and the mini panel always agree.
 * **Reuse profiles:** **Copy for current aircraft** creates a separately matched copy for any loaded aircraft,
   retaining the source. Positions may need adjustment for the destination cockpit; see
   [copying profiles](doc/copy-profile-for-aircraft.md).
+* **Second monitor:** **Pop out** in the editor header moves the editor into its own desktop window, which you can
+  drag to another screen; **Dock** puts it back. This is the simulator's own pop-out (Right Alt + click on the editor
+  does the same). A popped-out editor is always opaque. It is not offered in VR, and the mini panel stays docked.
 * **Camera directions:** configured automatically; users do not need to run an axis calibration.
 * **Tracking:** head tracking defaults off. Aircraft tracking defaults to heading and pitch for exterior and airport
   views. Both preferences are global and survive camera/profile changes; cockpit views never track the aircraft.
