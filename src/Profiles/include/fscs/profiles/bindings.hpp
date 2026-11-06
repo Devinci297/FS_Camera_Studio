@@ -81,6 +81,8 @@ struct HostSettings {
     double airportAutoZoomMaxFovDeg = 90;
     double airportAutoZoomResponseSeconds = 1;
     std::map<std::string,double> airportCategoryHeights{{"runways",3},{"gates",3},{"apron",3},{"taxi",3},{"tower",35}};
+    // Temporary airport sets: generate tower/runway/spotting views in memory near airports without saved cameras.
+    bool airportAutoGenerate = true;
     bool mouseInvertY = false;
     double moveSpeedMetersPerSec = 0.5;
     double movementPrecisionScale = 1.0;

@@ -5,7 +5,7 @@
 namespace fscs::host {
 using protocol::AckStatus;
 namespace { json noRevision(json p){if(p.is_object())p.erase("revision");return p;} }
-bool ModuleApp::airportDirty() const {for(auto& [code,p]:airportDrafts_)if(noRevision(p)!=noRevision(committedProfile(js::str(p,"profileId"))))return true;return false;}
+bool ModuleApp::airportDirty() const {for(auto& [code,p]:airportDrafts_)if(!transientAirports_.count(code)&&noRevision(p)!=noRevision(committedProfile(js::str(p,"profileId"))))return true;return false;}
 json ModuleApp::combinedProfile() const {
  auto out=working_.profile;
  auto it=airportDrafts_.find(loadedAirport_);if(it==airportDrafts_.end())return out;
@@ -55,7 +55,8 @@ bool ModuleApp::validateCombined(json& doc,std::string& error) const {
  if(aircraft.is_object()&&airport.is_object())for(const char* field:{"categories","cameras"})for(auto& item:airport[field])doc[field].push_back(item);
  return true;
 }
-json ModuleApp::airportState() const {return {{"scope","global"},{"autoSwitch",airportAuto_},{"loaded",loadedAirport_},{"pinned",pinnedAirport_},{"nearby",nearbyAirports_},{"facilities",nearbyFacilities_},{"radiusNm",js::num(js::object(working_.settings,"host"),"airportRadiusNm",25)},{"positionKnown",position_.valid()},{"worldStatus","Preview — world coordinates need in-sim qualification"}};}
+json ModuleApp::airportState() const {return {{"scope","global"},{"autoSwitch",airportAuto_},{"loaded",loadedAirport_},{"pinned",pinnedAirport_},{"nearby",nearbyAirports_},{"facilities",nearbyFacilities_},{"radiusNm",js::num(js::object(working_.settings,"host"),"airportRadiusNm",25)},{"positionKnown",position_.valid()},{"worldStatus","Preview — world coordinates need in-sim qualification"},
+ {"transient",transientAirports_.count(loadedAirport_)>0},{"autoGenerate",airportAutoGenerate()},{"loadedName",[this]{auto it=airportDrafts_.find(loadedAirport_);return it==airportDrafts_.end()?std::string():js::str(js::object(it->second,"airport"),"name");}()}};}
 bool ModuleApp::setAirportAuto(bool enabled,double now) {
  if(airportAuto_==enabled)return true;
  std::string nearest;
@@ -97,9 +98,11 @@ void ModuleApp::updateAirportAuto(double now) {
 void ModuleApp::refreshAirports(double now) {
  std::vector<json> saved;
  for(const auto& [id,rec]:repo_.committed().profiles)if(js::str(rec.current,"scope")=="airport"){
-  auto code=js::str(js::object(rec.current,"airport"),"icao");saved.push_back(rec.current);if(!airportDrafts_.count(code))airportDrafts_[code]=rec.current;
+  auto code=js::str(js::object(rec.current,"airport"),"icao");saved.push_back(rec.current);
+  if(transientAirports_.erase(code))airportDrafts_.erase(code); // a saved set always wins over a temporary one
+  if(!airportDrafts_.count(code))airportDrafts_[code]=rec.current;
  }
- auto list=profiles::airport::nearby(saved,position_,js::num(js::object(working_.settings,"host"),"airportRadiusNm",25));
+ auto list=transientAirportList(profiles::airport::nearby(saved,position_,js::num(js::object(working_.settings,"host"),"airportRadiusNm",25)),now);
  auto chosen=profiles::airport::choose(list,loadedAirport_,pinnedAirport_);
  bool changed=chosen!=loadedAirport_;nearbyAirports_=list;
  if(changed){loadedAirport_=chosen;recomputeDirty();publishWorking(now,false);if(!coord_.profile()||!coord_.profile()->camera(selection_))selectCamera(selectionFallback());working_.draftRevision++;broadcastSnapshot();}
@@ -116,15 +119,22 @@ bool ModuleApp::airportEvent(const BackendEvent& ev,double now){
  }
  if(auto e=std::get_if<backend_event::AircraftPosition>(&ev)){position_={e->lat,e->lon,e->altitude};positionAt_=now;if(position_.valid())coord_.setAircraftPosition(e->lat,e->lon,e->altitude,now,e->headingDeg);return true;}
  if(auto e=std::get_if<backend_event::NativeMouseButton>(&ev)){autoMouseDown_=e->down;if(airportAuto_)lastAutoSwitch_=now;}
- if(auto e=std::get_if<backend_event::AirportList>(&ev)){for(const auto& a:e->airports){bool found=false;for(auto& old:nearbyFacilities_)if(js::str(old,"icao")==js::str(a,"icao")){old=a;found=true;}if(!found&&nearbyFacilities_.size()<1000)nearbyFacilities_.push_back(a);}
-  if(e->complete){std::sort(nearbyFacilities_.begin(),nearbyFacilities_.end(),[this](const json&a,const json&b){return profiles::airport::distanceNm(position_,profiles::airport::geo(a))<profiles::airport::distanceNm(position_,profiles::airport::geo(b));});services_.resolveAirportIdentities(nearbyFacilities_);emitNow("AirportsChanged",airportState());}return true;}
+ if(auto e=std::get_if<backend_event::AirportList>(&ev)){for(const auto& a:e->airports){bool found=false;
+   // Repeated (automatic) discovery keeps an entry whose scenery ICAO was already resolved.
+   for(auto& old:nearbyFacilities_)if(js::str(old,"icao")==js::str(a,"icao")||(js::str(old,"facilityIdent")==js::str(a,"icao")&&js::str(old,"region")==js::str(a,"region"))){if(!old.contains("facilityIdent"))old=a;found=true;}
+   if(!found&&nearbyFacilities_.size()<1000)nearbyFacilities_.push_back(a);}
+  if(e->complete){std::sort(nearbyFacilities_.begin(),nearbyFacilities_.end(),[this](const json&a,const json&b){return profiles::airport::distanceNm(position_,profiles::airport::geo(a))<profiles::airport::distanceNm(position_,profiles::airport::geo(b));});
+   json unresolved=json::array();for(const auto& a:nearbyFacilities_)if(!a.contains("facilityIdent"))unresolved.push_back(a);
+   services_.resolveAirportIdentities(unresolved);emitNow("AirportsChanged",airportState());}return true;}
  if(auto e=std::get_if<backend_event::AirportFacility>(&ev)){
+  if(autoAirportFacility(*e,now))return true;
   auto it=airportJobs_.find(e->requestId);if(it==airportJobs_.end())return true;auto job=it->second;airportJobs_.erase(it);
+  if(e->error.empty()){auto cached=profiles::airport::compactFacility(e->facility);cached["icao"]=job.icao;airportFacilityCache_[job.icao]=cached;}
   std::vector<std::string> notes;auto doc=e->error.empty()?profiles::airport::generate(e->facility,job.options,notes):json(nullptr);
   if(doc.is_object())airportPreviews_[job.icao]=doc;
   emitNow("AirportPreview",{{"icao",job.icao},{"profile",doc},{"notes",notes},{"error",e->error}},job.to);return true;
  }
- if(std::holds_alternative<backend_event::FlightLoaded>(ev)||std::holds_alternative<backend_event::Disconnected>(ev)){autoMouseDown_=false;position_={NAN,NAN,NAN};nearbyFacilities_=json::array();pinnedAirport_.clear();refreshAirports(now);}
+ if(std::holds_alternative<backend_event::FlightLoaded>(ev)||std::holds_alternative<backend_event::Disconnected>(ev)){autoMouseDown_=false;position_={NAN,NAN,NAN};nearbyFacilities_=json::array();pinnedAirport_.clear();lastAutoDiscovery_=-1000;autoDiscoveryAt_={NAN,NAN,NAN};refreshAirports(now);}
  return false;
 }
 bool ModuleApp::handleAirport(const protocol::Command& c,double now){
@@ -157,7 +167,7 @@ bool ModuleApp::handleAirport(const protocol::Command& c,double now){
  }
  if(a=="SaveAirportPreview"){
   const auto code=js::str(p,"icao");auto it=airportPreviews_.find(code);if(it==airportPreviews_.end()){reply(c,AckStatus::Rejected,"Generate a preview first.");return true;}
-  const bool dirtyAirport=airportDrafts_.count(code)&&noRevision(airportDrafts_[code])!=noRevision(committedProfile(js::str(airportDrafts_[code],"profileId")));
+  const bool dirtyAirport=airportDrafts_.count(code)&&!transientAirports_.count(code)&&noRevision(airportDrafts_[code])!=noRevision(committedProfile(js::str(airportDrafts_[code],"profileId")));
   const bool replace=js::boolean(p,"replace",false);
   if(dirtyAirport&&!(replace&&js::boolean(p,"discardAirportEdits",false))){reply(c,AckStatus::Rejected,"This airport has unsaved edits. Save them, or confirm Replace generated cameras and discard this airport's edits.");return true;}
   auto doc=it->second;const auto& ids=js::array(p,"cameraIds");
@@ -170,6 +180,83 @@ bool ModuleApp::handleAirport(const protocol::Command& c,double now){
   profiles::CommitRequest req;req.upsertProfiles.push_back(doc);req.requestId=c.uiInstanceId+":"+c.requestId;reply(c,AckStatus::Pending);
   commit(std::move(req),{c.requestId,"airport",working_.draftRevision,{{"icao",code},{"discardedAirportEdits",dirtyAirport}},{}},now);return true;
  }
+ if(a=="SaveTemporaryAirport")return saveTemporaryAirport(c,now);
  return false;
+}
+// ---- Temporary airport sets -------------------------------------------------------------------------------
+// Near an airport without saved cameras, its views are generated in memory from scenery facility data (the
+// manual generator with automatic options), loaded under Airport like a saved set, and never written to
+// storage until the user saves them. A saved set always wins, and only when no saved set is in range.
+bool ModuleApp::airportAutoGenerate() const {return js::boolean(js::object(working_.settings,"host"),"airportAutoGenerate",true);}
+json ModuleApp::transientAirportList(json saved,double now) {
+ for(auto it=autoAirportJobs_.begin();it!=autoAirportJobs_.end();){
+  if(now>it->second.deadline){autoAirportRetry_[it->second.icao]=now+60;it=autoAirportJobs_.erase(it);}else ++it;
+ }
+ for(auto it=transientAirports_.begin();it!=transientAirports_.end();)it=airportDrafts_.count(*it)?std::next(it):transientAirports_.erase(it);
+ if(!saved.empty()||!airportAutoGenerate()||!position_.valid())return saved;
+ const double radius=js::num(js::object(working_.settings,"host"),"airportRadiusNm",25);
+ // Ask scenery for nearby airports occasionally, never on every check.
+ if(now-lastAutoDiscovery_>=30&&(nearbyFacilities_.empty()||!autoDiscoveryAt_.valid()||profiles::airport::distanceNm(autoDiscoveryAt_,position_)>=3)){
+  lastAutoDiscovery_=now;if(services_.requestNearbyAirports())autoDiscoveryAt_=position_;
+ }
+ json candidates=json::array();
+ auto consider=[&](const std::string& code,const std::string& name,profiles::airport::Geo at){
+  if(!profiles::airport::validCode(code))return;
+  for(const auto& c:candidates)if(js::str(c,"icao")==code)return;
+  const auto cached=airportFacilityCache_.find(code);if(cached!=airportFacilityCache_.end()&&cached->second.is_null())return; // no usable scenery data
+  const double d=profiles::airport::distanceNm(position_,at);
+  if(std::isfinite(d)&&d<=radius)candidates.push_back({{"icao",code},{"name",name},{"distanceNm",d}});
+ };
+ for(const auto& a:nearbyFacilities_)consider(js::str(a,"icao"),js::str(a,"icao"),profiles::airport::geo(a));
+ // The loaded temporary set stays a candidate while a fresh scenery list is pending.
+ const std::string current=transientAirports_.count(loadedAirport_)?loadedAirport_:std::string();
+ if(!current.empty()){const auto& meta=js::object(airportDrafts_[current],"airport");consider(current,current,profiles::airport::geo(js::get(meta,"origin")));}
+ std::sort(candidates.begin(),candidates.end(),[](const json& a,const json& b){if(a["distanceNm"]==b["distanceNm"])return a["icao"]<b["icao"];return a["distanceNm"]<b["distanceNm"];});
+ auto listed=[&](const std::string& code){
+  if(code.empty()||!transientAirports_.count(code))return saved; // an unsaved non-temporary draft is never promoted
+  const auto& doc=airportDrafts_[code];
+  for(const auto& c:candidates)if(js::str(c,"icao")==code){
+   auto entry=c;entry["name"]=js::str(js::object(doc,"airport"),"name",code);entry["profileId"]=js::str(doc,"profileId");entry["transient"]=true;
+   return json::array({entry});
+  }
+  return saved;
+ };
+ const auto pick=profiles::airport::choose(candidates,current,pinnedAirport_);
+ if(pick.empty())return saved;
+ if(!airportDrafts_.count(pick)){
+  const auto cached=airportFacilityCache_.find(pick);
+  // While the next airport's scenery data is on its way, the current temporary set stays loaded.
+  if(cached==airportFacilityCache_.end()){requestAutoAirport(pick,now);return listed(current);}
+  std::vector<std::string> notes;
+  auto doc=profiles::airport::generate(cached->second,profiles::airport::automaticOptions(js::object(js::object(working_.settings,"host"),"airportCategoryHeights")),notes);
+  if(!doc.is_object()){diag("temporary airport "+pick+": "+(notes.empty()?std::string("no usable scenery features"):notes.back()));cached->second=nullptr;return listed(current);}
+  airportDrafts_[pick]=std::move(doc);transientAirports_.insert(pick);
+  diag("temporary airport "+pick+": "+std::to_string(airportDrafts_[pick]["cameras"].size())+" generated views");
+ }
+ return listed(pick);
+}
+void ModuleApp::requestAutoAirport(const std::string& code,double now) {
+ for(const auto& [id,job]:autoAirportJobs_)if(job.icao==code)return;
+ const auto retry=autoAirportRetry_.find(code);if(retry!=autoAirportRetry_.end()&&now<retry->second)return;
+ const auto id=++airportRequestId_;
+ if(services_.requestAirportSummary(code,id))autoAirportJobs_[id]={code,now+20};else autoAirportRetry_[code]=now+60;
+}
+bool ModuleApp::autoAirportFacility(const backend_event::AirportFacility& e,double now) {
+ const auto it=autoAirportJobs_.find(e.requestId);if(it==autoAirportJobs_.end())return false;
+ const auto code=it->second.icao;autoAirportJobs_.erase(it);
+ // Cached for the session, including "no scenery data", so checks never request it again.
+ json cached=nullptr;if(e.error.empty()){cached=profiles::airport::compactFacility(e.facility);cached["icao"]=code;}
+ airportFacilityCache_[code]=cached;
+ if(repo_.loaded())refreshAirports(now);
+ return true;
+}
+bool ModuleApp::saveTemporaryAirport(const protocol::Command& c,double now) {
+ const auto code=js::str(c.payload,"icao");const auto it=airportDrafts_.find(code);
+ if(it==airportDrafts_.end()||!transientAirports_.count(code)){reply(c,AckStatus::Rejected,"These airport cameras are already saved.");return true;}
+ // The normal airport save: one profile file per airport, same IDs, so the active view and bindings carry over.
+ auto doc=it->second;auto validation=profiles::validateProfile(doc);
+ if(!validation.ok()){reply(c,AckStatus::Rejected,validation.summary());return true;}
+ profiles::CommitRequest req;req.upsertProfiles.push_back(doc);req.requestId=c.uiInstanceId+":"+c.requestId;reply(c,AckStatus::Pending);
+ commit(std::move(req),{c.requestId,"airport",working_.draftRevision,{{"icao",code},{"temporary",true}},{}},now);return true;
 }
 }

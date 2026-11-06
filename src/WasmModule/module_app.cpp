@@ -629,7 +629,7 @@ void ModuleApp::handle(const Command& c, double now) {
             return reply(c, AckStatus::Rejected, "There is nothing to save.");
         CommitRequest req;
         if (aircraftDirty()) req.upsertProfiles.push_back(working_.profile);
-        for(const auto& [code,doc]:airportDrafts_)if(withoutRevision(doc)!=withoutRevision(committedProfile(js::str(doc,"profileId"))))req.upsertProfiles.push_back(doc);
+        for(const auto& [code,doc]:airportDrafts_)if(!transientAirports_.count(code)&&withoutRevision(doc)!=withoutRevision(committedProfile(js::str(doc,"profileId"))))req.upsertProfiles.push_back(doc);
         req.settings = working_.settings;
         req.bindings = working_.bindings;
         req.navigation = navigation();
@@ -1142,6 +1142,7 @@ void ModuleApp::commit(CommitRequest req, PendingCommit pending, double now) {
             if(pc.kind=="save" || pc.kind=="airport")for(auto& [code,doc]:airportDrafts_){if(pc.kind=="airport"&&code!=js::str(pc.report,"icao"))continue;auto it=airportAtRequest.find(code);if(it!=airportAtRequest.end()&&withoutRevision(doc)==withoutRevision(it->second)){auto saved=committedProfile(js::str(doc,"profileId"));if(saved.is_object())doc=saved;}}
             if(pc.kind=="airport") {
                 const auto code=js::str(pc.report,"icao");
+                transientAirports_.erase(code);  // a saved temporary set becomes a normal saved set
                 // The loop above already replaces an unchanged draft with the verified
                 // saved document. Never erase edits made while this commit was pending.
                 if(!airportAtRequest.count(code))airportDrafts_.erase(code);

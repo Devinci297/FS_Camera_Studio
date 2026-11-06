@@ -115,6 +115,8 @@ public:
     virtual bool requestNearbyAirports() { return false; }
     virtual bool requestAirport(const std::string&, std::uint32_t) { return false; }
     virtual void resolveAirportIdentities(const nlohmann::json&) {}
+    // Airport, runways and parking only, without the taxi network: for automatic temporary airport sets.
+    virtual bool requestAirportSummary(const std::string& code, std::uint32_t id) { return requestAirport(code, id); }
 };
 
 }  // namespace fscs::host

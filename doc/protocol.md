@@ -217,13 +217,27 @@ marks settings as unsaved.
 switching remains independent of each camera. Airport defaults include `airportTrackingHorizonGuard` (true),
 `airportAutoZoomEnabled` (false), `airportAutoZoomFrameMeters` (40), `airportAutoZoomMinFovDeg` (10),
 `airportAutoZoomMaxFovDeg` (90), `airportAutoZoomResponseSeconds` (1), and `airportCategoryHeights`
-(`runways`, `gates`, `apron`, `taxi`: 3; `tower`: 35 meters).
+(`runways`, `gates`, `apron`, `taxi`: 3; `tower`: 35 meters), and `airportAutoGenerate` (true): temporary airport
+sets, below.
 
 Airport cameras may store `airportHeight: {category, baseAltitudeMeters, minimumMeters}` and sparse
 `airportOverrides` with `heightMeters`, `aircraftTracking`, `trackingHorizonGuard`, `autoZoomEnabled`,
 `autoZoomFrameMeters`, `autoZoomMinFovDeg`, `autoZoomMaxFovDeg`, `autoZoomResponseSeconds`.
 Missing properties inherit global defaults. Overrides are removed from non-airport cameras. See
 [airport settings](airport-camera-settings.md) for terrain readback, horizon behavior and height migration.
+
+**Temporary airport sets.** While `airportAutoGenerate` is on and no saved airport set is within
+`airportRadiusNm`, the module generates the nearest scenery airport's views in memory (the same generator as
+`PreviewAirports`, with automatic options: every runway end with spotting views, at most 4 gates/stands chosen
+by spread, the tower or a virtual tower, no taxi intersections) and loads them under Airport exactly like a
+saved set: same profile shape, stable generated IDs, the same radius, 2 NM hysteresis and pinning. They are never
+written to storage, never count as unsaved changes and are not included by `CommitChanges`; edits stay in memory
+for the session. A saved set always wins: for the same airport it replaces the temporary one, and any saved set
+in range suppresses temporary generation. Scenery is listed at most every 30 s and only after 3 NM of movement;
+each airport's facility data is requested once (airport, runways and parking only) and cached for the session,
+including "no scenery data" (a timed-out request is retried after 60 s). `Snapshot.airports` and
+`AirportsChanged` carry `transient` (the loaded set is temporary), `autoGenerate` and `loadedName`; nearby
+entries for a temporary set have `transient: true`. `SaveTemporaryAirport` stores it.
 
 ## 3. Transport
 
@@ -304,6 +318,7 @@ Rules:
 | `QualificationRecord` | `answers` {axis: `correct\|reversed\|wrong`}, `recall` (`pass\|fail`), `notes` | Flips reversed signs, records G01/G03 for this simulator build (Pending → `CommitCompleted` kind `qualification`) |
 | `QualificationEnd` | — | Ends the session; releases if the build is still unqualified and testing is not allowed |
 | `DroneHere` | — | `result`: `worldOrigin`, `positionMetersFRD`, `orientationCameraToAnchorXYZW`, `fovRad`, `source` (`view`: the Camera Studio view on screen; `behindAircraft`: 40 m behind and 12 m above the aircraft), `message`. Read only: the panel creates or moves the free camera with `UpdateDraft`. Rejected without an aircraft position |
+| `SaveTemporaryAirport` | `icao` | Stores the loaded temporary airport set (with any edits) as a normal airport profile, same IDs. Ack `Pending`, then `CommitCompleted` kind `airport` with `report.temporary: true`. Rejected when that airport has no temporary set |
 
 ### 5.1 Draft operations
 
