@@ -128,7 +128,8 @@ TEST_CASE("cinematic: phase weights, cockpit share and no immediate repeats with
     auto approach = run(cin::Phase::Approach, n, .15, 3);
     CHECK(approach["tower"] > approach["orbit"]);
     // Cockpit weight 0: never chosen while other views exist; 1: always when not already showing it.
-    CHECK_EQ(run(cin::Phase::Cruise, 500, 0, 4)["pilot"], 0);
+    auto noCockpit = run(cin::Phase::Cruise, 500, 0, 4);  // keep the map alive: CHECK_EQ binds a reference
+    CHECK_EQ(noCockpit["pilot"], 0);
     {
         cin::Director d(Seeded{5});
         CHECK_EQ(d.pick(list, "ext1", cin::Phase::Cruise, 1), std::string("pilot"));
