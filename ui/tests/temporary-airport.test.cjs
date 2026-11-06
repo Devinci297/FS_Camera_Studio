@@ -1,7 +1,7 @@
 const {chromium}=require(process.env.FSCS_PLAYWRIGHT||'playwright');
 const assert=require('node:assert/strict'),path=require('node:path');
 // Temporary airport sets: the module generates views for a nearby airport without saved cameras. The library
-// marks them "Temporary — Save to keep"; Save stores them as a normal airport set with the same camera IDs.
+// marks them "Temporary - Save to keep"; Save stores them as a normal airport set with the same camera IDs.
 (async()=>{
  const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
  try{
@@ -16,7 +16,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await page.locator('.mc-airport-tree').waitFor();
   assert.match(await page.locator('.mc-airport-tree>.mc-tree-scope-toggle').innerText(),/Airport KDEM/);
   const notice=page.locator('.mc-airport-tree .mc-airport-temporary');
-  assert.ok(await notice.isVisible());assert.match(await notice.innerText(),/Temporary — Save to keep/);
+  assert.ok(await notice.isVisible());assert.match(await notice.innerText(),/Temporary - Save to keep/);
   assert.equal(await notice.getAttribute('role'),'status');
   const categories=await page.locator('.mc-airport-tree .mc-category-head').allInnerTexts();
   for(const name of ['Runways','Spotting','Gates','Tower'])assert.ok(categories.some(text=>text.includes(name)),name+' subcategory is listed');
@@ -26,7 +26,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.equal(await page.locator('#mc-save-state').getAttribute('data-dirty'),'false','A temporary set is not an unsaved edit');
   // The profiles page summarises the same state.
   await page.locator('#mc-nav-profiles').click();
-  assert.match(await page.locator('#mc-airports-summary').innerText(),/Temporary airport cameras: KDEM[\s\S]*Temporary — Save to keep/);
+  assert.match(await page.locator('#mc-airports-summary').innerText(),/Temporary airport cameras: KDEM[\s\S]*Temporary - Save to keep/);
   await page.locator('#mc-nav-cameras').click();
   // Settings > Airport defaults turns automatic generation off and on.
   await page.locator('#mc-nav-settings').click();await page.locator('#mc-settings-link-airport').click();

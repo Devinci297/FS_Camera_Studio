@@ -39,7 +39,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.match(await page.locator('#mc-traffic-count').innerText(),new RegExp(traffic.aircraft.length+' aircraft within 20 NM'));
   const first=rows.first();
   assert.equal(await first.locator('.mc-traffic-name strong').innerText(),'Lufthansa 441');
-  assert.match(await first.locator('.mc-traffic-name small').innerText(),/A320 · D-AINB/);
+  assert.match(await first.locator('.mc-traffic-name small').innerText(),/A320 - D-AINB/);
   assert.equal((await first.locator('.mc-traffic-status').innerText()).toLowerCase(),'parked');
   assert.match(await first.locator('.mc-traffic-figures').innerText(),/^0\.1 NM, 1,417 ft, 0 kt$/);
   const gaRow=rows.filter({hasText:'N172DM'});
@@ -78,26 +78,31 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await page.locator('#mc-traffic-distance').selectOption('0');
   assert.equal(await rows.count(),traffic.aircraft.length);
 
-  // View buttons: Tower and Runway need a loaded airport set; Track needs an airport or free view on screen.
+  // View buttons: Tower and Runway need airport cameras or scenery data near the target (SpottingChanged.views);
+  // Track needs an airport or free view on screen.
   const row=label=>rows.filter({has:page.locator('.mc-traffic-name strong',{hasText:label})});
   const view=(label,name)=>row(label).locator('button[data-view='+name+']');
   assert.equal(await view('easyJet 2914','tower').isDisabled(),true);
   assert.equal(await view('easyJet 2914','runway').isDisabled(),true);
-  assert.match(await view('easyJet 2914','tower').getAttribute('title'),/airport cameras/);
+  assert.match(await view('easyJet 2914','tower').getAttribute('title'),/No tower position is known/);
+  assert.match(await view('easyJet 2914','runway').getAttribute('title'),/No runway data is known/);
   assert.equal(await view('easyJet 2914','track').isDisabled(),true);
   assert.match(await view('easyJet 2914','track').getAttribute('title'),/airport or free camera/);
   assert.equal(await view('easyJet 2914','chase').isEnabled(),true);
   assert.equal(await view('easyJet 2914','flyby').isEnabled(),true);
   assert.equal(await view('easyJet 2914','chase').getAttribute('aria-label'),'Chase view of easyJet 2914');
-  // The module rejects an airport view without an airport set, with a reason.
+  // The module rejects a tower view with no airport data near the target, with a reason.
   const rejected=await page.evaluate(()=>FSCApp.bridge.request('SpotTarget',{objectId:104,view:'tower'}));
-  assert.equal(rejected.status,'Rejected');assert.match(rejected.reason,/airport cameras/);
+  assert.equal(rejected.status,'Rejected');assert.match(rejected.reason,/No tower position is known/);
+  // An older module without SpottingChanged.views: the airport-camera rule applies.
+  await page.evaluate(()=>{FSCApp.state.spotting=Object.assign({},FSCApp.state.spotting);delete FSCApp.state.spotting.views;});  // redrawn by the next TrafficChanged
+  await page.waitForFunction(()=>/airport cameras/.test(document.querySelector('#mc-traffic-list button[data-view=tower]').title));
 
   await view('easyJet 2914','chase').click();
   await sent(page,'SpotTarget',{objectId:104,view:'chase'});
   await page.waitForFunction(()=>FSCApp.state.spotting&&FSCApp.state.spotting.state==='tracking'&&FSCApp.state.spotting.targetId===104);
   await page.waitForFunction(()=>FSCApp.state.ownership.state==='Active');
-  assert.match(await page.locator('#mc-spot-state-text').innerText(),/^Spotting easyJet 2914 · A319 · Chase$/);
+  assert.match(await page.locator('#mc-spot-state-text').innerText(),/^Spotting easyJet 2914 - A319 - Chase$/);
   assert.equal(await page.locator('#mc-spot-state').getAttribute('data-state'),'tracking');
   assert.equal(await row('easyJet 2914').getAttribute('data-tracking'),'true');
   assert.equal(await view('easyJet 2914','chase').getAttribute('aria-pressed'),'true');
@@ -115,7 +120,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await view('British Airways 710','tower').click();
   await sent(page,'SpotTarget',{objectId:106,view:'tower'});
   await page.waitForFunction(()=>FSCApp.state.spotting.view==='tower');
-  assert.match(await page.locator('#mc-spot-state-text').innerText(),/British Airways 710 · A321 · Tower/);
+  assert.match(await page.locator('#mc-spot-state-text').innerText(),/British Airways 710 - A321 - Tower/);
   await page.waitForFunction(()=>!document.querySelector('#mc-traffic-list button[data-view=track]').disabled);
   await view('easyJet 2914','runway').click();
   await sent(page,'SpotTarget',{objectId:104,view:'runway'});
@@ -127,7 +132,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   // A target that leaves the traffic radius is reported lost.
   await freeze(page,329);
   await page.waitForFunction(()=>FSCApp.state.spotting.state==='lost');
-  assert.match(await page.locator('#mc-spot-state-text').innerText(),/^Lost United 15 · B789: .*radius/);
+  assert.match(await page.locator('#mc-spot-state-text').innerText(),/^Lost United 15 - B789: .*radius/);
   await freeze(page,100);
 
   // Stop returns to the view shown before spotting began.
@@ -143,7 +148,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await sent(page,'SetAutoSpot',{enabled:true});
   await page.waitForFunction(()=>FSCApp.state.spotting.autoSpot&&FSCApp.state.spotting.state==='tracking');
   assert.equal(await page.locator('#mc-spot-auto').getAttribute('aria-pressed'),'true');
-  assert.match(await page.locator('#mc-spot-state-text').innerText(),/· Auto-spot$/);
+  assert.match(await page.locator('#mc-spot-state-text').innerText(),/ - Auto-spot$/);
   const picked=(await spot(page)).targetId;
   assert.ok(['arriving','landing','takeoff','departing'].includes(traffic.aircraft.find(a=>a.objectId===picked).status),'Auto-spot follows an arrival or departure');
   await page.locator('#mc-spot-auto').click();
@@ -170,6 +175,40 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await page.waitForFunction(()=>FSCApp.state.spotting.state==='off'&&!FSCApp.state.spotting.autoSpot);
   await page.evaluate(()=>FSCDemo.traffic({enabled:true}));
   await page.waitForFunction(n=>FSCApp.state.traffic.aircraft.length===n,traffic.aircraft.length);
+
+  // No camera profile: spotting stays available (chase, fly-by, computed tower and runway); Track needs a profile.
+  await page.evaluate(()=>FSCDemo.setCanActivate(false,'No camera profile is open for this aircraft.'));
+  await page.waitForFunction(()=>FSCApp.state.caps.spottingAvailable===true&&FSCApp.state.caps.canActivate===false);
+  assert.equal(await view('easyJet 2914','chase').isEnabled(),true,'chase works without a profile');
+  assert.equal(await view('easyJet 2914','flyby').isEnabled(),true);
+  assert.equal(await view('easyJet 2914','runway').isEnabled(),true,'a computed runway view near the loaded airport');
+  assert.equal(await view('easyJet 2914','tower').isEnabled(),true);
+  assert.equal(await view('easyJet 2914','track').isDisabled(),true);
+  assert.match(await view('easyJet 2914','track').getAttribute('title'),/camera profile/);
+  assert.match(await page.locator('#mc-spot-state-text').innerText(),/^Not spotting\..*Track needs one\.$/);
+  assert.equal(await page.locator('#mc-spot-auto').isEnabled(),true,'Auto-spot works without a profile');
+  await view('easyJet 2914','runway').click();
+  await page.waitForFunction(()=>FSCApp.state.spotting.state==='tracking'&&FSCApp.state.spotting.view==='runway');
+  const computed=await spot(page);
+  assert.equal(computed.spot.kind,'fence');assert.equal(computed.spot.icao,'KDEM');
+  assert.deepEqual(computed.runways.map(r=>r.end),['09','27']);
+  await page.waitForFunction(()=>!document.querySelector('#mc-traffic-list button[data-view=track]').disabled);
+  await page.locator('#mc-spot-stop').click();
+  await page.waitForFunction(()=>FSCApp.state.spotting.state==='off');
+  // A block that is not about the profile stops spotting too; a module without spottingAvailable falls back to canActivate.
+  await page.evaluate(()=>FSCDemo.setCanActivate(false,'Camera control is turned off for testing.'));
+  await page.waitForFunction(()=>FSCApp.state.caps.spottingAvailable===false);
+  assert.equal(await view('easyJet 2914','chase').isDisabled(),true);
+  assert.match(await view('easyJet 2914','chase').getAttribute('title'),/turned off for testing/);
+  assert.match(await page.locator('#mc-spot-state-text').innerText(),/^Spotting needs camera control: Camera control is turned off for testing\./);
+  assert.equal(await page.locator('#mc-spot-auto').isDisabled(),true);
+  await page.evaluate(()=>FSCDemo.setCanActivate(false,'No camera profile is open for this aircraft.'));
+  await page.waitForFunction(()=>FSCApp.state.caps.spottingAvailable===true);
+  await page.evaluate(()=>{const caps=Object.assign({},FSCApp.state.caps);delete caps.spottingAvailable;delete caps.spottingBlockReason;FSCApp.state.caps=caps;});
+  await page.waitForFunction(()=>document.querySelector('#mc-traffic-list button[data-view=chase]').disabled);
+  assert.match(await view('easyJet 2914','chase').getAttribute('title'),/No camera profile/);
+  await page.evaluate(()=>FSCDemo.setCanActivate(true));
+  await page.waitForFunction(()=>FSCApp.state.caps.canActivate===true&&!document.querySelector('#mc-traffic-list button[data-view=chase]').disabled);
 
   // Release and Panic stop spotting.
   await view('Lufthansa 441','chase').click();
@@ -260,7 +299,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await sent(mini.page,'SpotTarget',{objectId:sorted[0],view:'chase'});
   await mini.page.waitForFunction(()=>FSCApp.state.spotting&&FSCApp.state.spotting.state==='tracking');
   await status.waitFor();
-  assert.equal(await status.innerText(),'Spotting: Lufthansa 441 · A320');
+  assert.equal(await status.innerText(),'Spotting: Lufthansa 441 - A320');
   await next.click();
   await sent(mini.page,'SpotTarget',{objectId:sorted[1],view:'chase'});
   await mini.page.waitForFunction(id=>FSCApp.state.spotting.targetId===id,sorted[1]);

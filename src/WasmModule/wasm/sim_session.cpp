@@ -15,8 +15,8 @@ namespace fscs::host {
 namespace {
 
 enum : DWORD { kEvtAircraftLoaded = 1, kEvtFlightLoaded, kEvtSim, kEvtPause, kEvtMouseRight, kEvtMouseX, kEvtMouseY, kEvtTest = 900, kEvtTestPovRelease = 901, kEvtInputBase = 1000, kEvtPovReleaseBase = 4000 };
-enum : DWORD { kReqAircraftState = 1, kReqTitle, kReqTitleOnce, kReqMotion, kReqPosition, kReqGround, kReqTraffic };
-enum : DWORD { kDefTitle = 1, kDefMotion, kDefPosition, kDefGround, kDefTraffic };
+enum : DWORD { kReqAircraftState = 1, kReqTitle, kReqTitleOnce, kReqMotion, kReqPosition, kReqGround, kReqTraffic, kReqTarget };
+enum : DWORD { kDefTitle = 1, kDefMotion, kDefPosition, kDefGround, kDefTraffic, kDefTarget };
 enum : DWORD { kInputGroup = 1, kTestInputGroup = 2, kMouseInputGroup = 3, kMouseAxesGroup = 4, kCaptureInputGroup = 5 };
 enum : DWORD { kNotifyInput = 1 };
 enum : DWORD { kEvtZoomIn = 800, kEvtZoomOut, kEvtZoomPlus, kEvtZoomMinus };
@@ -117,6 +117,18 @@ void SimSession::setup() {
     for (const auto& [name, type] : trafficText) SimConnect_AddToDataDefinition(h, kDefTraffic, name, nullptr, type);
     trafficPending_.clear();
     userObjectId_ = 0;
+    // Spotting target: every sim frame for the one aircraft spotted (watchTrafficTarget), so chase and fly-by follow the
+    // pose the simulator draws instead of a prediction from the 1.5 s poll. VELOCITY WORLD X is east, Y up and Z north
+    // (SDK simulation variables, "Speed relative to the earth"); the module checks the axes against the positions.
+    const std::pair<const char*, const char*> targetVars[] = {
+        {"PLANE LATITUDE", "degrees"}, {"PLANE LONGITUDE", "degrees"}, {"PLANE ALTITUDE", "meters"},
+        {"PLANE HEADING DEGREES TRUE", "degrees"}, {"PLANE PITCH DEGREES", "degrees"}, {"PLANE BANK DEGREES", "degrees"},
+        {"VELOCITY WORLD X", "meters per second"}, {"VELOCITY WORLD Y", "meters per second"}, {"VELOCITY WORLD Z", "meters per second"},
+        {"SIM ON GROUND", "Bool"}, {"GROUND ALTITUDE", "meters"}};
+    for (const auto& [name, unit] : targetVars) SimConnect_AddToDataDefinition(h, kDefTarget, name, unit, SIMCONNECT_DATATYPE_FLOAT64);
+    // A watch from before a reconnect is asked for again on the new connection.
+    if (watchedTarget_ != 0)
+        SimConnect_RequestDataOnSimObject(h, kReqTarget, kDefTarget, watchedTarget_, SIMCONNECT_PERIOD_SIM_FRAME);
 
     for (const DWORD id : {kEvtTest, kEvtTestPovRelease}) {
         SimConnect_MapClientEventToSimEvent(h, id, "");
@@ -351,6 +363,18 @@ bool SimSession::requestTraffic(double radiusMeters) {
     return SUCCEEDED(SimConnect_RequestDataOnSimObjectType(asHandle(handle_), kReqTraffic, kDefTraffic, radius, SIMCONNECT_SIMOBJECT_TYPE_AIRCRAFT));
 }
 
+bool SimSession::watchTrafficTarget(std::uint32_t objectId) {
+    if (objectId == watchedTarget_) return true;
+    const DWORD previous = watchedTarget_;
+    watchedTarget_ = objectId;
+    if (!handle_) return objectId == 0;  // asked for in setup() once connected
+    const HANDLE h = asHandle(handle_);
+    // One request id: stop the previous object, then ask for the new one every sim frame.
+    if (previous != 0) SimConnect_RequestDataOnSimObject(h, kReqTarget, kDefTarget, previous, SIMCONNECT_PERIOD_NEVER);
+    if (objectId == 0) return true;
+    return SUCCEEDED(SimConnect_RequestDataOnSimObject(h, kReqTarget, kDefTarget, objectId, SIMCONNECT_PERIOD_SIM_FRAME));
+}
+
 bool SimSession::enumerateControllers() { return handle_ && SUCCEEDED(SimConnect_EnumerateControllers(asHandle(handle_))); }
 
 void SimSession::onRecv(const void* raw, unsigned long size) {
@@ -468,6 +492,17 @@ void SimSession::onRecv(const void* raw, unsigned long size) {
             if (d->dwRequestID == kReqGround && d->dwDefineCount == 1 && data->dwSize >= offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA, dwData) + sizeof(double)) {
                 double v; std::memcpy(&v, &d->dwData, sizeof(v));
                 staged_.push_back(backend_event::GroundElevation{v});
+            }
+            if (d->dwRequestID == kReqTarget && d->dwDefineCount == 11 && watchedTarget_ != 0 && d->dwObjectID == watchedTarget_ &&
+                data->dwSize >= offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA, dwData) + 11 * sizeof(double)) {
+                double v[11]; std::memcpy(v, &d->dwData, sizeof(v));
+                backend_event::TrafficTarget t;
+                t.objectId = static_cast<std::uint32_t>(d->dwObjectID);
+                t.lat = v[0]; t.lon = v[1]; t.altitude = v[2]; t.headingDeg = v[3];
+                t.pitchDeg = -v[4]; t.bankDeg = -v[5];  // as the traffic poll: SimConnect nose down / left bank positive
+                t.velocityEast = v[6]; t.velocityDown = -v[7]; t.velocityNorth = v[8];
+                t.onGround = v[9] != 0; t.groundAltitude = v[10];
+                staged_.push_back(t);
             }
             if (d->dwRequestID == kReqTitle || d->dwRequestID == kReqTitleOnce) {
                 const char* title = reinterpret_cast<const char*>(&d->dwData);

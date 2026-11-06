@@ -109,6 +109,11 @@ public:
     const std::string& activeCameraId() const { return activeCameraId_; }
     bool canActivate() const { return blockReason().empty(); }
     std::string blockReason() const;
+    // Spotting needs no camera profile: only the simulator, a loaded flight, the axis check and the simulator's
+    // permission. Chase, fly-by and the computed runway and tower views work without a profile; views that recall
+    // profile cameras still need canActivate().
+    std::string spottingBlockReason() const;
+    bool spottingAvailable() const { return spottingBlockReason().empty(); }
     const core::CameraEngine& engine() const { return engine_; }
     const core::CameraEffects& effects() const { return effects_; }
     const core::MountVibration& mountVibration() const { return mountVibration_; }
@@ -157,11 +162,14 @@ public:
     static constexpr double kSpotLostHoldSeconds = 5;      // a lost target holds the last view this long
     static constexpr double kSpotRunwayRecheckSeconds = 1;  // runway view: the nearest runway view is re-checked
     static constexpr double kSpotRunwayDwellSeconds = 6;    // ... no more often than this, with a 15 % margin
-    std::string spotTarget(std::uint32_t objectId, traffic::SpotView view, double now);
+    // `runway` pins a runway view to that runway spot (SpotTarget.spot); without it the end is picked automatically.
+    std::string spotTarget(std::uint32_t objectId, traffic::SpotView view, double now,
+                           const std::optional<traffic::RunwaySpot>& runway = std::nullopt);
     // StopSpotting: back to the view shown before spotting began, or release when there was none.
     void stopSpotting(const std::string& reason, double now);
     // Ends spotting and keeps whatever world or aircraft view is underneath (another automatic mode takes over).
-    void endSpotting(const std::string& reason) { endSpot(reason, false, false); }
+    // Without a view underneath (a spot taken without a camera profile) the camera goes back to the simulator.
+    void endSpotting(const std::string& reason, double now);
     bool spotting() const { return spot_.has_value(); }
     // Chase and fly-by show no profile camera: ActiveCameraChanged / Snapshot report cameraId null meanwhile.
     bool spotOverlay() const { return spot_ && spot_->overlay; }
@@ -179,6 +187,18 @@ public:
     // Auto-spot (driven by the host): a lost target then waits for the host to pick the next one.
     void setAutoSpot(bool on) { autoSpot_ = on; }
     void setTrafficAirport(const profiles::airport::Geo& airport) { traffic_.setAirport(airport); }
+    // Scenery data for the computed runway-end and tower views (the loaded or nearest airport, and the one nearest
+    // the target); set by the host from its facility cache.
+    void setSpotAirports(std::vector<traffic::SpotAirport> airports) { spotAirports_ = std::move(airports); }
+    const std::vector<traffic::SpotAirport>& spotAirports() const { return spotAirports_; }
+    // The runway spot a computed runway view shows (nullopt otherwise), and whether it was pinned by SpotTarget.spot.
+    std::optional<traffic::RunwaySpot> spotRunway() const { return spot_ ? spot_->runway : std::nullopt; }
+    // Whether tower and runway views can be shown at all: profile airport cameras (with control available) or
+    // computed views from scenery data. SpottingChanged.views.
+    json spotViewsJson() const;
+    // Camera category heights for computed views (settings, else the generator's 3 m and 35 m).
+    double runwayCameraHeight() const;
+    double towerCameraHeight() const;
     const traffic::Model& traffic() const { return traffic_; }
 
 private:
@@ -198,6 +218,9 @@ private:
     void onStatus(const backend_event::CameraStatus& st, double now);
     void onCameraData(const backend_event::CameraData& d, double now);
     bool eligibleToSubmit() const;
+    // eligibleToSubmit() without the active camera: a spot taken without a camera profile submits its overlay alone.
+    bool submitReady() const;
+    bool spotBare() const { return spot_ && activeCameraId_.empty() && pendingCameraId_.empty(); }
     void submit(bool refreshTrackingPosition = true);
     const std::string& aircraftTrackingFor(const profiles::CameraEntry& cam) const;
     void updateAirportAutoZoom(double dt);
@@ -382,16 +405,25 @@ private:
         bool overlay = false, fixed = false, aboveGround = false;
         profiles::airport::Geo position{NAN, NAN, NAN};  // overlay camera
         core::Vec3 chaseOffset{NAN, NAN, NAN};
+        core::Vec3 chaseSmoothed{NAN, NAN, NAN}, chaseRate;  // critically damped chase offset and its rate
         double fovRad = NAN;
         double runwayCheckAt = 0, cameraSince = 0;
+        std::optional<traffic::RunwaySpot> runway;  // computed runway view: the runway spot shown
+        bool pinned = false;                        // ... chosen by SpotTarget.spot: never re-picked
     };
     std::optional<Spot> spot_;
     bool spotActivating_ = false, autoSpot_ = false;
     std::string spotReason_;
     traffic::Model traffic_;
+    std::vector<traffic::SpotAirport> spotAirports_;
     bool spotAims(const profiles::CameraEntry& cam) const;
     const profiles::CameraEntry* spotCamera(traffic::SpotView view, const traffic::Pose& target) const;
     std::string spotActivate(const std::string& cameraId, double now);
+    std::string spotAcquire(double now);  // takes control with no camera underneath
+    void detachSpotBase();                // the profile view under an overlay went away: keep spotting without it
+    void enforceBlock(double now);        // releases (or detaches a spot's base view) when control is blocked
+    bool profileSpotCamera(traffic::SpotView view, const traffic::Pose& target, double range) const;
+    void tickBareSpot(double dt, double now);
     void updateSpot(double dt, double now);
     void placeSpotOverlay(double dt, double now);
     void submitSpotOverlay();

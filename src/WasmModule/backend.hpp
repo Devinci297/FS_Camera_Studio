@@ -41,6 +41,14 @@ struct TrafficAircraft {
     std::string title, atcId, airline, flightNumber, model;
 };
 struct Traffic { std::vector<TrafficAircraft> aircraft; std::uint32_t userObjectId = 0; };
+// Spotting: the watched target (IModuleServices::watchTrafficTarget), every simulator frame. Meters, degrees true,
+// pitch/bank FRD as TrafficAircraft; velocity in world north, east, down m/s (SimConnect VELOCITY WORLD Z, X, -Y).
+struct TrafficTarget {
+    std::uint32_t objectId = 0;
+    double lat = NAN, lon = NAN, altitude = NAN, headingDeg = NAN, pitchDeg = 0, bankDeg = 0;
+    double velocityNorth = 0, velocityEast = 0, velocityDown = 0, groundAltitude = NAN;
+    bool onGround = false;
+};
 struct Connected { std::string simVersion; };
 struct Disconnected { std::string reason; };
 struct CameraStatus { SdkAvailability state = SdkAvailability::NotAcquired; bool gameControlled = false; };
@@ -72,7 +80,7 @@ using BackendEvent = std::variant<backend_event::Connected, backend_event::Disco
                                   backend_event::CameraData, backend_event::DefinitionList, backend_event::AircraftLoaded,
                                   backend_event::AircraftTitle, backend_event::FlightLoaded, backend_event::SimRunning,
                                   backend_event::Paused, backend_event::CameraException,
-                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::ControllerButton, backend_event::ControllerHat, backend_event::ControllerCaptureMappingStatus, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity, backend_event::GroundElevation, backend_event::Traffic>;
+                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::ControllerButton, backend_event::ControllerHat, backend_event::ControllerCaptureMappingStatus, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity, backend_event::GroundElevation, backend_event::Traffic, backend_event::TrafficTarget>;
 
 enum class CameraFlag { Interaction, AboveGround };
 
@@ -131,6 +139,9 @@ public:
     // Spotting: one poll for aircraft within `radiusMeters` of the user aircraft (SimConnect caps it at 200 km). The
     // answer arrives as a Traffic event; re-issued by the host about every 1.5 s.
     virtual bool requestTraffic(double radiusMeters) { (void)radiusMeters; return false; }
+    // Spotting: per-frame data for one aircraft (the spotting target), as TrafficTarget events; 0 stops it. A new id
+    // replaces the previous one. Re-issued by the session after a reconnect.
+    virtual bool watchTrafficTarget(std::uint32_t objectId) { (void)objectId; return false; }
 };
 
 }  // namespace fscs::host

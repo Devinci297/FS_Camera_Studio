@@ -152,7 +152,10 @@ private:
     bool handleSpotting(const protocol::Command& c, double now);
     bool spottingEvent(const std::string& name, json& payload);
     void updateSpotting(double now);
-    std::string spot(std::uint32_t objectId, traffic::SpotView view, double now);
+    std::string spot(std::uint32_t objectId, traffic::SpotView view, double now,
+                     const std::optional<traffic::RunwaySpot>& runway = std::nullopt);
+    void updateSpotAirports(double now);
+    static constexpr double kSpotAirportsSeconds = 2;
     bool setAutoSpot(bool enabled, double now, std::string* why = nullptr);
     void stopAutoSpot(const std::string& reason);
     void yieldSpotting(const std::string& reason);  // another automatic mode was turned on
@@ -170,6 +173,9 @@ private:
     std::string spotReason_, spottingEmitted_;
     double nextTrafficPoll_ = 0, lastTrafficEmit_ = -100, lastAutoSpotCheck_ = -100, autoSpotSince_ = 0, autoSpotViewAt_ = 0;
     std::uint64_t trafficEmitted_ = 0;
+    std::uint32_t watchedTarget_ = 0;  // the aircraft with per-frame data (watchTrafficTarget)
+    std::string spotAirportsKey_;
+    double nextSpotAirports_ = 0;
     json cinematicState() const;
     void emitCinematic(bool force = false);
     cinematic::Director cinematic_;

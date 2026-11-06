@@ -215,9 +215,9 @@ TEST_CASE("spotting: stale aircraft are dropped and the user aircraft, object 0 
     be::TrafficAircraft s;
     s.objectId = 5;
     s.airline = "DLH"; s.flightNumber = "4AB"; s.model = "A320";
-    CHECK_EQ(tr::label(s), std::string("DLH4AB \xC2\xB7 A320"));
+    CHECK_EQ(tr::label(s), std::string("DLH4AB - A320"));
     s.airline = "Lufthansa";
-    CHECK_EQ(tr::label(s), std::string("Lufthansa 4AB \xC2\xB7 A320"));
+    CHECK_EQ(tr::label(s), std::string("Lufthansa 4AB - A320"));
     s.airline.clear(); s.atcId = "N123AB"; s.model.clear();
     CHECK_EQ(tr::label(s), std::string("N123AB"));
     s.atcId.clear(); s.title = "Cessna 172";
@@ -309,7 +309,8 @@ struct SpotRig {
     json profile;
     std::string pilot, tower;
     std::function<std::vector<be::TrafficAircraft>(double)> truth;
-    explicit SpotRig(bool airport = true) {
+    std::function<std::optional<be::TrafficTarget>(double)> frames;  // per-frame data for the watched target
+    explicit SpotRig(bool airport = true, bool withProfile = true) {
         qual.adapterQualified = true;
         qual.captureQualified = true;
         profile = fscs::profiles::makeC172Profile("asobo-c172", "C172");
@@ -330,7 +331,7 @@ struct SpotRig {
         c.onBackendEvent(be::Connected{"1.8.16.0"}, t);
         c.onBackendEvent(be::AircraftLoaded{"SimObjects\\Airplanes\\asobo-c172\\aircraft.cfg"}, t);
         c.onBackendEvent(be::CameraStatus{SdkAvailability::NotAcquired, false}, t);
-        c.setProfile(fscs::profiles::toSnapshot(profile), t);
+        if (withProfile) c.setProfile(fscs::profiles::toSnapshot(profile), t);
         own();
     }
     void own() { const auto g = ap::world(kAirport, {-300, 0, 0}); c.setAircraftPosition(g.lat, g.lon, g.altitude, t, 90); }
@@ -348,6 +349,7 @@ struct SpotRig {
         for (int i = 0; i < static_cast<int>(std::lround(seconds * 100)); ++i) {
             t += .01;
             if (truth && t >= nextPoll) { poll(); nextPoll = t + 1.5; }
+            if (frames) if (const auto f = frames(t)) c.onBackendEvent(*f, t);
             own();
             c.tick(t);
         }
@@ -526,8 +528,8 @@ TEST_CASE("spotting coordinator: rejections - no airport views, track without a 
     SpotRig r(false);
     r.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, 0, -1000 + 60 * t, 0, 90, 60, 0, true)}; };
     r.advance(.1);
-    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Tower, r.t), std::string("No tower view is loaded for a nearby airport."));
-    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Runway, r.t), std::string("No runway or spotting views are loaded for a nearby airport."));
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Tower, r.t), std::string("No tower position is known for an airport near this aircraft yet."));
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Runway, r.t), std::string("No runway data is known for an airport near this aircraft yet."));
     CHECK_EQ(r.c.spotTarget(99, tr::SpotView::Chase, r.t), std::string("That aircraft is no longer in range."));
     r.send("ActivateCamera", {{"cameraId", r.pilot}});
     r.acquire();
@@ -643,11 +645,11 @@ struct SpotModule {
     std::vector<json> log;  // every event since the last drain
     bool leased = false, visible = true;  // the main panel renews its lease every 2 s while open
     double renewAt = 0;
-    explicit SpotModule(bool airport = true) {
+    explicit SpotModule(bool airport = true, const std::string& aircraft = "SimObjects\\Airplanes\\asobo_c172sp_g1000\\aircraft.cfg") {
         app.start(t);
         frame();
         app.onEvent(be::Connected{"1.8.16.0"}, t);
-        app.onEvent(be::AircraftLoaded{"SimObjects\\Airplanes\\asobo_c172sp_g1000\\aircraft.cfg"}, t);
+        app.onEvent(be::AircraftLoaded{aircraft}, t);
         app.onEvent(be::CameraStatus{SdkAvailability::NotAcquired, false}, t);
         frame(2);
         panel("Hello", {{"surface", "main"}});
@@ -817,7 +819,7 @@ TEST_CASE("module: SpotTarget, StopSpotting and SetAutoSpot commands, with resul
     CHECK_EQ(result["state"].get<std::string>(), std::string("tracking"));
     CHECK_EQ(result["view"].get<std::string>(), std::string("chase"));
     CHECK_EQ(result["targetId"].get<std::uint32_t>(), 7u);
-    CHECK_EQ(result["targetLabel"].get<std::string>(), std::string("DLH7AB \xC2\xB7 A320"));
+    CHECK_EQ(result["targetLabel"].get<std::string>(), std::string("DLH7AB - A320"));
     m.seconds(1);
     CHECK(m.app.coordinator().ownership() == Ownership::Active);
     auto snap = m.snapshot();
@@ -960,7 +962,8 @@ TEST_CASE("module: auto-spot picks landings, arrivals and departures at the airp
     // A landing roll appears: shown at once, in the runway view; once it slows to taxi the view becomes the tower.
     m.truth = [](double t) {
         const double rolled = std::min(t - 46.0, 20.0);
-        return std::vector<be::TrafficAircraft>{plane(11, 0, -900 + 40 * rolled, 0, 90, rolled < 15 ? 45 : 8, 0, true)};
+        const double east = -900 + 40 * std::min(rolled, 15.0) + 8 * std::max(0.0, rolled - 15);
+        return std::vector<be::TrafficAircraft>{plane(11, 0, east, 0, 90, rolled < 15 ? 40 : 8, 0, true)};
     };
     // It was seen airborne just before touchdown.
     m.app.onEvent(be::Traffic{{plane(11, 0, -1100, 15, 90, 60, -3)}, kUser}, m.t);
@@ -1051,4 +1054,662 @@ TEST_CASE("module: spotting bindings - appended, Ctrl+Alt T/Y/O/J, collision-fre
     m.seconds(.2);
     CHECK(!m.app.coordinator().spotting());
     CHECK_EQ(m.snapshot()["spotting"]["reason"].get<std::string>(), std::string("A camera was selected manually."));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Smoothness: per-frame target data, injected traffic without speeds, parked targets
+
+namespace {
+// The per-frame sample of `a`, with world velocity (north, east, down) as SimConnect VELOCITY WORLD would give it.
+be::TrafficTarget frameOf(const be::TrafficAircraft& a, core::Vec3 velocity) {
+    be::TrafficTarget f;
+    f.objectId = a.objectId;
+    f.lat = a.lat; f.lon = a.lon; f.altitude = a.altitude;
+    f.headingDeg = a.headingDeg; f.pitchDeg = a.pitchDeg; f.bankDeg = a.bankDeg;
+    f.velocityNorth = velocity.x; f.velocityEast = velocity.y; f.velocityDown = velocity.z;
+    f.onGround = a.onGround;
+    f.groundAltitude = a.groundAltitude;
+    return f;
+}
+double gap(const ap::Geo& a, const ap::Geo& b) { return ap::local(a, b).length(); }
+}  // namespace
+
+TEST_CASE("spotting: ATC text - $$: and TT: prefixes are stripped; labels are plain ASCII") {
+    CHECK_EQ(tr::cleanAtcText("$$:E190"), std::string("E190"));
+    CHECK_EQ(tr::cleanAtcText("$$E190"), std::string("E190"));
+    CHECK_EQ(tr::cleanAtcText("TT:$$:A20N"), std::string("A20N"));
+    CHECK_EQ(tr::cleanAtcText("$$:TT:ATCCOM.AC_MODEL_B738.0.text"), std::string("B738"));
+    CHECK_EQ(tr::cleanAtcText("tt:ATCCOM.AC_MODEL_A320.0.text"), std::string("A320"));
+    be::TrafficAircraft s;
+    s.airline = "CVY"; s.flightNumber = "44N"; s.model = "$$:E190";
+    tr::Model m;
+    auto p = plane(5, 0, 0, 300, 90, 70);
+    p.airline = s.airline; p.flightNumber = s.flightNumber; p.model = s.model;
+    m.update({p}, kUser, kAirport, 0);
+    const auto label = tr::label(m.find(5)->last);
+    CHECK_EQ(label, std::string("CVY44N - E190"));
+    CHECK(std::all_of(label.begin(), label.end(), [](char c) { return static_cast<unsigned char>(c) < 128; }));
+}
+
+TEST_CASE("spotting: injected traffic with zero reported speeds - speeds fitted to positions, smooth, not parked") {
+    // FSLTL-style: GROUND VELOCITY and VERTICAL SPEED read 0 while the aircraft flies east at 70 m/s, descending 4 m/s.
+    tr::Model m;
+    m.setAirport(kAirport);
+    const auto truth = [](double t) {
+        auto a = plane(9, 0, -8000 + 70 * t, 600 - 4 * t, 90, 0, 0);
+        return a;
+    };
+    const double dt = 1.0 / 60;
+    double nextPoll = 0, maxAccel = 0, maxError = 0;
+    std::vector<core::Vec3> path;
+    for (int frame = 0; frame < 60 * 20; ++frame) {
+        const double t = frame * dt;
+        if (t >= nextPoll - 1e-9) { m.update({truth(t)}, kUser, kAirport, t); nextPoll += 1.5; }
+        const auto p = m.predict(9, t);
+        CHECK(p.valid());
+        path.push_back(at(p.position));
+        const auto real = truth(t);
+        if (t > 6) maxError = std::max(maxError, (path.back() - at({real.lat, real.lon, real.altitude})).length());
+    }
+    for (std::size_t i = 60 * 6; i < path.size(); ++i)
+        maxAccel = std::max(maxAccel, ((path[i] - path[i - 1] * 2 + path[i - 2]) * (1 / (dt * dt))).length());
+    CHECK(maxAccel < 3);     // no surge and stop between polls
+    CHECK(maxError < 1);
+    const auto* e = m.find(9);
+    CHECK(e->status == tr::Status::Arriving);  // not parked: within 15 NM, descending
+    const auto doc = m.toJson(kAirport, 20);
+    const auto& listed = doc["aircraft"][0];
+    CHECK_NEAR(listed["groundSpeedKt"].get<double>(), 70 * tr::kKnotsPerMps, 2);
+    CHECK_NEAR(listed["verticalSpeedFpm"].get<double>(), -4 * tr::kFpmPerMps, 20);
+    // On the ground at 20 m/s with a zero report: a takeoff roll, not parked.
+    tr::Model g;
+    g.setAirport(kAirport);
+    for (double t = 0; t <= 4.5; t += 1.5) g.update({plane(10, 0, -900 + 25 * t, 0, 90, 0, 0, true)}, kUser, kAirport, t);
+    CHECK(g.find(10)->status == tr::Status::Takeoff);  // 25 m/s = 48.6 kt: a roll
+    CHECK_NEAR(g.find(10)->last.groundSpeed, 25, .5);
+    for (double t = 6; t <= 12; t += 1.5) g.update({plane(10, 0, -900 + 25 * 4.5 + 10 * (t - 4.5), 0, 90, 0, 0, true)}, kUser, kAirport, t);
+    CHECK(g.find(10)->status == tr::Status::Taxi);  // 10 m/s: taxiing
+    CHECK_NEAR(g.find(10)->last.groundSpeed, 10, .5);
+    // A plausible report is kept, and a fit across a jump is never a speed.
+    tr::Model j;
+    j.update({plane(11, 0, 0, 0, 90, 15, 0, true)}, kUser, kAirport, 0);
+    j.update({plane(11, 0, 500, 0, 90, 15, 0, true)}, kUser, kAirport, 1.5);
+    CHECK_NEAR(j.find(11)->last.groundSpeed, 15, 1e-9);
+}
+
+TEST_CASE("spotting: per-frame target data is shown exactly, the poll never disturbs it, and losing it blends back") {
+    tr::Model m;
+    const auto truth = [](double t) { return plane(7, 0, -6000 + 70 * t, 300 + 2 * t, 90, 70, 2); };
+    // The poll lags and is off by 20 m: per-frame data wins.
+    for (double t = 0; t <= 3; t += 1.5) m.update({plane(7, 20, -6000 + 70 * t, 300, 90, 70)}, kUser, kAirport, t);
+    const double dt = 1.0 / 60;
+    double t = 3;
+    for (int i = 0; i < 120; ++i, t += dt) {
+        m.updateTarget(frameOf(truth(t), {0, 70, -2}), t);
+        if (i == 60) m.update({plane(7, 20, -6000 + 70 * t, 300, 90, 70)}, kUser, kAirport, t);  // a poll mid-way
+        const auto p = m.predict(7, t);
+        const auto real = truth(t);
+        CHECK_NEAR(gap(p.position, {real.lat, real.lon, real.altitude}), 0, 1e-9);  // zero error at the sample time
+        CHECK_NEAR(p.headingDeg, 90, 1e-9);
+        CHECK(m.frameFresh(7, t));
+    }
+    t -= dt;
+    const auto last = truth(t);
+    // Within 0.1 s: extrapolated with the sample's velocity; beyond that it continues and blends into the poll prediction.
+    CHECK_NEAR(at(m.predict(7, t + .05).position).y - at({last.lat, last.lon, last.altitude}).y, 3.5, 1e-6);
+    CHECK_NEAR(at(m.predict(7, t + .3).position).y - at({last.lat, last.lon, last.altitude}).y, 21, .5);
+    // Samples stop: after 0.5 s the pose blends into the poll prediction with no step at 60 fps.
+    double maxStep = 0;
+    ap::Geo prev = m.predict(7, t).position;
+    for (int i = 1; i < 180; ++i) {
+        const auto now = m.predict(7, t + i * dt).position;
+        maxStep = std::max(maxStep, gap(prev, now));
+        prev = now;
+    }
+    CHECK(maxStep < 70 * dt * 2);  // never more than about two frames of travel
+    CHECK(!m.frameFresh(7, t + 1));
+    // Velocity is checked against the positions: a zero or wrongly mapped VELOCITY WORLD is replaced by a fit.
+    tr::Model z;
+    z.update({plane(8, 0, 0, 300, 90, 70)}, kUser, kAirport, 0);
+    double u = 0;
+    for (int i = 0; i < 40; ++i, u += dt) z.updateTarget(frameOf(plane(8, 0, 70 * u, 300, 90, 0), {0, 0, 0}), u);
+    CHECK_NEAR(z.predict(8, u - dt).velocity.y, 70, .5);
+    CHECK_NEAR(z.predict(8, u - dt).velocity.x, 0, .5);
+    tr::Model w;
+    w.update({plane(8, 0, 0, 300, 90, 70)}, kUser, kAirport, 0);
+    u = 0;
+    for (int i = 0; i < 40; ++i, u += dt) w.updateTarget(frameOf(plane(8, 0, 70 * u, 300, 90, 0), {0, -70, 0}), u);  // reversed
+    CHECK_NEAR(w.predict(8, u - dt).velocity.y, 70, .5);
+    CHECK(tr::chaseDirectionDeg(w.predict(8, u - dt)) > 80);
+    // Unknown objects are ignored.
+    w.updateTarget(frameOf(plane(99, 0, 0, 300, 90, 0), {}), u);
+    CHECK(w.find(99) == nullptr);
+}
+
+TEST_CASE("spotting: a parked target is perfectly still despite noisy reports, polled or per frame") {
+    std::uint64_t seed = 99;
+    const auto noise = [&] {
+        seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+        return static_cast<double>(seed >> 11) / 9007199254740992.0 * 2 - 1;
+    };
+    const auto noisy = [&](double meters, double degrees) {
+        auto a = plane(5, 100, 200, 0, 45, .05 * std::abs(noise()), .02 * noise(), true);
+        const auto g = ap::world({a.lat, a.lon, a.altitude}, {meters * noise(), meters * noise(), meters / 2 * noise()});
+        a.lat = g.lat; a.lon = g.lon; a.altitude = g.altitude;
+        a.headingDeg += degrees * noise();
+        return a;
+    };
+    tr::Model m;
+    m.update({noisy(.2, .3)}, kUser, kAirport, 0);
+    const auto first = m.predict(5, 0);
+    for (double t = 1.5; t < 30; t += 1.5) {
+        m.update({noisy(.2, .3)}, kUser, kAirport, t);
+        for (double f = 0; f < 1.5; f += .1) {
+            const auto p = m.predict(5, t + f);
+            CHECK_NEAR(gap(p.position, first.position), 0, 1e-9);
+            CHECK_NEAR(p.headingDeg, first.headingDeg, 1e-9);
+            CHECK_NEAR(p.velocity.length(), 0, 1e-12);
+        }
+    }
+    CHECK(m.find(5)->status == tr::Status::Parked);
+    // Per frame: 5 cm of jitter and a few mm/s of velocity noise never move it either.
+    double t = 30;
+    m.updateTarget(frameOf(noisy(.05, .1), {.001, -.002, 0}), t);
+    const auto held = m.predict(5, t);
+    for (int i = 0; i < 300; ++i) {
+        t += 1.0 / 60;
+        m.updateTarget(frameOf(noisy(.05, .1), {.003 * noise(), .003 * noise(), 0}), t);
+        CHECK_NEAR(gap(m.predict(5, t).position, held.position), 0, 1e-9);
+        CHECK_NEAR(m.predict(5, t).headingDeg, held.headingDeg, 1e-9);
+    }
+    // Moving off is followed at once.
+    for (int i = 0; i < 30; ++i) {
+        t += 1.0 / 60;
+        const auto a = plane(5, 100, 200 + 3 * (i + 1) / 60.0 + .5, 0, 45, 3, 0, true);
+        m.updateTarget(frameOf(a, {0, 3, 0}), t);
+    }
+    CHECK(gap(m.predict(5, t).position, held.position) > .5);
+}
+
+TEST_CASE("spotting: chase direction - heading when slow, track when fast; smoothDamp is continuous") {
+    tr::Pose p;
+    p.position = ap::world(kAirport, {0, 0, -100});
+    p.headingDeg = 0;
+    p.velocity = {0, 5, 0};  // sliding east at 5 m/s, nose north (a slow, noisy track)
+    CHECK_NEAR(tr::chaseDirectionDeg(p), 0, 1e-9);
+    CHECK_NEAR(tr::chaseOffset(p).x, -60, 1e-9);
+    p.velocity = {0, 12, 0};
+    CHECK_NEAR(tr::chaseDirectionDeg(p), 90, 1e-9);
+    p.velocity = {0, 8, 0};
+    const double mid = tr::chaseDirectionDeg(p);
+    CHECK(mid > 10 && mid < 80);
+    core::Vec3 rate, x{NAN, NAN, NAN};
+    x = tr::smoothDamp(x, rate, {10, 0, 0}, .01);
+    CHECK_NEAR(x.x, 10, 1e-12);
+    double prevStep = 0, maxChange = 0, maxStep = 0;
+    for (int i = 0; i < 300; ++i) {
+        const auto before = x;
+        x = tr::smoothDamp(x, rate, {20, 0, 0}, .01);
+        const double step = x.x - before.x;
+        maxStep = std::max(maxStep, step);
+        if (i > 0) maxChange = std::max(maxChange, std::abs(step - prevStep));
+        prevStep = step;
+    }
+    CHECK_NEAR(x.x, 20, 1e-3);
+    CHECK(maxStep < .4);     // a 10 m change of target is eased in, never jumped to
+    CHECK(maxChange < .07);  // the rate changes gradually: no kink
+}
+
+TEST_CASE("spotting: runway ends and spots from scenery data - geometry, end selection and SpotTarget.spot parsing") {
+    const std::vector<tr::SpotAirport> airports{tr::spotAirport(airportFixture())};
+    const auto& a = airports.front();
+    CHECK_EQ(a.icao, std::string("KAAA"));
+    CHECK_EQ(a.ends.size(), std::size_t{2});
+    const auto* e09 = tr::findRunwayEnd(airports, "KAAA", "09");
+    const auto* e27 = tr::findRunwayEnd(airports, "KAAA", "27");
+    CHECK(e09 && e27);
+    if (!e09 || !e27) return;
+    CHECK_NEAR(e09->headingDeg, 90, 1e-9);
+    CHECK_NEAR(at(e09->threshold).y, -1000, .01);
+    CHECK_NEAR(at(e27->threshold).y, 1000, .01);
+    // Fence line: 150 m behind the threshold, 80 m to the right of the landing direction, 3 m up.
+    const auto fence = tr::runwaySpot(*e09, "fence", 3);
+    CHECK_EQ(fence.kind, std::string("fence"));
+    const auto f = at(tr::spotPosition(*e09, fence));
+    CHECK_NEAR(f.y, -1150, .01);
+    CHECK_NEAR(f.x, -80, .01);  // right of an eastbound landing is south
+    CHECK_NEAR(-f.z, 3, .01);
+    const auto f27 = at(tr::spotPosition(*e27, tr::runwaySpot(*e27, "fence", 3)));
+    CHECK_NEAR(f27.y, 1150, .01);
+    CHECK_NEAR(f27.x, 80, .01);
+    const auto approach = at(tr::spotPosition(*e09, tr::runwaySpot(*e09, "approach", 3)));
+    CHECK_NEAR(approach.y, -1000 - 1852, .01);
+    CHECK_NEAR(approach.x, 0, .01);
+    CHECK_NEAR(-approach.z, 1852 * std::tan(3 * core::kDegToRad) - 90, .01);
+    CHECK_NEAR(at(tr::spotPosition(*e09, tr::runwaySpot(*e09, "threshold", 3))).x, -32, .01);
+    // Tower: the scenery tower at airport elevation; the generator's virtual tower when scenery has none.
+    CHECK_NEAR(at(a.tower).x, 111, 1);
+    CHECK(!a.virtualTower);
+    CHECK_NEAR(at(tr::towerPosition(a, 35)).z, -35, .01);
+    auto noTower = airportFixture();
+    noTower["tower"] = {{"lat", 0}, {"lon", 0}, {"altitude", 0}};
+    const auto v = tr::spotAirport(noTower);
+    CHECK(v.virtualTower);
+    CHECK_NEAR(std::abs(at(v.tower).x), 300, .5);  // abeam the runway midpoint
+    // End selection.
+    const auto pose = [](double north, double east, double height, double heading, double speed) {
+        tr::Pose p;
+        p.position = ap::world(kAirport, {north, east, -height});
+        p.headingDeg = heading;
+        p.velocity = {speed * std::cos(heading * core::kDegToRad), speed * std::sin(heading * core::kDegToRad), 0};
+        return p;
+    };
+    bool aligned = false;
+    // Arriving from the west on final for 09 (5 km out, 60 m left of the centerline): 09.
+    auto* pick = tr::pickRunwayEnd(airports, pose(60, -6000, 250, 92, 70), tr::Status::Arriving, &aligned);
+    CHECK(pick == e09);
+    CHECK(aligned);
+    // Landing roll on 09 past the middle, nearer the 27 threshold: still 09.
+    CHECK(tr::pickRunwayEnd(airports, pose(0, 600, 0, 90, 40), tr::Status::Landing) == e09);
+    // Taking off on 09 from its threshold: the far end, 27 (it lifts off over 27's approach side).
+    CHECK(tr::pickRunwayEnd(airports, pose(0, -900, 0, 90, 50), tr::Status::Takeoff, &aligned) == e27);
+    CHECK(aligned);
+    CHECK(tr::pickRunwayEnd(airports, pose(0, 3000, 300, 90, 80), tr::Status::Departing) == e27);
+    // Parked or not lined up: the nearest end.
+    CHECK(tr::pickRunwayEnd(airports, pose(200, 800, 0, 0, 0), tr::Status::Parked, &aligned) == e27);
+    CHECK(!aligned);
+    CHECK(tr::pickRunwayEnd(airports, pose(3000, -900, 300, 0, 70), tr::Status::Arriving) == e09);  // crossing: nearest
+    CHECK(tr::pickRunwayEnd(airports, pose(0, 40000, 300, 270, 70), tr::Status::Arriving) == nullptr);  // too far away
+    // SpotTarget.spot.
+    std::string error;
+    auto parsed = tr::parseRunwaySpot({{"icao", "KAAA"}, {"runwayEnd", "27"}, {"kind", "custom"}, {"behindMeters", 40}, {"sideMeters", -25}, {"heightMeters", 10}},
+                                      airports, 3, error);
+    CHECK(parsed.has_value());
+    if (parsed) {
+        CHECK_EQ(parsed->kind, std::string("custom"));
+        CHECK_NEAR(parsed->sideMeters, -25, 1e-12);
+        const auto c = at(tr::spotPosition(*e27, *parsed));
+        CHECK_NEAR(c.y, 1040, .01);
+        CHECK_NEAR(c.x, -25, .01);
+        CHECK_NEAR(-c.z, 10, .01);
+    }
+    parsed = tr::parseRunwaySpot({{"icao", "KAAA"}, {"runwayEnd", "09"}}, airports, 3, error);
+    CHECK(parsed.has_value() && parsed->kind == "fence" && parsed->behindMeters == 150);
+    CHECK(!tr::parseRunwaySpot({{"icao", "KAAA"}, {"runwayEnd", "18"}}, airports, 3, error).has_value());
+    CHECK(error.find("not known") != std::string::npos);
+    CHECK(!tr::parseRunwaySpot({{"icao", "KAAA"}, {"runwayEnd", "09"}, {"kind", "roof"}}, airports, 3, error).has_value());
+    CHECK(!tr::parseRunwaySpot({{"icao", "KAAA"}, {"runwayEnd", "09"}, {"heightMeters", -1}}, airports, 3, error).has_value());
+    const auto j = tr::toJson(tr::runwaySpot(*e09, "fence", 3));
+    for (const char* k : {"icao", "runwayEnd", "kind", "behindMeters", "sideMeters", "heightMeters"}) CHECK(j.contains(k));
+}
+
+TEST_CASE("spotting coordinator: chase on per-frame data - exact aim, rigid offset, fallback without a step, target terrain only") {
+    SpotRig r;
+    r.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, 0, -6000 + 70 * t, 300 + 3 * std::sin(t), 90 + 5 * std::sin(t / 3), 70)}; };
+    // The aircraft drawn wanders off any straight-line prediction; the per-frame data is what is drawn.
+    r.frames = [&r](double t) {
+        const auto a = r.truth(t)[0];
+        return std::optional<be::TrafficTarget>(frameOf(a, {0, 70, -3 * std::cos(t)}));
+    };
+    r.send("ActivateCamera", {{"cameraId", r.pilot}});
+    r.acquire();
+    r.advance(.5);
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Chase, r.t), std::string());
+    r.advance(4);
+    double maxAimError = 0, maxTargetError = 0, maxOffsetJerk = 0;
+    core::Vec3 prev2{NAN, NAN, NAN}, prev{NAN, NAN, NAN};
+    for (int i = 0; i < 300; ++i) {
+        r.advance(.01);
+        const auto real = r.truth(r.t)[0];
+        const ap::Geo drawn{real.lat, real.lon, real.altitude};
+        maxTargetError = std::max(maxTargetError, gap(r.c.spotPose().position, drawn));
+        const auto expected = tr::aim(r.camera(), drawn);
+        maxAimError = std::max({maxAimError, std::abs(core::wrapDeg(r.looking().headingDeg - expected->headingDeg)),
+                                std::abs(r.looking().pitchDeg - expected->pitchDeg)});
+        const auto offset = ap::local(drawn, r.camera());
+        if (prev2.finite()) maxOffsetJerk = std::max(maxOffsetJerk, (offset - prev * 2 + prev2).length());
+        prev2 = prev;
+        prev = offset;
+    }
+    CHECK(maxTargetError < 1e-6);  // the pose is the simulator's own
+    CHECK(maxAimError < 1e-6);     // degrees: the target stays exactly centred
+    CHECK(maxOffsetJerk < .005);   // the camera rides with the target; its offset changes smoothly
+    // Terrain under the user aircraft never moves the chase (only the target's own ground altitude counts).
+    const auto before = r.camera().altitude - r.truth(r.t)[0].altitude;
+    r.c.onBackendEvent(be::GroundElevation{kAirport.altitude + 500}, r.t);
+    r.advance(.5);
+    CHECK_NEAR(r.camera().altitude - r.truth(r.t)[0].altitude, before, .05);
+    // Per-frame data stops: the camera continues without a step.
+    r.frames = nullptr;
+    double maxStep = 0;
+    ap::Geo last = r.camera();
+    for (int i = 0; i < 300; ++i) {
+        r.advance(.01);
+        maxStep = std::max(maxStep, gap(last, r.camera()));
+        last = r.camera();
+    }
+    CHECK(maxStep < 70 * .01 * 1.6);
+}
+
+TEST_CASE("spotting coordinator: a parked target gives a perfectly still chase and fly-by") {
+    SpotRig r;
+    std::uint64_t seed = 7;
+    const auto noise = [&seed] {
+        seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+        return static_cast<double>(seed >> 11) / 9007199254740992.0 * 2 - 1;
+    };
+    r.truth = [&noise](double) {
+        auto a = plane(7, 200, 300, 0, 120, 0, 0, true);
+        const auto g = ap::world({a.lat, a.lon, a.altitude}, {.2 * noise(), .2 * noise(), .1 * noise()});
+        a.lat = g.lat; a.lon = g.lon; a.altitude = g.altitude;
+        a.headingDeg += .3 * noise();
+        a.groundAltitude += .2 * noise();
+        return std::vector<be::TrafficAircraft>{a};
+    };
+    r.send("ActivateCamera", {{"cameraId", r.pilot}});
+    r.acquire();
+    r.advance(.5);
+    for (const auto view : {tr::SpotView::Chase, tr::SpotView::Flyby}) {
+        CHECK_EQ(r.c.spotTarget(7, view, r.t), std::string());
+        r.advance(8);  // settled
+        const auto settled = r.shown();
+        const auto submissions = r.c.submissions();
+        r.advance(10);  // several noisy polls
+        CHECK_EQ(r.c.submissions(), submissions);  // nothing new to submit: perfectly still
+        CHECK_NEAR(r.shown().x, settled.x, 0);
+        CHECK_NEAR(r.shown().headingDeg, settled.headingDeg, 0);
+        CHECK_NEAR(r.shown().fovRad, settled.fovRad, 0);
+    }
+    // Per-frame noise (a few cm) does not shake it either.
+    r.frames = [&noise](double) {
+        auto a = plane(7, 200, 300, 0, 120, 0, 0, true);
+        const auto g = ap::world({a.lat, a.lon, a.altitude}, {.04 * noise(), .04 * noise(), .02 * noise()});
+        a.lat = g.lat; a.lon = g.lon; a.altitude = g.altitude;
+        a.headingDeg += .1 * noise();
+        return std::optional<be::TrafficTarget>(frameOf(a, {.002 * noise(), .002 * noise(), 0}));
+    };
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Chase, r.t), std::string());
+    r.advance(8);
+    const auto submissions = r.c.submissions();
+    r.advance(5);
+    CHECK(r.c.submissions() <= submissions + 1);
+}
+
+TEST_CASE("spotting coordinator: slow targets are chased from behind the nose, not along a noisy track") {
+    SpotRig r;
+    // Taxiing north at 4 m/s while the reported track wobbles 40 degrees either side.
+    r.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, -500 + 4 * t, 300, 0, 0, 4, 0, true)}; };
+    r.frames = [&r](double t) {
+        const double wobble = 40 * core::kDegToRad * std::sin(t * 3);
+        return std::optional<be::TrafficTarget>(frameOf(r.truth(t)[0], {4 * std::cos(wobble), 4 * std::sin(wobble), 0}));
+    };
+    r.send("ActivateCamera", {{"cameraId", r.pilot}});
+    r.acquire();
+    r.advance(.2);
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Chase, r.t), std::string());
+    double maxSide = 0;
+    r.advance(3);
+    for (int i = 0; i < 300; ++i) {
+        r.advance(.01);
+        const auto offset = ap::local(r.c.spotPose().position, r.camera());
+        CHECK_NEAR(offset.x, -60, .5);
+        maxSide = std::max(maxSide, std::abs(offset.y));
+    }
+    CHECK(maxSide < .5);
+}
+
+TEST_CASE("spotting coordinator: without a camera profile - chase takes control with nothing underneath, StopSpotting releases") {
+    SpotRig r(false, false);
+    r.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, 0, -6000 + 70 * t, 300, 90, 70)}; };
+    r.advance(.1);
+    CHECK(!r.c.canActivate());
+    CHECK(r.c.spottingAvailable());
+    const auto caps = r.c.capabilitiesJson();
+    CHECK(!caps["canActivate"].get<bool>());
+    CHECK(caps["spottingAvailable"].get<bool>());
+    CHECK(caps["spottingBlockReason"].is_null());
+    CHECK_EQ(js::str(caps, "blockReason"), std::string("No camera profile is open for this aircraft."));
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Chase, r.t), std::string());
+    CHECK(r.c.ownership() == Ownership::Acquiring);
+    CHECK(r.backend.count("acquire") == 1);
+    r.acquire();
+    r.advance(1);
+    CHECK(r.c.ownership() == Ownership::Active);
+    CHECK(r.c.activeCameraId().empty());
+    CHECK(r.c.spotOverlay());
+    CHECK(!r.backend.submitted.empty());
+    CHECK(r.shown().referential == Referential::World);
+    r.checkAimed();
+    const auto offset = ap::local(r.c.spotPose().position, r.camera());
+    CHECK_NEAR(offset.y, -60, 1);
+    json active;
+    for (const auto& [n, p] : r.events) if (n == "ActiveCameraChanged") active = p;
+    CHECK(active["cameraId"].is_null());
+    // Fly-by and Next target work the same way; binoculars still zoom; glance is refused; mouse look is harmless.
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Flyby, r.t), std::string());
+    r.advance(1);
+    CHECK(r.c.spotOverlay());
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Chase, r.t), std::string());
+    r.advance(1);
+    r.events.clear();
+    r.c.onAction({fscs::profiles::Action::Binoculars, 0, true, 5}, r.t);
+    r.advance(1);
+    CHECK(r.shown().fovRad < tr::kChaseFovDeg * core::kDegToRad * .5);
+    r.c.onAction({fscs::profiles::Action::Binoculars, 0, false, 5}, r.t);
+    r.c.onAction({fscs::profiles::Action::GlanceNext, 0, true}, r.t);
+    json triggered;
+    for (const auto& [n, p] : r.events) if (n == "BindingTriggered") triggered = p;
+    CHECK(!js::str(triggered, "result").empty());
+    CHECK_EQ(status(r.send("MouseLookDelta", {{"headingDeg", 2}, {"pitchDeg", 1}})), std::string("Rejected"));
+    r.c.onBackendEvent(be::NativeMouseButton{true}, r.t);
+    r.c.onBackendEvent(be::NativeMouseAxis{true, 4000}, r.t);
+    r.advance(.5);
+    CHECK(r.c.spotting());
+    r.checkAimed();
+    // Track holds over the chase; tower and runway without data are refused plainly.
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Tower, r.t), std::string("No tower position is known for an airport near this aircraft yet."));
+    CHECK(r.c.spotting());
+    // Opening a profile, closing it again and a profile for another aircraft never release the spot.
+    r.c.setProfile(fscs::profiles::toSnapshot(r.profile), r.t);
+    r.advance(.5);
+    CHECK(r.c.spotting());
+    CHECK(r.c.ownership() == Ownership::Active);
+    auto other = fscs::profiles::toSnapshot(r.profile);
+    other.modelKey = "another-aircraft";
+    r.c.setProfile(other, r.t);
+    r.c.setProfile(std::nullopt, r.t);
+    r.c.setSettings(fscs::profiles::HostSettings{}, r.t);
+    r.advance(.5);
+    CHECK(r.c.spotting());
+    CHECK(r.c.ownership() == Ownership::Active);
+    // ... unless spotting itself becomes unavailable.
+    r.c.onBackendEvent(be::CameraStatus{SdkAvailability::Acquired, true}, r.t);  // the simulator pauses the camera
+    r.advance(.2);
+    r.c.onBackendEvent(be::CameraStatus{SdkAvailability::Acquired, false}, r.t);
+    r.advance(.2);
+    CHECK(r.c.ownership() == Ownership::Active);
+    CHECK(r.c.spotting());
+    // StopSpotting: nothing to go back to, so the simulator gets the camera back.
+    r.c.stopSpotting("Spotting stopped.", r.t);
+    CHECK(!r.c.spotting());
+    CHECK(r.c.ownership() == Ownership::Releasing);
+    r.c.onBackendEvent(be::CameraStatus{SdkAvailability::NotAcquired, false}, r.t);
+    r.advance(.1);
+    CHECK(r.c.ownership() == Ownership::Observing);
+    // Release and Panic as before.
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Chase, r.t), std::string());
+    r.acquire();
+    r.c.panicRelease(r.t);
+    CHECK(!r.c.spotting());
+    r.c.onBackendEvent(be::CameraStatus{SdkAvailability::NotAcquired, false}, r.t);
+    r.advance(.1);
+    // Spotting unavailable (axis check pending): refused with that reason.
+    r.qual.adapterQualified = false;
+    r.c.refreshQualification();
+    CHECK(!r.c.spottingAvailable());
+    CHECK(r.c.capabilitiesJson()["spottingBlockReason"].is_string());
+    CHECK(r.c.spotTarget(7, tr::SpotView::Chase, r.t).find("Axis mapping") != std::string::npos);
+}
+
+TEST_CASE("spotting coordinator: a profile going away under a chase keeps the spot without its base view") {
+    SpotRig r;
+    r.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, 0, -6000 + 70 * t, 300, 90, 70)}; };
+    r.send("ActivateCamera", {{"cameraId", r.pilot}});
+    r.acquire();
+    r.advance(.5);
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Chase, r.t), std::string());
+    r.advance(1);
+    CHECK_EQ(r.c.activeCameraId(), r.pilot);
+    r.c.setProfile(std::nullopt, r.t);
+    r.advance(1);
+    CHECK(r.c.spotting());
+    CHECK(r.c.ownership() == Ownership::Active);
+    CHECK(r.c.activeCameraId().empty());
+    const auto n = r.c.submissions();
+    r.advance(.5);
+    CHECK(r.c.submissions() > n);
+    r.checkAimed();
+    r.c.stopSpotting("Spotting stopped.", r.t);
+    CHECK(r.c.ownership() == Ownership::Releasing);
+    // A profile tower view (not an overlay) still releases when the profile goes.
+    r.c.onBackendEvent(be::CameraStatus{SdkAvailability::NotAcquired, false}, r.t);
+    r.c.setProfile(fscs::profiles::toSnapshot(r.profile), r.t);
+    r.advance(.2);
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Tower, r.t), std::string());
+    r.acquire();
+    CHECK_EQ(r.c.activeCameraId(), r.tower);
+    r.c.setProfile(std::nullopt, r.t);
+    CHECK(!r.c.spotting());
+}
+
+TEST_CASE("spotting coordinator: computed runway and tower views from scenery data, with or without a profile") {
+    SpotRig r(false, false);
+    r.c.setSpotAirports({tr::spotAirport(airportFixture())});
+    // On final for 09, descending.
+    r.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, 0, -7000 + 70 * t, 370 - 3.7 * t, 90, 70, -3.7)}; };
+    r.advance(.1);
+    const auto views = r.c.spotViewsJson();
+    CHECK(views["runway"].get<bool>());
+    CHECK(views["tower"].get<bool>());
+    CHECK(r.c.spotViewAvailable(tr::SpotView::Runway, 7, r.t));
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Runway, r.t), std::string());
+    r.acquire();
+    r.advance(1);
+    CHECK(r.c.spotOverlay());
+    const auto spot = r.c.spotRunway();
+    CHECK(spot.has_value());
+    if (spot) {
+        CHECK_EQ(spot->runwayEnd, std::string("09"));
+        CHECK_EQ(spot->kind, std::string("fence"));
+    }
+    const auto place = at(r.camera());
+    CHECK_NEAR(place.y, -1150, .5);
+    CHECK_NEAR(place.x, -80, .5);
+    CHECK_NEAR(-place.z, 3, .1);
+    r.checkAimed();
+    // Zooms on the target like fly-by as it comes close; stays put.
+    const double far = r.shown().fovRad;
+    r.advance(80);
+    CHECK_NEAR(gap(r.camera(), ap::world(kAirport, place)), 0, 1e-6);
+    CHECK(r.shown().fovRad > far);
+    r.checkAimed();
+    // A pinned spot is kept: another end, a custom offset.
+    const tr::RunwaySpot pinned{"KAAA", "27", "custom", 50, 20, 8};
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Runway, r.t, pinned), std::string());
+    r.advance(10);
+    const auto custom = at(r.camera());
+    CHECK_NEAR(custom.y, 1050, .5);
+    CHECK_NEAR(custom.x, 20, .5);
+    CHECK_NEAR(-custom.z, 8, .1);
+    CHECK(r.c.spotTarget(7, tr::SpotView::Runway, r.t, tr::RunwaySpot{"KAAA", "36", "fence", 0, 0, 0}).find("not known") != std::string::npos);
+    // Tower: the scenery tower position at the tower camera height.
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Tower, r.t), std::string());
+    r.advance(.5);
+    CHECK_NEAR(at(r.camera()).x, 111, 1);
+    CHECK_NEAR(-at(r.camera()).z, 35, .1);
+    r.checkAimed();
+    // Without runway data, refused plainly.
+    r.c.setSpotAirports({});
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Runway, r.t), std::string("No runway data is known for an airport near this aircraft yet."));
+}
+
+TEST_CASE("spotting coordinator: computed runway view re-picks the end as the target goes round, with the dwell") {
+    SpotRig r(false, false);
+    r.c.setSpotAirports({tr::spotAirport(airportFixture())});
+    // Parked near the 27 end, then taxiing west along the runway towards 09.
+    r.truth = [](double t) {
+        const double east = t < 5 ? 900 : std::max(-900.0, 900 - 15 * (t - 5));
+        return std::vector<be::TrafficAircraft>{plane(7, 50, east, 0, 270, t < 5 ? 0 : 15, 0, true)};
+    };
+    r.advance(.2);
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Runway, r.t), std::string());
+    r.acquire();
+    r.advance(1);
+    const auto end = [&r] { const auto spot = r.c.spotRunway(); return spot ? spot->runwayEnd : std::string(); };
+    CHECK_EQ(end(), std::string("27"));
+    r.advance(130);  // taxied to the far end
+    CHECK_EQ(end(), std::string("09"));
+    r.checkAimed();
+}
+
+TEST_CASE("module: per-frame watch follows spotting; runway spots from cached scenery data without a profile; auto-spot prefers runway") {
+    // An aircraft without any camera profile, and no temporary airport sets.
+    SpotModule m(false, "SimObjects\\Airplanes\\test_jet\\aircraft.cfg");
+    CHECK_EQ(status(m.setting("airportAutoGenerate", false)), std::string("Completed"));
+    m.truth = [](double t) {
+        return std::vector<be::TrafficAircraft>{plane(7, 0, -9000 + 70 * t, 470 - 3.7 * t, 90, 70, -3.7), plane(8, 0, 900, 0, 270, 0, 0, true)};
+    };
+    m.seconds(2);
+    CHECK(!m.app.coordinator().canActivate());
+    auto snap = m.snapshot();
+    CHECK(snap["capabilities"]["spottingAvailable"].get<bool>());
+    CHECK(!snap["capabilities"]["canActivate"].get<bool>());
+    CHECK(!snap["spotting"]["views"]["runway"].get<bool>());
+    // Chase without a profile; the watch starts, changes with the target and stops with spotting.
+    CHECK_EQ(status(m.panel("SpotTarget", {{"objectId", 8}, {"view", "chase"}})), std::string("Completed"));
+    m.seconds(.5);
+    CHECK(m.app.coordinator().ownership() == Ownership::Active);
+    CHECK(!m.services.watchRequests.empty());
+    CHECK_EQ(m.services.watchRequests.back(), 8u);
+    CHECK_EQ(status(m.panel("SpotTarget", {{"objectId", 7}, {"view", "flyby"}})), std::string("Completed"));
+    m.seconds(.2);
+    CHECK_EQ(m.services.watchRequests.back(), 7u);
+    m.app.onEvent(be::TrafficTarget{frameOf(m.truth(m.t)[0], {0, 70, 3.7})}, m.t);
+    m.frame();
+    CHECK(m.app.coordinator().traffic().frameFresh(7, m.t));
+    CHECK_EQ(status(m.panel("StopSpotting")), std::string("Completed"));
+    m.seconds(.2);
+    CHECK_EQ(m.services.watchRequests.back(), 0u);
+    CHECK(m.app.coordinator().ownership() == Ownership::Releasing);
+    m.app.onEvent(be::CameraStatus{SdkAvailability::NotAcquired, false}, m.t);
+    m.seconds(.2);
+    // Scenery knows a nearby airport; auto-spot asks for its facility data and then shows the arrival from the 09 fence.
+    m.app.onEvent(be::AirportList{json::array({{{"icao", "KAAA"}, {"region", "K1"}, {"lat", 40}, {"lon", -90}, {"altitude", 100}}}), true}, m.t);
+    CHECK_EQ(status(m.panel("SetAutoSpot", {{"enabled", true}})), std::string("Completed"));
+    m.seconds(3);
+    bool answered = false;
+    for (auto it = m.services.airportRequests.rbegin(); it != m.services.airportRequests.rend() && !answered; ++it)
+        if (it->first == "KAAA") { m.app.onEvent(be::AirportFacility{it->second, airportFixture(), ""}, m.t); answered = true; }
+    CHECK(answered);
+    m.seconds(8);
+    CHECK(m.app.coordinator().spotting());
+    CHECK_EQ(m.app.coordinator().spotTargetId(), 7u);
+    CHECK(m.app.coordinator().spotView() == tr::SpotView::Runway);
+    CHECK(m.app.coordinator().spotOverlay());
+    snap = m.snapshot();
+    CHECK(snap["spotting"]["views"]["runway"].get<bool>());
+    CHECK_EQ(snap["spotting"]["runways"].size(), std::size_t{2});
+    CHECK_EQ(js::str(snap["spotting"]["spot"], "runwayEnd"), std::string("09"));
+    CHECK_EQ(js::str(snap["spotting"]["spot"], "kind"), std::string("fence"));
+    CHECK(snap["activeCamera"]["cameraId"].is_null());
+    // SpotTarget.spot pins a runway end; it needs the runway view and a known end.
+    auto ack = m.panel("SpotTarget", {{"objectId", 7}, {"view", "runway"}, {"spot", {{"icao", "KAAA"}, {"runwayEnd", "27"}, {"kind", "approach"}}}});
+    CHECK_EQ(status(ack), std::string("Completed"));
+    CHECK_EQ(js::str(ack["result"]["spotting"]["spot"], "runwayEnd"), std::string("27"));
+    CHECK_EQ(js::str(ack["result"]["spotting"]["spot"], "kind"), std::string("approach"));
+    CHECK_EQ(status(m.panel("SpotTarget", {{"objectId", 7}, {"view", "chase"}, {"spot", {{"icao", "KAAA"}, {"runwayEnd", "27"}}}})), std::string("Rejected"));
+    CHECK_EQ(status(m.panel("SpotTarget", {{"objectId", 7}, {"view", "runway"}, {"spot", {{"icao", "KAAA"}, {"runwayEnd", "05"}}}})), std::string("Rejected"));
+    m.panel("ReleaseCamera");
+    m.seconds(.2);
+    CHECK_EQ(m.services.watchRequests.back(), 0u);
 }

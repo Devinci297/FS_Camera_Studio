@@ -123,6 +123,12 @@ std::string Coordinator::blockReason() const {
     if (!profile_) return "No camera profile is open for this aircraft.";
     if (profile_->modelKey != aircraft_.modelKey) return "The open profile belongs to another aircraft.";
     if (profile_->readOnly) return "This profile needs a newer version of Camera Studio.";
+    return spottingBlockReason();
+}
+
+std::string Coordinator::spottingBlockReason() const {
+    if (!simConnected_) return "Microsoft Flight Simulator 2024 is not running or not connected.";
+    if (!aircraft_.known()) return "Load a flight to use your cameras.";
     if (!qual_.adapterQualified && !settings_.allowUnqualifiedAdapter && !qualificationSession_)
         return "Axis mapping for simulator build " + (simVersion_.empty() ? std::string("(unknown)") : simVersion_) +
                " is not checked yet. Run the axis check in Settings > Simulator.";
@@ -152,7 +158,7 @@ void Coordinator::setState(Ownership s, const std::string& reason) {
 }
 
 json Coordinator::capabilitiesJson() const {
-    const std::string block = blockReason();
+    const std::string block = blockReason(), spotBlock = spottingBlockReason();
     json modes = json::object();
     for (auto m : {profiles::CameraMode::AircraftCockpit, profiles::CameraMode::AircraftExterior, profiles::CameraMode::Orbit,
                    profiles::CameraMode::Flyby, profiles::CameraMode::Airport, profiles::CameraMode::Free, profiles::CameraMode::Mounted}) {
@@ -171,6 +177,8 @@ json Coordinator::capabilitiesJson() const {
               {"allowUnqualifiedAdapter", settings_.allowUnqualifiedAdapter},
               {"canActivate", block.empty()},
               {"blockReason", block.empty() ? json(nullptr) : json(block)},
+              {"spottingAvailable", spotBlock.empty()},
+              {"spottingBlockReason", spotBlock.empty() ? json(nullptr) : json(spotBlock)},
               {"simVersion", simVersion_.empty() ? json(nullptr) : json(simVersion_)},
               {"fovRangeDeg", {30, 110}},
               {"levelHorizon", true},
@@ -271,15 +279,24 @@ void Coordinator::setProfile(std::optional<profiles::ProfileSnapshot> snapshot, 
     const auto previousCamera = activeEntry() ? std::optional<CameraEntry>(*activeEntry()) : std::nullopt;
     profile_ = std::move(snapshot);
     emitCapabilities();
+    // Chase, fly-by and the computed views need no profile: a spot keeps going without its view underneath.
+    const bool keepSpot = spot_ && spot_->overlay && spottingBlockReason().empty();
     if (!profile_) {
-        if (state_ == Ownership::Active || state_ == Ownership::SimulatorSuspended || state_ == Ownership::Acquiring)
+        if (keepSpot) {
+            detachSpotBase();
+        } else if (state_ == Ownership::Active || state_ == Ownership::SimulatorSuspended || state_ == Ownership::Acquiring) {
             release("No camera profile is open.", now);
+        }
         return;
     }
+    if (keepSpot && state_ == Ownership::Acquiring && !pendingCameraId_.empty() && (!canActivate() || !profile_->camera(pendingCameraId_)))
+        pendingCameraId_.clear();  // acquire with nothing underneath
     if (state_ == Ownership::Active && !activeCameraId_.empty()) {
         const auto block = blockReason();
         const CameraEntry* cam = profile_->camera(activeCameraId_);
-        if (!block.empty()) {
+        if (keepSpot && (!block.empty() || !same || !cam || !profiles::modeActivatable(cam->mode))) {
+            detachSpotBase();
+        } else if (!block.empty()) {
             release(block, now);
         } else if (!same || !cam || !profiles::modeActivatable(cam->mode)) {
             // The active view vanished (revert, delete, profile switch): release before replacing it and require
@@ -313,8 +330,19 @@ void Coordinator::setProfile(std::optional<profiles::ProfileSnapshot> snapshot, 
 void Coordinator::setQualificationSession(bool on, double now) {
     qualificationSession_ = on;
     emitCapabilities();
-    if (!on && (state_ == Ownership::Active || state_ == Ownership::SimulatorSuspended) && !blockReason().empty())
-        release(blockReason(), now);
+    if (!on) enforceBlock(now);
+}
+
+void Coordinator::enforceBlock(double now) {
+    if (state_ != Ownership::Active && state_ != Ownership::SimulatorSuspended) return;
+    const auto block = blockReason();
+    if (block.empty()) return;
+    const auto spotBlock = spottingBlockReason();
+    if (spot_ && spot_->overlay && spotBlock.empty()) {
+        detachSpotBase();  // spotting continues without a profile view underneath
+        return;
+    }
+    release(spotBlock.empty() ? block : spotBlock, now);
 }
 
 bool Coordinator::previewPose(const core::CameraPose& pose) {
@@ -339,12 +367,11 @@ void Coordinator::setSettings(const profiles::HostSettings& s, double now) {
             if (std::abs(delta)>1e-9) { base->positionFRD.z += delta; engine_.place(*base); }
         }
     }
-    if (state_ == Ownership::Active && eligibleToSubmit())
+    if (state_ == Ownership::Active && eligibleToSubmit() && !spot_)
         headTracking_.update("global",settings_.globalHeadTrackingEnabled ? "on" : "off",now);
     engine_.setSpeeds({settings_.lookSpeedDegPerSec, settings_.moveSpeedMetersPerSec * settings_.movementPrecisionScale, 0.5, 6.0});
     emitCapabilities();
-    if ((state_ == Ownership::Active || state_ == Ownership::SimulatorSuspended) && !blockReason().empty())
-        release(blockReason(), now);
+    enforceBlock(now);
 }
 
 json Coordinator::handle(const protocol::Command& c, double now) {
@@ -875,6 +902,8 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                 if (std::isfinite(e.meters) && e.meters > -1500 && e.meters < 10000) { groundAltitude_ = e.meters; groundAt_ = now; }
             } else if constexpr (std::is_same_v<T, backend_event::Traffic>) {
                 traffic_.update(e.aircraft, e.userObjectId, targetAt_ >= 0 ? aircraftGeo() : profiles::airport::Geo{NAN, NAN, NAN}, now);
+            } else if constexpr (std::is_same_v<T, backend_event::TrafficTarget>) {
+                traffic_.updateTarget(e, now);
             } else if constexpr (std::is_same_v<T, backend_event::Connected>) {
                 simConnected_ = true;
                 simVersion_ = e.simVersion;
@@ -996,6 +1025,11 @@ void Coordinator::onStatus(const backend_event::CameraStatus& st, double now) {
                 if (gameControlled_ && state_ == Ownership::Active) {
                     engine_.freeze(); effects_.reset(); motionReceivedAt_ = -1;
                     setState(Ownership::SimulatorSuspended, "Paused by the simulator");
+                } else if (!gameControlled_ && state_ == Ownership::SimulatorSuspended && wasGame && spotBare()) {
+                    // A spot without a view underneath: its overlay is computed afresh, nothing to read back.
+                    lastSubmitted_.reset();
+                    setState(Ownership::Active, "Camera active");
+                    emitActiveCamera();
                 } else if (!gameControlled_ && state_ == Ownership::SimulatorSuspended && wasGame) {
                     // The simulator may have changed the visible view: reseed from a readback, or yield.
                     const CameraEntry* cam = activeEntry();
@@ -1096,9 +1130,10 @@ void Coordinator::onCameraData(const backend_event::CameraData& d, double) {
     }
 }
 
-bool Coordinator::eligibleToSubmit() const {
-    return state_ == Ownership::Active && simConnected_ && sdk_ == SdkAvailability::Acquired && !gameControlled_ &&
-           !activeCameraId_.empty() && seedName_.empty();
+bool Coordinator::eligibleToSubmit() const { return submitReady() && !activeCameraId_.empty(); }
+
+bool Coordinator::submitReady() const {
+    return state_ == Ownership::Active && simConnected_ && sdk_ == SdkAvailability::Acquired && !gameControlled_ && seedName_.empty();
 }
 
 core::CameraPose Coordinator::effectiveAirportPose(const CameraEntry& cam) const {
@@ -1192,7 +1227,7 @@ std::string Coordinator::setBinoculars(bool pressed, std::uint64_t holdId) {
         if (binocularsHolds_.erase(holdId) && binocularsHolds_.empty()) emitBinoculars();
         return {};
     }
-    if (state_ != Ownership::Active || activeCameraId_.empty()) return "Select a camera before using binoculars.";
+    if (state_ != Ownership::Active || (activeCameraId_.empty() && !spot_)) return "Select a camera before using binoculars.";
     const bool wasHeld = !binocularsHolds_.empty();
     binocularsHolds_.insert(holdId);
     if (!wasHeld) emitBinoculars();
@@ -1506,12 +1541,20 @@ void Coordinator::tick(double now) {
         return;
     }
 
+    if (spotBare() && submitReady()) {
+        tickBareSpot(dt, now);
+        return;
+    }
     if (state_ == Ownership::Active && eligibleToSubmit()) {
         if (spot_) {
             updateSpot(dt, now);  // may return to the earlier view or release (a target lost for good)
             if (state_ != Ownership::Active || !eligibleToSubmit()) return;
+            if (spotBare()) return;  // the view underneath went away this frame
         }
-        if(activeEntry())headTracking_.update("global",settings_.globalHeadTrackingEnabled ? "on" : "off",now);
+        // Simulator head tracking adds its offsets to an add-on camera: off while spotting, so the computed and aimed
+        // spotting views stay exactly on the target; the global preference again afterwards.
+        if (spot_) headTracking_.update("spot", "off", now);
+        else if(activeEntry())headTracking_.update("global",settings_.globalHeadTrackingEnabled ? "on" : "off",now);
         emitCapabilities();
         const auto* effectCamera = activeEntry();
         const double effectsScale = effectCamera ? effectsScaleFor(effectCamera->mode) : 0.;
@@ -2051,10 +2094,13 @@ json Coordinator::bakeFreeCamera(const protocol::Command& c, const CameraEntry& 
 // ---------------------------------------------------------------------------------------------------------------
 // Spotting (traffic cameras)
 //
-// Tower and runway views recall the loaded airport's own views (saved or temporary) and aim them at the target; track
-// aims the world view on screen. Chase and fly-by are overlays: a computed world pose submitted instead of the active
-// camera, which stays underneath as the base so control, binoculars and the return work as for any view. Every pose
-// is computed each frame from the traffic model's smoothed prediction, so the aim does not step at a poll boundary.
+// Tower and runway views recall the loaded airport's own views (saved or temporary) and aim them at the target when
+// the profile can be used; otherwise, and wherever the profile has no such view near the target, they are computed
+// from scenery data (a runway-end spot, the tower) like chase and fly-by. Track aims the world view on screen. Chase,
+// fly-by and the computed views are overlays: a computed world pose submitted instead of the active camera, which
+// stays underneath as the base so the return works as for any view; without a usable profile there is no base and
+// control is taken with nothing underneath. Every pose is computed each frame from the traffic model, which follows
+// the target's per-frame data while it is fresh, so a camera tied to the target moves exactly with it.
 
 namespace {
 profiles::airport::Geo airportCameraWorld(const CameraEntry& cam, const core::CameraPose& pose) {
@@ -2080,18 +2126,55 @@ const CameraEntry* Coordinator::spotCamera(traffic::SpotView view, const traffic
     return best;
 }
 
+// A usable profile airport view of this kind within `range` of the target.
+bool Coordinator::profileSpotCamera(traffic::SpotView view, const traffic::Pose& target, double range) const {
+    if (!canActivate()) return false;
+    const auto* cam = spotCamera(view, target);
+    return cam && profiles::airport::local(airportCameraWorld(*cam, effectiveAirportPose(*cam)), target.position).length() <= range;
+}
+
+double Coordinator::runwayCameraHeight() const {
+    const auto it = settings_.airportCategoryHeights.find("runways");
+    return it != settings_.airportCategoryHeights.end() && std::isfinite(it->second) ? core::clamp(it->second, 0.0, 1000.0) : 3.0;
+}
+
+double Coordinator::towerCameraHeight() const {
+    const auto it = settings_.airportCategoryHeights.find("tower");
+    return it != settings_.airportCategoryHeights.end() && std::isfinite(it->second) ? core::clamp(it->second, 0.0, 1000.0) : 35.0;
+}
+
+json Coordinator::spotViewsJson() const {
+    bool tower = false, runway = false;
+    for (const auto& a : spotAirports_) {
+        tower = tower || a.tower.valid();
+        runway = runway || !a.ends.empty();
+    }
+    if (canActivate() && profile_)
+        for (const auto& cam : profile_->cameras) {
+            if (cam.mode != profiles::CameraMode::Airport) continue;
+            tower = tower || cam.airportHeightCategory == "tower";
+            runway = runway || cam.airportHeightCategory == "runways";
+        }
+    return {{"tower", tower}, {"runway", runway}};
+}
+
 bool Coordinator::spotViewAvailable(traffic::SpotView view, std::uint32_t objectId, double now) const {
     const auto target = traffic_.predict(objectId, now);
     if (!target.valid()) return false;
     switch (view) {
         case traffic::SpotView::Tower:
-        case traffic::SpotView::Runway: return spotCamera(view, target) != nullptr;
+            return (canActivate() && spotCamera(view, target)) || traffic::pickTower(spotAirports_, target);
+        case traffic::SpotView::Runway: {
+            const auto* e = traffic_.find(objectId);
+            return (canActivate() && spotCamera(view, target)) ||
+                   traffic::pickRunwayEnd(spotAirports_, target, e ? e->status : traffic::Status::Cruise);
+        }
         case traffic::SpotView::Chase:
         case traffic::SpotView::Flyby: return true;
         case traffic::SpotView::Track: {
             if (state_ != Ownership::Active) return false;
             if (spot_ && spot_->overlay) return spot_->position.valid();
-            const auto* cam = activeEntry();
+            const auto* cam = canActivate() ? activeEntry() : nullptr;
             return cam && (cam->mode == profiles::CameraMode::Airport || cam->mode == profiles::CameraMode::Free);
         }
     }
@@ -2110,13 +2193,53 @@ std::string Coordinator::spotActivate(const std::string& cameraId, double now) {
     return error;
 }
 
-std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView view, double now) {
-    if (const auto block = blockReason(); !block.empty()) return block;
+std::string Coordinator::spotAcquire(double now) {
+    switch (state_) {
+        case Ownership::Active:
+        case Ownership::SimulatorSuspended:
+        case Ownership::Acquiring: return {};
+        case Ownership::Releasing: return "Camera Studio is changing camera control. Try again in a moment.";
+        case Ownership::UserDisabled: return "Camera control by add-ons is disabled in the simulator.";
+        case Ownership::Observing:
+        case Ownership::Faulted:
+        case Ownership::OtherClient:
+            if (cleanupPending_) return "Camera Studio is still withdrawing an earlier request. Try again in a moment.";
+            ++recalls_;
+            glance_.reset(); glanceReturn_.reset();
+            stopWalkaround();
+            seedName_.clear();
+            pendingCameraId_.clear();  // nothing underneath: the overlay is the whole view
+            beginAcquire(now);
+            return state_ == Ownership::Acquiring ? std::string() : stateReason_;
+    }
+    return "unexpected state";
+}
+
+void Coordinator::detachSpotBase() {
+    if (!spot_) return;
+    spot_->returnCameraId.clear();
+    pendingCameraId_.clear();
+    if (activeCameraId_.empty()) return;
+    if (!lookOwner_.empty()) rememberedLooks_[lookOwner_] = engine_.look();
+    lookOwner_.clear();
+    cancelMouseDrag();
+    peek_.reset();
+    glance_.reset(); glanceReturn_.reset();
+    stopWalkaround();
+    activeCameraId_.clear();
+    engine_.reset(); effects_.reset();
+    emitActiveCamera();
+}
+
+std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView view, double now, const std::optional<traffic::RunwaySpot>& runway) {
+    if (const auto block = spottingBlockReason(); !block.empty()) return block;
     if (state_ == Ownership::Releasing || cleanupPending_) return "Camera Studio is changing camera control. Try again in a moment.";
+    if (!seedName_.empty()) return "Camera Studio is busy; try again in a moment.";
     traffic_.prune(now);
     const auto target = traffic_.predict(objectId, now);
     const auto* entry = traffic_.find(objectId);
     if (!entry || !target.valid()) return "That aircraft is no longer in range.";
+    const bool profileOk = canActivate();
     const bool shown = (state_ == Ownership::Active || state_ == Ownership::SimulatorSuspended) && !activeCameraId_.empty();
     Spot next;
     next.targetId = objectId;
@@ -2127,25 +2250,52 @@ std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView vi
     // returns to the view it was taken from.
     next.returnCameraId = spot_ ? spot_->returnCameraId : glanceCurrent() ? glance_->returnCameraId : shown ? activeCameraId_ : std::string();
     std::string cameraId;
+    // Computed views stand at a fixed place and zoom on the target, like fly-by.
+    const auto computed = [&](const profiles::airport::Geo& at) {
+        next.overlay = true;
+        next.position = at;
+        next.fovRad = NAN;
+    };
     switch (view) {
-        case traffic::SpotView::Tower:
+        case traffic::SpotView::Tower: {
+            const auto* tower = traffic::pickTower(spotAirports_, target);
+            if (profileSpotCamera(view, target, traffic::kSpotAirportRangeMeters) || (!tower && profileOk && spotCamera(view, target))) {
+                cameraId = spotCamera(view, target)->id;
+            } else if (tower) {
+                computed(traffic::towerPosition(*tower, towerCameraHeight()));
+            } else {
+                return "No tower position is known for an airport near this aircraft yet.";
+            }
+            break;
+        }
         case traffic::SpotView::Runway: {
-            const auto* cam = spotCamera(view, target);
-            if (!cam) return view == traffic::SpotView::Tower ? "No tower view is loaded for a nearby airport."
-                                                              : "No runway or spotting views are loaded for a nearby airport.";
-            cameraId = cam->id;
+            bool aligned = false;
+            const auto* end = runway ? traffic::findRunwayEnd(spotAirports_, runway->icao, runway->runwayEnd)
+                                     : traffic::pickRunwayEnd(spotAirports_, target, entry->status, &aligned);
+            if (runway && !end) return "That runway end is not known. Wait for the airport's scenery data, or choose another end.";
+            if (!runway && (profileSpotCamera(view, target, traffic::kSpotAirportRangeMeters) || (!end && profileOk && spotCamera(view, target)))) {
+                cameraId = spotCamera(view, target)->id;
+            } else if (end) {
+                next.runway = runway ? *runway : traffic::runwaySpot(*end, "fence", runwayCameraHeight());
+                next.pinned = runway.has_value();
+                computed(traffic::spotPosition(*end, *next.runway));
+            } else {
+                return "No runway data is known for an airport near this aircraft yet.";
+            }
             break;
         }
         case traffic::SpotView::Track: {
-            const auto* cam = state_ == Ownership::Active ? activeEntry() : nullptr;
+            const auto* cam = state_ == Ownership::Active && profileOk ? activeEntry() : nullptr;
             if (spot_ && spot_->overlay && state_ == Ownership::Active && spot_->position.valid()) {
-                // Over a chase or fly-by: stay where that camera is and keep aiming.
+                // Over a chase, fly-by or computed view: stay where that camera is and keep aiming.
                 next.overlay = next.fixed = true;
                 next.position = spot_->position;
                 next.fovRad = spot_->fovRad;
             } else if (cam && !(spot_ && spot_->overlay) &&
                        (cam->mode == profiles::CameraMode::Airport || cam->mode == profiles::CameraMode::Free)) {
                 cameraId = cam->id;
+            } else if (!profileOk) {
+                return "Track aims an airport or free camera from your camera profile. Without one, use Chase, Fly-by, Tower or Runway.";
             } else {
                 return "Track needs an airport or free camera on screen.";
             }
@@ -2156,10 +2306,13 @@ std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView vi
     }
     if (next.overlay && spot_ && spot_->overlay) next.aboveGround = spot_->aboveGround;
     if (next.overlay) {
-        // The view underneath: the one on screen (or about to be), else the profile's default view to take control.
-        const bool claimed = shown || (state_ == Ownership::Acquiring && !pendingCameraId_.empty());
+        // The view underneath: the one on screen (or about to be), else the profile's default view to take control,
+        // else nothing (no usable profile).
+        const bool claimed = shown || spotBare() || state_ == Ownership::Acquiring;
         if (!claimed) {
-            if (const auto error = spotActivate(profile_->defaultCameraId, now); !error.empty()) return error;
+            std::string error = profileOk && profile_->camera(profile_->defaultCameraId) ? spotActivate(profile_->defaultCameraId, now) : "none";
+            if (!error.empty()) error = spotAcquire(now);
+            if (!error.empty()) return error;
         }
     } else if (!(shown && activeCameraId_ == cameraId) && !(state_ == Ownership::Acquiring && pendingCameraId_ == cameraId)) {
         if (const auto error = spotActivate(cameraId, now); !error.empty()) return error;
@@ -2170,9 +2323,15 @@ std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView vi
     peek_.reset();
     next.cameraId = cameraId;
     next.cameraSince = next.runwayCheckAt = now;
+    if (spot_ && spot_->targetId == objectId && spot_->view == view && view == traffic::SpotView::Chase) {
+        next.chaseOffset = spot_->chaseOffset;  // the same chase again: no restart
+        next.chaseSmoothed = spot_->chaseSmoothed;
+        next.chaseRate = spot_->chaseRate;
+    }
     spot_ = std::move(next);
     spotReason_.clear();
     lastSubmitted_.reset();
+    airportAutoZoomFov_.reset();
     if (spot_->overlay && !spot_->fixed) placeSpotOverlay(0, now);
     emitActiveCamera();
     return {};
@@ -2187,6 +2346,16 @@ void Coordinator::stopSpotting(const std::string& reason, double now) {
     spotActivating_ = true;  // returning is not a manual recall, and releasing here is not a loss of control
     const std::string error = !back.empty() && profile_ && profile_->camera(back) ? activate(back, now, false) : std::string("none");
     if (!error.empty()) release("Camera returned to the simulator", now);
+    spotActivating_ = false;
+}
+
+void Coordinator::endSpotting(const std::string& reason, double now) {
+    const bool bare = spotBare();
+    endSpot(reason, false, false);
+    if (!bare || (state_ != Ownership::Active && state_ != Ownership::SimulatorSuspended && state_ != Ownership::Acquiring)) return;
+    // Nothing underneath: the simulator's camera, until the other mode recalls a view.
+    spotActivating_ = true;
+    release("Camera returned to the simulator", now);
     spotActivating_ = false;
 }
 
@@ -2209,6 +2378,17 @@ void Coordinator::endSpot(const std::string& reason, bool manual, bool released)
     emitActiveCamera();
 }
 
+void Coordinator::tickBareSpot(double dt, double now) {
+    // Control taken for spotting without a camera profile: only the overlay is shown.
+    updateSpot(dt, now);  // may release (a target lost for good)
+    if (!spot_ || state_ != Ownership::Active) return;
+    headTracking_.update("spot", "off", now);
+    emitCapabilities();
+    updateBinoculars(dt);
+    if (spot_->overlay) submitSpotOverlay();
+    if (engine_.transitioning() != lastTransitioning_) emitActiveCamera();
+}
+
 void Coordinator::updateSpot(double dt, double now) {
     if (!spot_) return;
     // A target that leaves the picture is lost: the view holds where it was aiming, then spotting stops (with auto-spot
@@ -2225,49 +2405,80 @@ void Coordinator::updateSpot(double dt, double now) {
         stopSpotting("The aircraft is no longer in range.", now);
         return;
     }
-    if (spot_->overlay) {
-        placeSpotOverlay(dt, now);
-        return;
+    // Runway view: follow the target to the best runway end or runway view, with a margin and a minimum dwell.
+    if (spot_->view == traffic::SpotView::Runway && !spot_->lost && !spot_->pinned && now >= spot_->runwayCheckAt) {
+        spot_->runwayCheckAt = now + kSpotRunwayRecheckSeconds;
+        if (spot_->runway) {
+            const auto* current = traffic::findRunwayEnd(spotAirports_, spot_->runway->icao, spot_->runway->runwayEnd);
+            const auto* e = traffic_.find(spot_->targetId);
+            bool aligned = false;
+            const auto* best = traffic::pickRunwayEnd(spotAirports_, spot_->target, e ? e->status : traffic::Status::Cruise, &aligned);
+            if (best && best != current && now - spot_->cameraSince >= kSpotRunwayDwellSeconds) {
+                auto candidate = traffic::runwaySpot(*best, spot_->runway->kind == "custom" ? "fence" : spot_->runway->kind, runwayCameraHeight());
+                const auto at = traffic::spotPosition(*best, candidate);
+                const double d = current ? profiles::airport::local(spot_->position, spot_->target.position).length() : INFINITY;
+                // The end the aircraft is lined up with wins; the nearest end only by a clear margin.
+                if (aligned || !current || profiles::airport::local(at, spot_->target.position).length() + std::max(10.0, d * .15) < d) {
+                    spot_->runway = std::move(candidate);
+                    spot_->position = at;
+                    spot_->fovRad = NAN;  // a cut: frame the target afresh
+                    spot_->cameraSince = now;
+                    lastSubmitted_.reset();
+                }
+            }
+        } else if (!spot_->overlay) {
+            const auto* current = profile_ ? profile_->camera(spot_->cameraId) : nullptr;
+            const auto* nearest = spotCamera(traffic::SpotView::Runway, spot_->target);
+            if (current && nearest && nearest->id != current->id && now - spot_->cameraSince >= kSpotRunwayDwellSeconds) {
+                const auto distance = [&](const CameraEntry& c) {
+                    return profiles::airport::local(airportCameraWorld(c, effectiveAirportPose(c)), spot_->target.position).length();
+                };
+                const double d = distance(*current);
+                const std::string id = nearest->id;
+                if (distance(*nearest) + std::max(10.0, d * .15) < d && spotActivate(id, now).empty() && spot_) {
+                    spot_->cameraId = id;
+                    spot_->cameraSince = now;
+                }
+            }
+        }
     }
-    // Runway view: follow the target to the nearest runway or spotting view, with a margin and a minimum dwell.
-    if (spot_->view != traffic::SpotView::Runway || spot_->lost || now < spot_->runwayCheckAt) return;
-    spot_->runwayCheckAt = now + kSpotRunwayRecheckSeconds;
-    const auto* current = profile_ ? profile_->camera(spot_->cameraId) : nullptr;
-    const auto* nearest = spotCamera(traffic::SpotView::Runway, spot_->target);
-    if (!current || !nearest || nearest->id == current->id || now - spot_->cameraSince < kSpotRunwayDwellSeconds) return;
-    const auto distance = [&](const CameraEntry& c) {
-        return profiles::airport::local(airportCameraWorld(c, effectiveAirportPose(c)), spot_->target.position).length();
-    };
-    const double d = distance(*current);
-    const std::string id = nearest->id;
-    if (distance(*nearest) + std::max(10.0, d * .15) < d && spotActivate(id, now).empty() && spot_) {
-        spot_->cameraId = id;
-        spot_->cameraSince = now;
-    }
+    if (spot_ && spot_->overlay) placeSpotOverlay(dt, now);
 }
 
 void Coordinator::placeSpotOverlay(double dt, double now) {
+    (void)now;
     auto& s = *spot_;
     const auto& t = s.target;
     if (!t.valid()) return;
     const bool hold = s.lost || motionPaused_;  // hold the last view
+    // Never below the terrain under the target (its own per-frame GROUND ALTITUDE when watched). Terrain near the user
+    // aircraft is not used: it changes with the user's position, not the target's, and would move the camera.
+    const double floor = traffic::terrainFloor(t.groundAltitude, NAN);
     if (s.view == traffic::SpotView::Chase && !s.fixed) {
-        // Behind and above along the track; the offset eases round turns, so the chase swings rather than snaps.
-        if (!hold || !s.chaseOffset.finite()) s.chaseOffset = traffic::follow(s.chaseOffset, traffic::chaseOffset(t), dt);
-        s.position = profiles::airport::world(t.position, s.chaseOffset);
+        // Behind and above along the track (the heading when slow); the offset eases round turns, so the chase swings
+        // rather than snaps, and a critically damped filter keeps the remaining per-frame changes from shaking it. The
+        // camera is the target plus that offset, so the target itself stays steady in frame.
+        if (!hold || !s.chaseOffset.finite()) {
+            s.chaseOffset = traffic::follow(s.chaseOffset, traffic::chaseOffset(t), dt);
+            auto wanted = s.chaseOffset;
+            if (std::isfinite(floor)) wanted.z = std::min(wanted.z, t.position.altitude - floor);
+            s.chaseSmoothed = traffic::smoothDamp(s.chaseSmoothed, s.chaseRate, wanted, dt);
+        }
+        s.position = profiles::airport::world(t.position, s.chaseSmoothed);
+        if (std::isfinite(floor) && s.position.valid()) s.position.altitude = std::max(s.position.altitude, floor);
         s.fovRad = traffic::kChaseFovDeg * core::kDegToRad;
-    } else if (s.view == traffic::SpotView::Flyby && !s.fixed) {
-        // Stationary ahead of the target; placed again once it has passed and is well beyond.
+        return;
+    }
+    if (s.view == traffic::SpotView::Flyby && !s.fixed) {
+        // Stationary ahead of the target; placed again once it has passed and is well beyond. The terrain floor applies
+        // when it is placed only, so the camera never moves while the target comes past.
         if (!s.position.valid() || (!hold && traffic::flybyPassed(s.position, t))) {
             s.position = traffic::flybyPosition(t);
+            if (std::isfinite(floor) && s.position.valid()) s.position.altitude = std::max(s.position.altitude, floor);
             s.fovRad = NAN;  // a cut: frame the target afresh
         }
     }
-    // Never below the terrain under the target, or under the user aircraft when the camera is near it.
-    const double floor = traffic::terrainFloor(t.groundAltitude, freeTerrainAltitude(s.position, now));
-    if (std::isfinite(floor) && s.position.valid()) s.position.altitude = std::max(s.position.altitude, floor);
-    if (s.view == traffic::SpotView::Chase && !s.fixed) return;
-    // Fly-by and a held track zoom on the target with the airport auto zoom settings.
+    // Fly-by, the computed runway and tower views and a held track zoom on the target with the airport auto zoom settings.
     const double distance = profiles::airport::local(s.position, t.position).length();
     if (!std::isfinite(distance)) return;
     const double minimum = core::clamp(settings_.airportAutoZoomMinFovDeg, 2., 120.) * core::kDegToRad;
@@ -2276,7 +2487,7 @@ void Coordinator::placeSpotOverlay(double dt, double now) {
     const double response = core::clamp(settings_.airportAutoZoomResponseSeconds, .1, 5.);
     const double wanted = traffic::autoZoomFov(std::max(distance, .5), frame, minimum, maximum);
     if (!std::isfinite(s.fovRad)) s.fovRad = wanted;
-    else if (!motionPaused_ && dt > 0 && dt <= .1) s.fovRad = traffic::easeFov(core::clamp(s.fovRad, minimum, maximum), wanted, dt, response);
+    else if (!motionPaused_ && dt > 0) s.fovRad = traffic::easeFov(core::clamp(s.fovRad, minimum, maximum), wanted, std::min(dt, .1), response);
 }
 
 void Coordinator::submitSpotOverlay() {

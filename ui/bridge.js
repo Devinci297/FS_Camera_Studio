@@ -490,7 +490,7 @@
       session: 'Ready',
       aircraft: { title: C172.title, modelKey: C172.modelKey },
       ownership: { state: 'Observing', gameControlled: true, reason: null },
-      forcedBlock: null, qualified: true, captureQualified: false, simVersion: '1.8.16.0', qualification: null,
+      forcedBlock: null, forcedSpotting: false, qualified: true, captureQualified: false, simVersion: '1.8.16.0', qualification: null,
       active: { profileId: null, cameraId: null, peeking: false, transitioning: false, fromDraft: false },
       live: null, look: NEUTRAL_LOOK(), peek: null, pendingCommit: null, instances: new Map(), timers: new Set(),
       working: null, selection: { profileId: null, cameraId: null },
@@ -558,12 +558,14 @@
     const aircraftPayload = () => Object.assign({ title: m.aircraft ? m.aircraft.title : null, modelKey: m.aircraft ? m.aircraft.modelKey : null }, matchFor(m.aircraft));
     function capabilities() {
       const allow = Boolean(m.working.settings.host.allowUnqualifiedAdapter);
-      let blockReason = null;
-      if (m.forcedBlock) blockReason = m.forcedBlock;
-      else if (m.session !== 'Ready') blockReason = 'Camera Studio is not ready yet.';
-      else if (!m.aircraft || !m.aircraft.modelKey) blockReason = 'Load a flight to use your cameras.';
-      else if (!m.qualified && !allow && !m.qualification) blockReason = 'This simulator build has not passed the axis check yet. Run it from Settings > Simulator.';
-      return { adapterQualified: m.qualified, adapterContract: 'camera-api-v1', captureQualified: m.captureQualified, allowUnqualifiedAdapter: allow, canActivate: !blockReason, blockReason, simVersion: m.simVersion, fovRangeDeg: [20, 120], levelHorizon: true, followHorizon: true, modes: clone(MODE_CAPS) };
+      // Spotting needs no camera profile: a profile-only block (forcedSpotting) leaves spotting available.
+      let spottingBlockReason = null;
+      if (m.forcedBlock && !m.forcedSpotting) spottingBlockReason = m.forcedBlock;
+      else if (m.session !== 'Ready') spottingBlockReason = 'Camera Studio is not ready yet.';
+      else if (!m.aircraft || !m.aircraft.modelKey) spottingBlockReason = 'Load a flight to use your cameras.';
+      else if (!m.qualified && !allow && !m.qualification) spottingBlockReason = 'This simulator build has not passed the axis check yet. Run it from Settings > Simulator.';
+      const blockReason = spottingBlockReason || m.forcedBlock || null;
+      return { adapterQualified: m.qualified, adapterContract: 'camera-api-v1', captureQualified: m.captureQualified, allowUnqualifiedAdapter: allow, canActivate: !blockReason, blockReason, spottingAvailable: !spottingBlockReason, spottingBlockReason, simVersion: m.simVersion, fovRangeDeg: [20, 120], levelHorizon: true, followHorizon: true, modes: clone(MODE_CAPS) };
     }
     function summaries() {
       return Array.from(repo.profiles.values()).map(e => {
@@ -791,9 +793,12 @@
     const SPOT_VIEWS = ['tower', 'runway', 'chase', 'flyby', 'track'];
     const AUTO_STATUSES = ['arriving', 'landing', 'takeoff', 'departing'];
     const AUTO_VIEWS = { arriving: 'runway', landing: 'runway', takeoff: 'runway', taxi: 'tower', departing: 'chase' };
-    const NO_AIRPORT_VIEWS = 'Tower and runway views need airport cameras. Load or generate cameras for a nearby airport first.';
-    const spotLabel = a => ((a.airline && a.flightNumber ? a.airline + ' ' + a.flightNumber : '') || a.atcId || a.title) + (a.model ? ' · ' + a.model : '');
-    const spottingState = () => ({ targetId: m.spot.targetId, view: m.spot.view, autoSpot: m.spot.autoSpot, state: m.spot.state, targetLabel: m.spot.targetLabel || '', reason: m.spot.reason || null });
+    const NO_VIEW_DATA = { tower: 'No tower position is known for an airport near this aircraft yet.', runway: 'No runway data is known for an airport near this aircraft yet.' };
+    const spotLabel = a => ((a.airline && a.flightNumber ? a.airline + ' ' + a.flightNumber : '') || a.atcId || a.title) + (a.model ? ' - ' + a.model : '');
+    // Computed tower and runway views come from the scenery data of the loaded airport (the demo field's runway 09/27).
+    const DEMO_RUNWAYS = [{ icao: 'KDEM', end: '09', headingDeg: 90 }, { icao: 'KDEM', end: '27', headingDeg: 270 }];
+    const spottingState = () => ({ targetId: m.spot.targetId, view: m.spot.view, autoSpot: m.spot.autoSpot, state: m.spot.state, targetLabel: m.spot.targetLabel || '', reason: m.spot.reason || null,
+      views: { tower: airportLoaded(), runway: airportLoaded() }, runways: airportLoaded() ? clone(DEMO_RUNWAYS) : [], spot: m.spot.spot ? clone(m.spot.spot) : null });
     const spotEnv = () => ({ uiInstanceId: 'module', requestId: 'spotting-' + (++m.seq) });
     function spotAirportCamera(view, target) {
       if (!airportLoaded()) return null;
@@ -809,28 +814,32 @@
     function spotCheck(objectId, view) {
       if (SPOT_VIEWS.indexOf(view) < 0) return { error: 'Choose a tower, runway, chase, fly-by or track view.' };
       const caps = capabilities();
-      if (!caps.canActivate) return { error: caps.blockReason };
+      if (!caps.spottingAvailable) return { error: caps.spottingBlockReason };
       trafficPayload();
       const target = m.traffic.aircraft.find(a => a.objectId === objectId);
       if (!target) return { error: 'That aircraft is no longer nearby.' };
-      let camera = null;
+      let camera = null, runway = null;
       if (view === 'tower' || view === 'runway') {
-        camera = spotAirportCamera(view, target);
-        if (!camera) return { error: airportLoaded() ? 'The loaded airport has no ' + view + ' view.' : NO_AIRPORT_VIEWS };
+        // The loaded airport set's view when the profile is usable, else a computed view from scenery data.
+        if (!airportLoaded()) return { error: NO_VIEW_DATA[view] };
+        camera = caps.canActivate ? spotAirportCamera(view, target) : null;
+        if (!camera && view === 'runway') runway = { icao: 'KDEM', runwayEnd: target.headingDeg > 0 && target.headingDeg <= 180 ? '09' : '27', kind: 'fence', behindMeters: 150, sideMeters: 80, heightMeters: 3 };
       }
       if (view === 'track') {
         const shown = m.ownership.state === 'Active' && workingCamera(m.active.cameraId);
-        const world = m.spot.state !== 'off' && m.spot.view ? ['tower', 'runway', 'track'].indexOf(m.spot.view) >= 0 : Boolean(shown && (shown.mode === 'airport' || shown.mode === 'free'));
+        const overlay = m.spot.state !== 'off' && m.spot.view ? ['tower', 'runway', 'track'].indexOf(m.spot.view) >= 0 : false;
+        if (!caps.canActivate && !overlay) return { error: 'Track aims an airport or free camera from your camera profile. Without one, use Chase, Fly-by, Tower or Runway.' };
+        const world = m.spot.state !== 'off' && m.spot.view ? overlay : Boolean(shown && (shown.mode === 'airport' || shown.mode === 'free'));
         if (!world) return { error: 'Track aims the current airport or free camera at the aircraft. Show one of those views first.' };
       }
-      return { target, camera, view };
+      return { target, camera, view, runway };
     }
     // Takes control if needed. Chase and fly-by views have no saved camera; tower and runway show the airport camera.
     function spotApply(check, auto) {
       const s = m.spot, target = check.target;
       stopCinematic('Spotting started.');
       if (s.state === 'off' || s.state === 'waiting') s.before = m.ownership.state === 'Active' || m.ownership.state === 'Acquiring' ? m.active.cameraId : null;
-      Object.assign(s, { state: 'tracking', targetId: target.objectId, view: check.view, targetLabel: spotLabel(target), reason: null, since: trafficClock(), autoSpot: Boolean(auto) });
+      Object.assign(s, { state: 'tracking', targetId: target.objectId, view: check.view, targetLabel: spotLabel(target), reason: null, since: trafficClock(), autoSpot: Boolean(auto), spot: check.runway || null });
       clearMotion();
       m.glance = null; m.peek = null;
       const cameraId = check.view === 'track' ? m.active.cameraId : check.camera ? check.camera.id : null;
@@ -877,7 +886,7 @@
       }
       if (s.autoSpot) return ack(env, 'Completed', null, { spotting: spottingState() });
       const caps = capabilities();
-      if (!caps.canActivate) return ack(env, 'Rejected', caps.blockReason, { spotting: spottingState() });
+      if (!caps.spottingAvailable) return ack(env, 'Rejected', caps.spottingBlockReason, { spotting: spottingState() });
       stopCinematic('Auto-spot started.');
       trafficPayload();
       const target = autoCandidate(null);
@@ -1417,7 +1426,12 @@
         event('ControllerInputCaptured',{captureId:delayedCaptureId || capture.captureId,input:{kind:'joystick',deviceId,deviceName:name,definition:'joystick:'+deviceId+':POV:0',pov:direction,label:name+' - Hat 1 '+direction}},capture.uiInstanceId); return true;
       },
       controllerCaptureStatus(state) { const capture=m.controllerCapture;if(!capture)return; m.controllerCapture=null;event('ControllerCaptureStatus',{state,deviceId:capture.deviceId,captureId:capture.captureId},capture.uiInstanceId); },
-      setCanActivate(on, reason) { m.forcedBlock = on ? null : (reason || 'Camera control is turned off for testing.'); event('CapabilitiesChanged', capabilities()); },
+      // spotting: true for a block that leaves spotting available, like a missing camera profile (the default for such a reason).
+      setCanActivate(on, reason, spotting) {
+        m.forcedBlock = on ? null : (reason || 'Camera control is turned off for testing.');
+        m.forcedSpotting = !on && (spotting === undefined ? /camera profile/i.test(m.forcedBlock) : Boolean(spotting));
+        event('CapabilitiesChanged', capabilities());
+      },
       setQualified(on) { m.qualified = Boolean(on); event('CapabilitiesChanged', capabilities()); },
       loadAircraft(title, modelKey) {
         m.aircraft = (title || modelKey) ? { title: title || null, modelKey: modelKey || null } : null;

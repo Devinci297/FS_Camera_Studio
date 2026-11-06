@@ -1,6 +1,7 @@
 // Spotting, the module side: the traffic feed (a SimConnect poll about every 1.5 s while a panel is visible or
-// spotting is on), TrafficChanged at most once a second, the SpotTarget / StopSpotting / SetAutoSpot commands, the
-// spotting bindings and session-wide auto-spot. The coordinator presents the views (coordinator.cpp).
+// spotting is on, plus per-frame data for the target), TrafficChanged at most once a second, the scenery data for the
+// computed runway and tower views, the SpotTarget / StopSpotting / SetAutoSpot commands, the spotting bindings and
+// session-wide auto-spot. The coordinator presents the views (coordinator.cpp).
 
 #include "module_app.hpp"
 
@@ -47,15 +48,60 @@ profiles::airport::Geo ModuleApp::trafficAirport() const {
 
 json ModuleApp::trafficState() const { return coord_.traffic().toJson(position_, now_); }
 
+void ModuleApp::updateSpotAirports(double now) {
+    if (now < nextSpotAirports_) return;
+    nextSpotAirports_ = now + kSpotAirportsSeconds;
+    // The loaded (else the nearest) airport, and the scenery airport nearest the target: their runway ends and towers.
+    std::vector<std::string> codes;
+    const auto add = [&](const std::string& code) {
+        if (profiles::airport::validCode(code) && std::find(codes.begin(), codes.end(), code) == codes.end()) codes.push_back(code);
+    };
+    add(loadedAirport_);
+    if (loadedAirport_.empty() && !nearbyFacilities_.empty()) add(js::str(nearbyFacilities_[0], "icao"));
+    const auto target = coord_.spotPose();
+    if (coord_.spotting() && target.valid()) {
+        std::string nearest;
+        double best = traffic::kSpotAirportRangeMeters / traffic::kMetersPerNm;
+        for (const auto& a : nearbyFacilities_) {
+            const double d = profiles::airport::distanceNm(profiles::airport::geo(a), target.position);
+            if (d < best) { best = d; nearest = js::str(a, "icao"); }
+        }
+        add(nearest);
+    }
+    std::string key;
+    std::vector<traffic::SpotAirport> airports;
+    for (const auto& code : codes) {
+        const auto cached = airportFacilityCache_.find(code);
+        if (cached == airportFacilityCache_.end()) {
+            // Rate limited and cached for the session. With temporary airport sets turned off, only while spotting.
+            if (airportAutoGenerate() || autoSpot_ || coord_.spotting()) requestAutoAirport(code, now);
+            key += code + "?;";
+        } else if (cached->second.is_object()) {
+            airports.push_back(traffic::spotAirport(cached->second));
+            key += code + ";";
+        }
+    }
+    if (key == spotAirportsKey_) return;
+    spotAirportsKey_ = key;
+    coord_.setSpotAirports(std::move(airports));
+}
+
 json ModuleApp::spottingState() const {
     const bool on = coord_.spotting();
     const char* state = on ? (coord_.spotLost() ? "lost" : "tracking") : autoSpot_ ? "waiting" : "off";
+    json runways = json::array();
+    for (const auto& a : coord_.spotAirports())
+        for (const auto& e : a.ends) runways.push_back({{"icao", e.icao}, {"end", e.name}, {"headingDeg", std::round(e.headingDeg * 10) / 10}});
+    const auto spot = coord_.spotRunway();
     return {{"targetId", on ? json(coord_.spotTargetId()) : json(nullptr)},
             {"view", on && coord_.spotView() ? json(traffic::toString(*coord_.spotView())) : json(nullptr)},
             {"autoSpot", autoSpot_},
             {"state", state},
             {"targetLabel", on ? json(coord_.spotLabel()) : json(nullptr)},
-            {"reason", spotReason_.empty() ? json(nullptr) : json(spotReason_)}};
+            {"reason", spotReason_.empty() ? json(nullptr) : json(spotReason_)},
+            {"views", coord_.spotViewsJson()},
+            {"runways", runways},
+            {"spot", spot ? traffic::toJson(*spot) : json(nullptr)}};
 }
 
 void ModuleApp::emitSpotting(bool force) {
@@ -66,9 +112,9 @@ void ModuleApp::emitSpotting(bool force) {
     emitState("SpottingChanged", std::move(state));
 }
 
-std::string ModuleApp::spot(std::uint32_t objectId, SpotView view, double now) {
+std::string ModuleApp::spot(std::uint32_t objectId, SpotView view, double now, const std::optional<traffic::RunwaySpot>& runway) {
     if (!simRunning_) return "Load a flight before spotting traffic.";
-    const auto error = coord_.spotTarget(objectId, view, now);
+    const auto error = coord_.spotTarget(objectId, view, now, runway);
     if (!error.empty()) return error;
     // One automatic mode at a time: spotting stops Cinematic mode and airport Auto switch.
     if (cinematicOn_) stopCinematic("Spotting started.", now);
@@ -90,7 +136,7 @@ void ModuleApp::stopAutoSpot(const std::string& reason) {
 void ModuleApp::yieldSpotting(const std::string& reason) {
     if (!autoSpot_ && !coord_.spotting()) return;
     stopAutoSpot(reason);
-    coord_.endSpotting(reason);  // the other mode takes over from the view underneath
+    coord_.endSpotting(reason, now_);  // the other mode takes over from the view underneath
     spotReason_ = reason;
     emitSpotting();
 }
@@ -107,7 +153,8 @@ bool ModuleApp::setAutoSpot(bool enabled, double now, std::string* why) {
         return false;
     };
     if (!simRunning_) return fail("Load a flight before turning on auto-spot.");
-    if (!coord_.canActivate()) return fail(coord_.blockReason());
+    // No camera profile needed: chase, fly-by and the computed runway and tower views work without one.
+    if (!coord_.spottingAvailable()) return fail(coord_.spottingBlockReason());
     if (cinematicOn_) stopCinematic("Auto-spot was turned on.", now);
     if (airportAuto_) setAirportAuto(false, now);
     autoSpot_ = true;
@@ -226,7 +273,7 @@ void ModuleApp::updateAutoSpot(double now) {
         spotReason_ = "Waiting for arriving or departing traffic.";
         return;
     }
-    if (!coord_.canActivate()) return;
+    if (!coord_.spottingAvailable()) return;
     if (const auto next = autoSpotPick(0, now)) autoSpotShow(*next, now);
 }
 
@@ -256,12 +303,20 @@ void ModuleApp::updateSpotting(double now) {
                                            profiles::kSpottingMinRadiusNm, profiles::kSpottingMaxRadiusNm);
         services_.requestTraffic(std::min(radiusNm * traffic::kMetersPerNm, kTrafficMaxRadiusMeters));
     }
+    if (simRunning_ && (autoSpot_ || coord_.spotting() || anyVisibleLease())) updateSpotAirports(now);
     if (anyVisibleLease() && coord_.traffic().revision() != trafficEmitted_ && now - lastTrafficEmit_ >= kTrafficEmitSeconds) {
         trafficEmitted_ = coord_.traffic().revision();
         lastTrafficEmit_ = now;
         emitState("TrafficChanged", trafficState());
     }
     updateAutoSpot(now);
+    // Per-frame data for the target only: started, changed and stopped with spotting (release, panic, stop, lost).
+    const std::uint32_t watch = coord_.spotting() ? coord_.spotTargetId() : 0;
+    if (watch != watchedTarget_) {
+        watchedTarget_ = watch;
+        services_.watchTrafficTarget(watch);
+        diag(watch ? "spotting: per-frame data for object " + std::to_string(watch) : std::string("spotting: per-frame data stopped"));
+    }
     emitSpotting();
 }
 
@@ -290,9 +345,12 @@ bool ModuleApp::handleSpotting(const protocol::Command& c, double now) {
         const auto id = js::integer(p, "objectId", 0);
         const auto view = traffic::parseSpotView(js::str(p, "view"));
         std::string error;
+        std::optional<traffic::RunwaySpot> runway;
         if (id <= 0 || id > 0xffffffffLL) error = "Choose an aircraft from the traffic list.";
         else if (!view) error = "Choose a spotting view: tower, runway, chase, flyby or track.";
-        else error = spot(static_cast<std::uint32_t>(id), *view, now);
+        else if (!js::get(p, "spot").is_null() && *view != SpotView::Runway) error = "A runway spot can only be used with the runway view.";
+        else if (!js::get(p, "spot").is_null() && !(runway = traffic::parseRunwaySpot(js::get(p, "spot"), coord_.spotAirports(), coord_.runwayCameraHeight(), error))) {}
+        else error = spot(static_cast<std::uint32_t>(id), *view, now, runway);
         if (error.empty()) stopAutoSpot("A target was chosen manually.");  // a manual choice ends auto-spot
         emitSpotting();
         reply(c, error.empty() ? AckStatus::Completed : AckStatus::Rejected, error, {{"spotting", spottingState()}});

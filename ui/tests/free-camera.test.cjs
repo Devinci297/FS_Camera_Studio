@@ -36,7 +36,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.equal(await page.locator('#mc-follow-horizon-range').isDisabled(),true);
   assert.match(await page.locator('#mc-follow-horizon-note').textContent(),/World-fixed/);
   assert.equal(await page.locator('#mc-glance').isDisabled(),true);
-  assert.match(await page.locator('.mc-effective-tracking').first().innerText(),/Free camera · tracks heading \+ pitch · global/);
+  assert.match(await page.locator('.mc-effective-tracking').first().innerText(),/Free camera - tracks heading \+ pitch - global/);
   await page.locator('#mc-tab-motion').click();
   assert.match(await page.locator('#mc-external-motion').innerText(),/Free camera \(drone\)/);
   assert.equal(await page.locator('#mc-effects-enabled').isDisabled(),true);

@@ -42,7 +42,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await slider.evaluate(el=>{el.value='0';el.dispatchEvent(new Event('input',{bubbles:true}));});
   assert.equal((await cam()).mountVibration,0);assert.equal(await number.inputValue(),'0');
   // Aircraft tracking does not apply: the effective tracking line says so.
-  assert.match(await page.locator('.mc-effective-tracking').first().innerText(),/Mounted · aircraft tracking excluded/);
+  assert.match(await page.locator('.mc-effective-tracking').first().innerText(),/Mounted - aircraft tracking excluded/);
   // Motion tab: no automatic motion or flight effects; the transition stays editable.
   await page.locator('#mc-tab-motion').click();
   assert.match(await page.locator('#mc-external-motion').innerText(),/Rigid on the airframe/);

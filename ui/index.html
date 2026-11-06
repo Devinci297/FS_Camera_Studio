@@ -68,7 +68,7 @@
               <div class="mc-axis-grid" id="mc-position-fields"></div>
               <div class="mc-section-heading mc-pose-section"><h4>Orientation</h4><span>Rotate your view</span></div>
               <div class="mc-axis-grid" id="mc-angle-fields"></div>
-              <div class="mc-pose-toolbar"><button type="button" class="mc-secondary mc-save-current-view" id="mc-save-current-view"><i data-icon="camera"></i>Capture current view</button><button type="button" id="mc-restore-pose"><i data-icon="rotate-ccw"></i>Restore saved pose</button><button type="button" id="mc-center-look"><i data-icon="crosshair"></i>Reset rotation</button><small>Type a value · Drag a slider to adjust</small></div>
+              <div class="mc-pose-toolbar"><button type="button" class="mc-secondary mc-save-current-view" id="mc-save-current-view"><i data-icon="camera"></i>Capture current view</button><button type="button" id="mc-restore-pose"><i data-icon="rotate-ccw"></i>Restore saved pose</button><button type="button" id="mc-center-look"><i data-icon="crosshair"></i>Reset rotation</button><small>Type a value, or drag a slider to adjust</small></div>
               <div class="mc-divider"></div>
               <div class="mc-lens-controls"><div class="mc-lens-top"><h4 id="mc-fov-heading">Field of view - sim FOV</h4><label class="mc-value-input"><input type="number" id="mc-fov-number" min="30" max="110" step="1" value="62" aria-label="Field of view in degrees (sim FOV)"><span>deg</span></label></div>
               <input type="range" id="mc-fov-range" min="30" max="110" step="1" value="62" aria-label="Field of view">
@@ -148,10 +148,10 @@
           <div class="mc-inline-field"><span id="mc-name-display-label">Category and camera names</span><div class="mc-setting-choices" id="mc-setting-name-display" role="group" aria-labelledby="mc-name-display-label"><button type="button" data-value="icons" aria-pressed="false">Icons</button><button type="button" data-value="labels" aria-pressed="false">Labels</button><button type="button" data-value="both" aria-pressed="true">Both</button></div></div>
           <div class="mc-section-label mc-spaced" id="mc-mouse-settings">Right-drag mouse look</div>
           <label class="mc-switch-row"><span class="mc-switch-copy"><span>Enable right-drag mouse look</span><small>Hold the right mouse button over the scene and drag. Your custom camera stays active.</small></span><input type="checkbox" class="mc-switch" id="mc-setting-mouse-enabled" checked></label>
-          <label class="mc-inline-field"><span>Sensitivity<small>1.0 is the tested smooth default</small></span><span class="mc-unit"><input type="number" id="mc-setting-mouse-sensitivity" min="0.1" max="4" step="0.1">×</span></label>
+          <label class="mc-inline-field"><span>Sensitivity<small>1.0 is the tested smooth default</small></span><span class="mc-unit"><input type="number" id="mc-setting-mouse-sensitivity" min="0.1" max="4" step="0.1">x</span></label>
           <label class="mc-inline-field"><span>Smoothing<small>0 is immediate; higher values feel softer</small></span><span class="mc-unit"><input type="number" id="mc-setting-mouse-smoothing" min="0" max="250" step="5">ms</span></label>
           <label class="mc-switch-row"><span>Invert vertical mouse look</span><input type="checkbox" class="mc-switch" id="mc-setting-mouse-invert"></label>
-          <p class="mc-note">Move: W forward · S back · A left · D right · Q raise · E lower. Hold Shift for 4× speed. Movement pauses while typing.</p>
+          <p class="mc-note">Move: W forward, S back, A left, D right, Q raise, E lower. Hold Shift for 4x speed. Movement pauses while typing.</p>
           <button type="button" class="mc-secondary" id="mc-mouse-defaults">Restore mouse-look defaults</button>
           <p class="mc-note">Choose Keep look or Return to saved separately for each camera in Behavior.</p>
           <label class="mc-inline-field"><span>Nearby airport radius<small>Load one saved airport within this distance</small></span><span class="mc-unit"><input type="number" id="mc-setting-airport-radius" min="5" max="100" step="5">NM</span></label>

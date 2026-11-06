@@ -83,6 +83,8 @@ public:
     bool requestAirport(const std::string& code,std::uint32_t id) override {airportRequests.emplace_back(code,id);return true;}
     std::vector<double> trafficRequests;  // radius (meters) of each spotting traffic poll
     bool requestTraffic(double radiusMeters) override { trafficRequests.push_back(radiusMeters); return true; }
+    std::vector<std::uint32_t> watchRequests;  // watchTrafficTarget calls (0 = stop)
+    bool watchTrafficTarget(std::uint32_t objectId) override { watchRequests.push_back(objectId); return true; }
     bool nativeMouseEnabled = false;
     std::vector<bool> mouseEnableChanges;
     void setNativeMouseEnabled(bool enabled) override {

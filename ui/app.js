@@ -1709,10 +1709,10 @@
     svg.innerHTML = '<path class="mc-angle-zone"/><path class="mc-angle-track" d="'+(pitch?'M86 17A58 58 0 0 1 86 133':'M120 23A52 52 0 1 1 120 127A52 52 0 1 1 120 23')+'"/>' +
       '<path class="mc-diagram-guide" d="'+(pitch?'M42 75H157':'M120 19V131M64 75H176')+'"/><path class="mc-angle-ray"/>' +
       '<g class="mc-angle-camera" transform="translate('+(pitch?'58 66':'104 64')+')"><rect width="32" height="23" rx="4"/><path d="M8 0L11-6H22L25 0"/><circle cx="17" cy="11" r="8"/><circle cx="17" cy="11" r="4"/></g>'+
-      '<text class="mc-angle-limit" x="'+(pitch?'112':'27')+'" y="'+(pitch?'18':'78')+'">'+(pitch?'+89° Up':'−90°')+'</text>'+
-      '<text class="mc-angle-limit" text-anchor="end" x="'+(pitch?'184':'218')+'" y="'+(pitch?'135':'78')+'">'+(pitch?'−89° Down':'+90°')+'</text>'+
+      '<text class="mc-angle-limit" x="'+(pitch?'112':'27')+'" y="'+(pitch?'18':'78')+'">'+(pitch?'+89° Up':'-90°')+'</text>'+
+      '<text class="mc-angle-limit" text-anchor="end" x="'+(pitch?'184':'218')+'" y="'+(pitch?'135':'78')+'">'+(pitch?'-89° Down':'+90°')+'</text>'+
       '<text class="mc-angle-zero" x="'+(pitch?'158':'120')+'" y="'+(pitch?'78':'14')+'" text-anchor="middle">0°</text>'+
-      (pitch?'':'<text class="mc-angle-limit" x="120" y="145" text-anchor="middle">±180°</text>')+'<circle class="mc-angle-handle" r="8"/><text class="mc-angle-readout" x="'+(pitch?'37':'120')+'" y="'+(pitch?'106':'107')+'" text-anchor="middle"></text>';
+      (pitch?'':'<text class="mc-angle-limit" x="120" y="145" text-anchor="middle">+/-180°</text>')+'<circle class="mc-angle-handle" r="8"/><text class="mc-angle-readout" x="'+(pitch?'37':'120')+'" y="'+(pitch?'106':'107')+'" text-anchor="middle"></text>';
     const update = e => {
       const rect = svg.getBoundingClientRect(), scale = Math.min(rect.width/240,rect.height/150);
       if (!scale || readOnly()) return;
@@ -2093,7 +2093,7 @@
     const body = actionDialog(view.name, [
       ['Assign key binding', 'keyboard', () => assignCameraBinding(view)],
       [view.favorite?'Remove star (hide in mini panel)':'Star camera (show in mini panel)', 'star', () => {setFavorite(view);closeDialog();}],
-      ['Copy settings', 'copy', () => copyCameraSettings(view),false,'Copy this camera’s edited pose, lens, motion and behavior settings.'],
+      ['Copy settings', 'copy', () => copyCameraSettings(view),false,'Copy this camera\'s edited pose, lens, motion and behavior settings.'],
       ['Paste settings', 'paste', () => pasteCameraSettings(view),!readCameraSettingsClipboard(),'Choose copied settings to apply to this camera. Identity and shortcuts are preserved.'],
       ['Rename', 'pencil', () => renameCamera()],
       [group.defaultCameraId===view.id?'Category default':'Make category default', 'check-circle-2', () => setCategoryDefault(view),group.defaultCameraId===view.id],
@@ -2269,7 +2269,7 @@
       b.setAttribute('aria-label',label);b.setAttribute('aria-pressed',String((S.working.settings.host.globalAircraftTracking||'both')===value));
       b.appendChild(make('small',detail));body.appendChild(b);
     });
-    if(view&&view.mode==='airport')body.appendChild(button('This airport camera’s settings',()=>airportCameraSettings(view),'mc-secondary'));
+    if(view&&view.mode==='airport')body.appendChild(button('This airport camera\'s settings',()=>airportCameraSettings(view),'mc-secondary'));
     dialogActions([['Close',()=>closeDialog()]]);
     if(IS_MINI) {
       revealMini();
@@ -2306,10 +2306,10 @@
       add(row,make('span',label),input);group.appendChild(row);
     };
     const modeNames={off:'Off',heading:'Heading only',both:'Heading + pitch'};
-    select(trackingGroup,'aircraftTracking','Aircraft tracking',[['global','Global · '+modeNames[host.globalAircraftTracking||'both']],['off','Override · Off'],['heading','Override · Heading only'],['both','Override · Heading + pitch']]);
-    select(trackingGroup,'trackingHorizonGuard','Keep distant views near the horizon',[['global','Global · '+(host.airportTrackingHorizonGuard!==false?'On':'Off')],['true','Override · On'],['false','Override · Off']]);
+    select(trackingGroup,'aircraftTracking','Aircraft tracking',[['global','Global - '+modeNames[host.globalAircraftTracking||'both']],['off','Override - Off'],['heading','Override - Heading only'],['both','Override - Heading + pitch']]);
+    select(trackingGroup,'trackingHorizonGuard','Keep distant views near the horizon',[['global','Global - '+(host.airportTrackingHorizonGuard!==false?'On':'Off')],['true','Override - On'],['false','Override - Off']]);
     trackingGroup.appendChild(make('p','Softens steep pitch at long distances caused by elevation differences. Heading still follows your aircraft. Turn off for unrestricted vertical tracking.','mc-note'));
-    select(zoomGroup,'autoZoomEnabled','Auto zoom',[['global','Global · '+(host.airportAutoZoomEnabled?'On':'Off')],['true','Override · On'],['false','Override · Off']]);
+    select(zoomGroup,'autoZoomEnabled','Auto zoom',[['global','Global - '+(host.airportAutoZoomEnabled?'On':'Off')],['true','Override - On'],['false','Override - Off']]);
     const categoryKey=view.airportHeight&&view.airportHeight.category||airportHeightCategory(view);
     const heights=Object.assign({runways:3,gates:3,apron:3,taxi:3,tower:35},host.airportCategoryHeights||{});
     const zoomFields=make('div',undefined,'mc-override-grid');zoomGroup.appendChild(zoomFields);
@@ -2377,7 +2377,7 @@
       const override=view&&view.mode==='airport'&&view.airportOverrides&&view.airportOverrides.aircraftTracking;
       const effectiveTracking=override||aircraftTracking;
       effective.hidden=!view||(!editor&&view.mode!=='airport');
-      effective.textContent=!view?'':view.mode==='aircraftCockpit'?'Cockpit · aircraft tracking excluded':view.mode==='mounted'?'Mounted · aircraft tracking excluded':(view.mode==='airport'?'Airport':view.mode==='free'?'Free camera':'Exterior')+' · '+(effectiveTracking==='off'?'fixed direction':effectiveTracking==='heading'?'tracks heading':'tracks heading + pitch')+(override?' · override':' · global');
+      effective.textContent=!view?'':view.mode==='aircraftCockpit'?'Cockpit - aircraft tracking excluded':view.mode==='mounted'?'Mounted - aircraft tracking excluded':(view.mode==='airport'?'Airport':view.mode==='free'?'Free camera':'Exterior')+' - '+(effectiveTracking==='off'?'fixed direction':effectiveTracking==='heading'?'tracks heading':'tracks heading + pitch')+(override?' - override':' - global');
       effective.title=override?'This camera overrides global aircraft tracking. Change it in Airport camera settings.':'Effective aircraft tracking for this camera. Cockpit and mounted cameras never track the aircraft.';
       if(!editor){
         const drone=ensure('drone','Drop drone here',dropDrone);setIcon(drone,DRONE_ICON);drone.title='Drop drone here: a free camera at the current view, or behind the aircraft. Fly it with the movement keys.';drone.disabled=!S.snapshot||!P()||readOnly();
@@ -2826,8 +2826,8 @@
     return flight || a.atcId || a.title || a.model || 'Aircraft ' + a.objectId;
   }
   function trafficDetail(a) {
-    const label = trafficLabel(a);
-    return [a.model || a.title, a.atcId && label.indexOf(a.atcId) < 0 ? a.atcId : ''].filter(Boolean).join(' · ');
+    const label = trafficLabel(a), model = /^\$\$/.test(a.model || '') ? '' : a.model;  // "$$..." is an unresolved model placeholder
+    return [model || a.title, a.atcId && label.indexOf(a.atcId) < 0 ? a.atcId : ''].filter(Boolean).join(' - ');
   }
   function trafficFigures(a) {
     const nm = Number(a.distanceNm) || 0, altitude = Number(a.altitudeFt) || 0;
@@ -2848,11 +2848,28 @@
     const view = S.ownership.state === 'Active' ? camIn(S.active.cameraId) : null;
     return Boolean(view && (view.mode === 'airport' || view.mode === 'free'));
   }
+  // Spotting needs no camera profile. A module that reports spottingAvailable gates it on its own; older ones use canActivate.
+  function spottingBlock() {
+    if ('spottingAvailable' in S.caps) return S.caps.spottingAvailable ? null : (S.caps.spottingBlockReason || 'Camera control is not available right now.');
+    return S.caps.canActivate ? null : (S.caps.blockReason || 'Camera control is not available right now.');
+  }
+  const SPOT_NO_DATA = { tower: 'No tower position is known for an airport near this aircraft yet.', runway: 'No runway data is known for an airport near this aircraft yet.' };
   function spotViewReason(view) {
     if (!S.snapshot) return statusText();
-    if (!S.caps.canActivate) return S.caps.blockReason || 'Camera control is not available right now.';
-    if ((view === 'tower' || view === 'runway') && !airportViewsLoaded()) return 'Tower and runway views need airport cameras. Load or generate cameras for a nearby airport first.';
-    if (view === 'track' && !spotTrackable()) return 'Track aims the current airport or free camera at the aircraft. Show one of those views first.';
+    const blocked = spottingBlock(), sp = spotting();
+    if (blocked) return blocked;
+    if (view === 'tower' || view === 'runway') {
+      // SpottingChanged.views says whether the module can show the view (airport cameras or computed from scenery data).
+      const views = S.spotting && S.spotting.views;
+      if (views && typeof views[view] === 'boolean') return views[view] ? null : SPOT_NO_DATA[view];
+      if (!S.caps.canActivate) return S.caps.blockReason || 'Camera control is not available right now.';
+      if (!airportViewsLoaded()) return 'Tower and runway views need airport cameras. Load or generate cameras for a nearby airport first.';
+    }
+    if (view === 'track') {
+      const overlay = sp.state !== 'off' && (sp.view === 'tower' || sp.view === 'runway' || sp.view === 'track');
+      if (!S.caps.canActivate && !overlay) return 'Track aims an airport or free camera from your camera profile. Without one, use Chase, Fly-by, Tower or Runway.';
+      if (!spotTrackable()) return 'Track aims the current airport or free camera at the aircraft. Show one of those views first.';
+    }
     return null;
   }
   function applySpottingAck(ack) {
@@ -2871,17 +2888,20 @@
   }
   function spotStateText() {
     const sp = spotting(), label = sp.targetLabel || 'the aircraft';
-    if (sp.state === 'tracking') return 'Spotting ' + label + (sp.view ? ' · ' + (SPOT_VIEW_NAMES[sp.view] || sp.view) : '') + (sp.autoSpot ? ' · Auto-spot' : '');
+    if (sp.state === 'tracking') return 'Spotting ' + label + (sp.view ? ' - ' + (SPOT_VIEW_NAMES[sp.view] || sp.view) : '') + (sp.autoSpot ? ' - Auto-spot' : '');
     if (sp.state === 'lost') return 'Lost ' + label + (sp.reason ? ': ' + sp.reason : '');
     if (sp.state === 'waiting') return 'Auto-spot is waiting for arriving or departing traffic' + (sp.reason ? ': ' + sp.reason : '.');
-    if (S.snapshot && !S.caps.canActivate) return 'Spotting needs camera control: ' + (S.caps.blockReason || 'camera control is not available right now.') + (S.caps.blockReason === 'No camera profile is open for this aircraft.' ? ' Use Create profile for this aircraft above, then choose a view.' : '');
+    const blocked = S.snapshot ? spottingBlock() : null;
+    if (blocked) return 'Spotting needs camera control: ' + blocked + (blocked === 'No camera profile is open for this aircraft.' ? ' Use Create profile for this aircraft above, then choose a view.' : '');
+    // Without a usable camera profile only Track is missing: chase, fly-by and the computed tower and runway views still work.
+    if (S.snapshot && !S.caps.canActivate) return 'Not spotting. Choose a view for an aircraft below. Chase, Fly-by, Tower and Runway (from scenery data) work without a camera profile; Track needs one.';
     return 'Not spotting. Choose a view for an aircraft below.';
   }
   function miniSpotText() {
     const sp = spotting(), label = sp.targetLabel || 'aircraft';
     return sp.state === 'tracking' ? 'Spotting: ' + label : sp.state === 'lost' ? 'Spotting: lost ' + label : sp.state === 'waiting' ? 'Spotting: Auto-spot waiting' : '';
   }
-  const autoSpotTitle = disabled => (disabled ? (S.caps.blockReason || 'Load a flight to use Auto-spot.')
+  const autoSpotTitle = disabled => (disabled ? (spottingBlock() || 'Load a flight to use Auto-spot.')
     : 'Global: follow arriving and departing traffic at the loaded airport automatically. Stop, Release or Panic ends it.');
   // Display only, safe at the 1 Hz TrafficChanged rate: updates the dock controls and the Traffic page in place.
   function renderSpotting() {
@@ -2907,7 +2927,7 @@
     if (next.parentNode !== group || next.previousSibling !== auto) group.insertBefore(next, auto.nextSibling);
     setIcon(auto, 'radio'); setIcon(next, 'chevron-right');
     auto.setAttribute('aria-pressed', String(sp.autoSpot));
-    auto.disabled = !S.snapshot || (!sp.autoSpot && !S.caps.canActivate);
+    auto.disabled = !S.snapshot || (!sp.autoSpot && Boolean(spottingBlock()));
     auto.title = autoSpotTitle(auto.disabled);
     const blocked = spotViewReason('chase'), target = nextSpotTarget();
     next.disabled = Boolean(blocked) || !target;
@@ -2964,7 +2984,7 @@
     setText($('mc-spot-state-text'), spotStateText());
     const auto = $('mc-spot-auto'), stop = $('mc-spot-stop');
     auto.setAttribute('aria-pressed', String(sp.autoSpot));
-    auto.disabled = !S.snapshot || (!sp.autoSpot && !S.caps.canActivate);
+    auto.disabled = !S.snapshot || (!sp.autoSpot && Boolean(spottingBlock()));
     auto.title = autoSpotTitle(auto.disabled);
     stop.disabled = !S.snapshot || (sp.state === 'off' && !sp.autoSpot);
     stop.title = 'Stop spotting and return to the view you had before';
@@ -3015,7 +3035,7 @@
         });
         add(box, input, document.createTextNode(unit)); add(row, copy, box); pane.appendChild(row);
       });
-      pane.appendChild(make('p', 'Tower and runway views use the loaded airport cameras; Track aims the current airport or free camera. Auto-spot picks arriving and departing aircraft at the loaded airport. Release, Panic, Cinematic mode and airport Auto switch stop spotting.', 'mc-note'));
+      pane.appendChild(make('p', 'Tower and runway views use the loaded airport cameras, or a view computed from scenery data (a runway-end fence spot, the tower) when there are none. Chase, Fly-by, Tower and Runway need no camera profile; Track aims the current airport or free camera. Auto-spot picks arriving and departing aircraft at the loaded airport. Release, Panic, Cinematic mode and airport Auto switch stop spotting.', 'mc-note'));
     }
     const host = S.working.settings.host;
     $$('input[data-key]', pane).forEach(input => { if (document.activeElement !== input) input.value = String(host[input.dataset.key] == null ? input.dataset.fallback : host[input.dataset.key]); });
@@ -3534,9 +3554,9 @@
   function temporaryAirport(code) { const state=S.airports||{}; return Boolean(code)&&state.transient===true&&state.loaded===code; }
   function temporaryAirportNotice(code) {
     const notice=make('div',undefined,'mc-airport-temporary');notice.setAttribute('role','status');
-    const copy=make('span',undefined,'mc-airport-temporary-copy');copy.appendChild(make('span','Temporary — Save to keep','mc-airport-temporary-text'));copy.title='Generated from scenery data for this session. Not stored until you save it.';
+    const copy=make('span',undefined,'mc-airport-temporary-copy');copy.appendChild(make('span','Temporary - Save to keep','mc-airport-temporary-text'));copy.title='Generated from scenery data for this session. Not stored until you save it.';
     const saving=S.savingTemporaryAirport===code;
-    const save=button(saving?'Saving…':'Save',()=>saveTemporaryAirport(code),'mc-secondary mc-airport-temporary-save','save');
+    const save=button(saving?'Saving...':'Save',()=>saveTemporaryAirport(code),'mc-secondary mc-airport-temporary-save','save');
     save.setAttribute('aria-label','Save '+code+' airport cameras');save.title='Save these generated airport cameras so they load every time you are near '+code+'.';save.disabled=saving||readOnly();
     add(notice,copy,save);return notice;
   }
@@ -3589,13 +3609,13 @@
   function validAirportOptions(){
     const o=airportOptions();
     if(!['runways','spotting','parking','taxi','tower'].some(k=>o[k])){dialogError('Choose at least one camera type.');return false;}
-    if((o.height!==undefined&&(!isFinite(o.height)||o.height<1||o.height>100))||!isFinite(o.offset)||o.offset<3||o.offset>150){dialogError('Use a height of 1–100 m and an offset of 3–150 m.');return false;}
+    if((o.height!==undefined&&(!isFinite(o.height)||o.height<1||o.height>100))||!isFinite(o.offset)||o.offset<3||o.offset>150){dialogError('Use a height of 1-100 m and an offset of 3-150 m.');return false;}
     return true;
   }
   function renderAirportNearby(){
     const box=$('mc-airport-nearby');if(!box)return;empty(box);
-    const saved=make('details',undefined,'mc-airport-saved');add(saved,make('summary','Saved airports · '+(S.airports.loaded||'Automatic nearest')),make('p','Only one airport loads alongside your aircraft cameras. Automatic selection uses a '+(S.airports.radiusNm||25)+' NM radius and switches when another saved airport is at least 2 NM closer.','mc-note'),button('Automatic nearest',()=>command('SelectAirport',{icao:''}),'mc-secondary'));box.appendChild(saved);
-    (S.airports.nearby||[]).forEach(a=>{const b=button(a.icao+' · '+a.name+' · '+Number(a.distanceNm).toFixed(1)+' NM'+(a.transient?' · temporary, not saved':''),()=>command('SelectAirport',{icao:a.icao}),'mc-secondary');b.setAttribute('aria-pressed',String(a.icao===S.airports.loaded));saved.appendChild(b);});
+    const saved=make('details',undefined,'mc-airport-saved');add(saved,make('summary','Saved airports - '+(S.airports.loaded||'Automatic nearest')),make('p','Only one airport loads alongside your aircraft cameras. Automatic selection uses a '+(S.airports.radiusNm||25)+' NM radius and switches when another saved airport is at least 2 NM closer.','mc-note'),button('Automatic nearest',()=>command('SelectAirport',{icao:''}),'mc-secondary'));box.appendChild(saved);
+    (S.airports.nearby||[]).forEach(a=>{const b=button(a.icao+' - '+a.name+' - '+Number(a.distanceNm).toFixed(1)+' NM'+(a.transient?' - temporary, not saved':''),()=>command('SelectAirport',{icao:a.icao}),'mc-secondary');b.setAttribute('aria-pressed',String(a.icao===S.airports.loaded));saved.appendChild(b);});
     const current=(S.airports.facilities||[]).slice(0,8);
     box.appendChild(make('h4','1. Select an airport','mc-airport-heading'));
     if(current.length){const chips=make('div',undefined,'mc-airport-chips');current.forEach((a,i)=>chips.appendChild(button((i===0?'Nearest: ':'')+a.icao,()=>{$('mc-airport-codes').value=a.icao;Array.from(chips.children).forEach(b=>b.setAttribute('aria-pressed',String(b.textContent.indexOf(a.icao)>=0)));},'mc-secondary')));box.appendChild(chips);}
@@ -3604,7 +3624,7 @@
   function renderAirportPreview(){
     const box=$('mc-airport-results');if(!box)return;empty(box);
     Object.keys(S.airportPreviews).forEach(code=>{const result=S.airportPreviews[code],section=make('section');add(section,make('h4',code));box.appendChild(section);
-      if(result.pending){section.appendChild(make('p','Reading airport scenery…'));return;}
+      if(result.pending){section.appendChild(make('p','Reading airport scenery...'));return;}
       if(result.error)section.appendChild(make('p',result.error,'mc-warn'));
       (result.notes||[]).forEach(n=>section.appendChild(make('p',n,'mc-note')));
       const profile=result.profile;if(!profile)return;
@@ -3698,7 +3718,7 @@
         if (a && a.matchProfileId === profile.profileId) title.appendChild(make('span', 'This aircraft', 'mc-pill mc-accent'));
         if (profile.readOnly) title.appendChild(make('span', 'Read-only', 'mc-pill'));
         const count = isCurrent ? P().cameras.filter(c=>!c.airportIcao).length : profile.cameraCount;
-        add(text, title, make('small', (profile.matchStrategy==='none'?'No aircraft assigned':'Aircraft: '+(profile.displayName || 'Unassigned')) + ' · ' + count + ' cameras' + (isCurrent && aircraftProfileDirty() ? ' - unsaved changes' : '')));
+        add(text, title, make('small', (profile.matchStrategy==='none'?'No aircraft assigned':'Aircraft: '+(profile.displayName || 'Unassigned')) + ' - ' + count + ' cameras' + (isCurrent && aircraftProfileDirty() ? ' - unsaved changes' : '')));
         add(row, pm, text);
         const actions = make('div', undefined, 'mc-row-actions');
         if (isCurrent) {
@@ -4162,7 +4182,7 @@
         input.addEventListener('change',()=>{const host=S.working.settings.host,n=Number(input.value);host.airportCategoryHeights=Object.assign({runways:3,gates:3,apron:3,taxi:3,tower:35},host.airportCategoryHeights||{},{[key]:input.value.trim()!==''&&isFinite(n)?M.clamp(n,0,1000):fallback});input.value=host.airportCategoryHeights[key];settingChanged();});
         const line=make('span',undefined,'mc-autozoom-input');add(line,input,make('span','m','mc-note'));add(field,make('span',label),line);heights.appendChild(field);
       });row.appendChild(heights);
-      row.appendChild(make('p','New cameras inherit these heights. Older cameras keep their saved altitude until you choose a height option in that camera’s settings. Moving a camera vertically creates its own height override.','mc-note'));
+      row.appendChild(make('p','New cameras inherit these heights. Older cameras keep their saved altitude until you choose a height option in that camera\'s settings. Moving a camera vertically creates its own height override.','mc-note'));
       row.appendChild(make('p','Applies immediately to all airports. Save changes or press Ctrl+S to keep your choices. Head tracking is controlled separately in Tracking.','mc-note'));
       group.appendChild(row);
       const anchor=$('mc-mouse-settings')||$('mc-setting-look-speed').closest('.mc-inline-field');

@@ -33,6 +33,7 @@ public:
     void resolveAirportIdentities(const nlohmann::json&) override;
     bool requestAirportSummary(const std::string&, std::uint32_t) override;
     bool requestTraffic(double radiusMeters) override;
+    bool watchTrafficTarget(std::uint32_t objectId) override;
     bool onAirportRecv(const void*, unsigned long);
     void onRecv(const void* data, unsigned long size);
 
@@ -72,6 +73,7 @@ private:
     std::vector<bool> captureInputsValid_;
     std::vector<backend_event::TrafficAircraft> trafficPending_;  // the poll being received
     std::uint32_t userObjectId_ = 0;                               // from the user aircraft's own data requests
+    unsigned long watchedTarget_ = 0;                              // spotting target with per-frame data (0: none)
 };
 
 }  // namespace fscs::host

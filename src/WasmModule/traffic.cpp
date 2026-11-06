@@ -43,7 +43,12 @@ std::string cleanAtcText(const std::string& text) {
                 return std::toupper(static_cast<unsigned char>(a)) == std::toupper(static_cast<unsigned char>(b));
             })) s.erase(0, prefix.size());
     };
-    strip("TT:");
+    // Localisation prefixes, in either order: "TT:" (a translation key) and "$$:" (a literal, e.g. "$$:E190").
+    for (bool again = true; again;) {
+        const auto before = s.size();
+        for (const char* prefix : {"TT:", "$$:", "$$"}) strip(prefix);
+        again = s.size() != before;
+    }
     const bool key = s.rfind("ATCCOM.", 0) == 0;
     if (key) {
         s.erase(0, 7);
@@ -79,11 +84,43 @@ std::string label(const Sample& s) {
         callsign = s.atcId;
     }
     if (callsign.empty()) return !s.title.empty() ? s.title : s.model.empty() ? "Aircraft " + std::to_string(s.objectId) : s.model;
-    return s.model.empty() ? callsign : callsign + " \xC2\xB7 " + s.model;
+    return s.model.empty() ? callsign : callsign + " - " + s.model;
 }
 
 double Pose::trackDeg() const {
     return std::hypot(velocity.x, velocity.y) > 2 ? std::atan2(velocity.y, velocity.x) * core::kRadToDeg : headingDeg;
+}
+
+double chaseDirectionDeg(const Pose& target) {
+    const double speed = std::hypot(target.velocity.x, target.velocity.y);
+    const double u = core::clamp((speed - kChaseHeadingBelowMps) / (kChaseTrackAboveMps - kChaseHeadingBelowMps), 0.0, 1.0);
+    if (u <= 0 || !std::isfinite(speed)) return target.headingDeg;
+    const double track = std::atan2(target.velocity.y, target.velocity.x) * core::kRadToDeg;
+    return core::wrapDeg(target.headingDeg + core::wrapDeg(track - target.headingDeg) * u * u * (3 - 2 * u));
+}
+
+std::optional<core::Vec3> fitVelocity(const std::deque<std::pair<double, Geo>>& samples, double minSpan, double* mean,
+                                      std::size_t minSamples) {
+    if (samples.size() < std::max<std::size_t>(minSamples, 2) || samples.back().first - samples.front().first < minSpan) return std::nullopt;
+    const Geo& ref = samples.back().second;
+    double tm = 0;
+    core::Vec3 xm;
+    for (const auto& [t, g] : samples) { tm += t; xm += local(ref, g); }
+    const double n = static_cast<double>(samples.size());
+    tm /= n;
+    xm = xm * (1 / n);
+    double stt = 0;
+    core::Vec3 stx;
+    for (const auto& [t, g] : samples) {
+        const double dt = t - tm;
+        stt += dt * dt;
+        stx += (local(ref, g) - xm) * dt;
+    }
+    if (!(stt > 1e-9)) return std::nullopt;
+    const auto v = stx * (1 / stt);
+    if (!v.finite()) return std::nullopt;
+    if (mean) *mean = tm;
+    return v;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -131,6 +168,34 @@ Shown shown(const Model::Entry& e, double t) {
 
 double finiteOr(double v, double fallback) { return std::isfinite(v) ? v : fallback; }
 
+// The per-frame sample at `t`: exact at its receive time, extrapolated at most kFrameLeadSeconds.
+Shown frameShown(const Model::Entry::Frame& f, double t) {
+    const double lead = core::clamp(t - f.at, 0.0, Model::kFrameLeadSeconds);
+    return {world(f.position, f.velocity * lead), f.velocity, f.headingDeg, 0.0, f.pitchDeg, f.bankDeg};
+}
+
+bool hasFrame(const Model::Entry& e) { return e.frame.position.valid() && std::isfinite(e.frame.headingDeg); }
+
+// What is shown at `t`: per-frame data as it is (extrapolated at most kFrameLeadSeconds); once it stops, a smoothstep
+// blend from the last sample dead-reckoned on into the poll prediction (no step in position or velocity); otherwise
+// the poll prediction.
+Shown display(const Model::Entry& e, double t) {
+    if (!hasFrame(e)) return shown(e, t);
+    const double age = t - e.frame.at;
+    if (age <= Model::kFrameLeadSeconds) return frameShown(e.frame, t);
+    const double u = (age - Model::kFrameLeadSeconds) / Model::kBlendSeconds;
+    if (!(u < 1)) return shown(e, t);
+    const double s = u * u * (3 - 2 * u), ds = 6 * u * (1 - u) / Model::kBlendSeconds;
+    Shown a = frameShown(e.frame, t);
+    a.position = world(e.frame.position, e.frame.velocity * std::min(age, Model::kMaxExtrapolationSeconds));
+    const auto b = shown(e, t);
+    const auto d = local(a.position, b.position);
+    const double dh = core::wrapDeg(b.headingDeg - a.headingDeg);
+    return {world(a.position, d * s), a.velocity * (1 - s) + b.velocity * s + d * ds, core::wrapDeg(a.headingDeg + dh * s),
+            b.headingRate * s + dh * ds, a.pitchDeg + (b.pitchDeg - a.pitchDeg) * s,
+            a.bankDeg + core::wrapDeg(b.bankDeg - a.bankDeg) * s};
+}
+
 }  // namespace
 
 void Model::update(const std::vector<Sample>& poll, std::uint32_t userObjectId, const Geo& ownship, double now) {
@@ -148,6 +213,8 @@ void Model::update(const std::vector<Sample>& poll, std::uint32_t userObjectId, 
             it = entries_.emplace(raw.objectId, Entry{}).first;
         }
         Entry& e = it->second;
+        // Per-frame data arriving: the poll must not disturb the pose (it arrives every frame, so within the lead time).
+        const bool framed = hasFrame(e) && now - e.frame.at <= kFrameLeadSeconds;
         Sample s = raw;
         s.headingDeg = core::wrapDeg(s.headingDeg);
         s.groundSpeed = std::max(0.0, finiteOr(s.groundSpeed, 0));
@@ -156,13 +223,38 @@ void Model::update(const std::vector<Sample>& poll, std::uint32_t userObjectId, 
         s.bankDeg = core::wrapDeg(finiteOr(s.bankDeg, 0));
         if (!(std::isfinite(s.groundAltitude) && s.groundAltitude > -1500 && s.groundAltitude < 10000)) s.groundAltitude = NAN;
         for (auto* text : {&s.title, &s.atcId, &s.airline, &s.flightNumber, &s.model}) *text = cleanAtcText(*text);
+        const bool known = e.lastSeen >= 0;
+        if (known && now - e.lastSeen > kStaleSeconds) e.history.clear();
+        // A jump (slew, warp, a new flight) starts the position history, drift and turn rate afresh.
+        bool jumped = false;
+        if (known) {
+            const auto shownNow = display(e, now);
+            jumped = !shownNow.position.valid() || local(shownNow.position, g).length() > kSnapMeters + 300 * (now - e.lastSeen);
+            if (jumped) { e.history.clear(); e.driftDeg = NAN; }
+        }
+
+        // Injected traffic can report zero (or wrong) speeds while it moves: fit the speed to the recent positions.
+        std::deque<std::pair<double, Geo>> recent;
+        for (const auto& h : e.history) if (now - h.first <= kPollFitSeconds && now - h.first > 1e-6) recent.push_back(h);
+        recent.emplace_back(now, g);
+        double fittedAt = now;
+        const auto fitted = fitVelocity(recent, 1.0, &fittedAt, 2);
+        std::optional<double> fittedTrackDeg;
+        // Plausible speeds only: a fit across a jump is not a velocity.
+        if (fitted && std::hypot(fitted->x, fitted->y) <= (s.onGround ? kMaxGroundSpeedMps : kMaxAirSpeedMps)) {
+            const double fs = std::hypot(fitted->x, fitted->y);
+            if (fs > 1 && (s.groundSpeed < .5 || s.groundSpeed < .25 * fs || s.groundSpeed > 4 * fs + 2)) {
+                s.groundSpeed = fs;
+                fittedTrackDeg = std::atan2(fitted->y, fitted->x) * core::kRadToDeg;
+            }
+            if (std::abs(s.verticalSpeed) < .05 && std::abs(fitted->z) > .3 && !s.onGround) s.verticalSpeed = -fitted->z;
+        }
 
         // Direction of travel: the heading plus the drift (wind) angle when airborne and moving, else the heading. The
         // drift is the measured track between the last two polls against the heading half-way between them, smoothed
         // over polls since it changes slowly and a single chord is noisy. Turn rate from the last two polls.
         double turn = 0;
-        const bool known = e.lastSeen >= 0;
-        if (known) {
+        if (known && !jumped) {
             const double dt = now - e.lastSeen;
             if (dt >= .3 && dt <= 6) {
                 const double dh = core::wrapDeg(s.headingDeg - e.last.headingDeg);
@@ -176,19 +268,36 @@ void Model::update(const std::vector<Sample>& poll, std::uint32_t userObjectId, 
             }
         }
         if (s.onGround) e.driftDeg = NAN;
-        const double t = (s.headingDeg + (std::isfinite(e.driftDeg) ? e.driftDeg : 0.0)) * core::kDegToRad;
-        const Track next{now, g, {s.groundSpeed * std::cos(t), s.groundSpeed * std::sin(t), s.onGround ? 0.0 : -s.verticalSpeed},
-                         s.headingDeg, turn, s.pitchDeg, s.bankDeg};
+        // Direction of travel: a fitted track (turned on to now by the turn rate), else heading plus drift.
+        const double t = (fittedTrackDeg ? *fittedTrackDeg + turn * (now - fittedAt)
+                                         : s.headingDeg + (std::isfinite(e.driftDeg) ? e.driftDeg : 0.0)) * core::kDegToRad;
+        const bool parked = s.onGround && s.groundSpeed < kParkedSpeedMps;
+        Track next{now, g, {s.groundSpeed * std::cos(t), s.groundSpeed * std::sin(t), s.onGround ? 0.0 : -s.verticalSpeed},
+                   s.headingDeg, turn, s.pitchDeg, s.bankDeg};
+        if (parked) { next.velocity = {}; next.headingRate = 0; }
         if (!known) {
+            e.from = e.to = next;
+            e.blendStart = -1e9;
+        } else if (framed) {
+            // Fresh per-frame data shows the aircraft: the poll only updates the fallback trajectory, never the pose.
             e.from = e.to = next;
             e.blendStart = -1e9;
         } else {
             // Continue from what is shown now (position, velocity and heading rate) into the new trajectory.
-            const auto cur = shown(e, now);
-            e.from = {now, cur.position, cur.velocity, cur.headingDeg, cur.headingRate, cur.pitchDeg, cur.bankDeg};
-            e.to = next;
-            const bool jump = !cur.position.valid() || local(cur.position, g).length() > kSnapMeters;
-            e.blendStart = jump ? -1e9 : now;
+            const auto cur = display(e, now);
+            e.frame.at = -1e9;  // a blend back from per-frame data is folded into this one
+            const auto moved = cur.position.valid() ? local(cur.position, g) : core::Vec3{NAN, NAN, NAN};
+            if (parked && e.last.onGround && moved.finite() && moved.length() < kParkedDeadbandMeters &&
+                std::abs(core::wrapDeg(s.headingDeg - cur.headingDeg)) < kParkedDeadbandDeg) {
+                // Parked: report noise never moves the pose; it stays exactly where it is shown.
+                e.from = e.to = {now, cur.position, {}, cur.headingDeg, 0, cur.pitchDeg, cur.bankDeg};
+                e.blendStart = -1e9;
+            } else {
+                e.from = {now, cur.position, cur.velocity, cur.headingDeg, cur.headingRate, cur.pitchDeg, cur.bankDeg};
+                e.to = next;
+                const bool jump = !moved.finite() || moved.length() > kSnapMeters;
+                e.blendStart = jump ? -1e9 : now;
+            }
         }
         const bool airborneRecently = now - e.lastAirborneAt <= kLandingMemorySeconds;
         if (!s.onGround) e.lastAirborneAt = now;
@@ -203,10 +312,58 @@ void Model::update(const std::vector<Sample>& poll, std::uint32_t userObjectId, 
     prune(now);
 }
 
+void Model::updateTarget(const FrameSample& raw, double now) {
+    const auto it = entries_.find(raw.objectId);
+    if (it == entries_.end()) return;
+    Entry& e = it->second;
+    const Geo g{raw.lat, raw.lon, raw.altitude};
+    if (!g.valid() || !std::isfinite(raw.headingDeg)) return;
+    e.frames.emplace_back(now, g);
+    while (!e.frames.empty() && (now - e.frames.front().first > kFrameFitSeconds || e.frames.size() > 64)) e.frames.pop_front();
+    Entry::Frame f;
+    f.at = now;
+    f.position = g;
+    f.headingDeg = core::wrapDeg(raw.headingDeg);
+    f.pitchDeg = core::clamp(finiteOr(raw.pitchDeg, 0), -90., 90.);
+    f.bankDeg = core::wrapDeg(finiteOr(raw.bankDeg, 0));
+    f.onGround = raw.onGround;
+    f.groundAltitude = std::isfinite(raw.groundAltitude) && raw.groundAltitude > -1500 && raw.groundAltitude < 10000 ? raw.groundAltitude : NAN;
+    // VELOCITY WORLD, checked against the positions: injected traffic may report zero, and a wrong axis would point
+    // the chase the wrong way. A least-squares fit over the last 0.6 s replaces a reported velocity that disagrees.
+    core::Vec3 v{finiteOr(raw.velocityNorth, 0), finiteOr(raw.velocityEast, 0), finiteOr(raw.velocityDown, 0)};
+    if (const auto fit = fitVelocity(e.frames, .15)) {
+        const double rs = std::hypot(v.x, v.y), fs = std::hypot(fit->x, fit->y);
+        if (fs > 1.5 && (rs < .5 || rs < .5 * fs || rs > 2 * fs + 2 || v.x * fit->x + v.y * fit->y < .5 * rs * fs)) {
+            v.x = fit->x;
+            v.y = fit->y;
+        }
+        if (std::abs(v.z) < .05 && std::abs(fit->z) > .5) v.z = fit->z;
+    }
+    if (f.onGround) v.z = 0;
+    const bool parked = f.onGround && std::hypot(v.x, v.y) < kFrameParkedSpeedMps;
+    if (parked) v = {};
+    f.velocity = v;
+    if (parked && hasFrame(e) && e.frame.onGround && now - e.frame.at <= kFrameFreshSeconds &&
+        local(e.frame.position, g).length() < kFrameParkedDeadbandMeters &&
+        std::abs(core::wrapDeg(f.headingDeg - e.frame.headingDeg)) < kFrameParkedDeadbandDeg) {
+        // Parked: the pose stays exactly where it is (a perfectly still camera); only the time moves on.
+        f.position = e.frame.position;
+        f.headingDeg = e.frame.headingDeg;
+        f.pitchDeg = e.frame.pitchDeg;
+        f.bankDeg = e.frame.bankDeg;
+    }
+    e.frame = f;
+}
+
+bool Model::frameFresh(std::uint32_t id, double now) const {
+    const auto* e = find(id);
+    return e && hasFrame(*e) && now - e->frame.at <= kFrameFreshSeconds && now - e->frame.at >= -1e-9;
+}
+
 bool Model::prune(double now) {
     bool removed = false;
     for (auto it = entries_.begin(); it != entries_.end();) {
-        if (now - it->second.lastSeen > kStaleSeconds) {
+        if (now - it->second.seen() > kStaleSeconds) {
             it = entries_.erase(it);
             removed = true;
         } else {
@@ -229,28 +386,29 @@ const Model::Entry* Model::find(std::uint32_t id) const {
 
 bool Model::fresh(std::uint32_t id, double now) const {
     const auto* e = find(id);
-    return e && now - e->lastSeen <= kStaleSeconds;
+    return e && now - e->seen() <= kStaleSeconds;
 }
 
 Pose Model::predict(std::uint32_t id, double now) const {
     Pose p;
     const auto* e = find(id);
-    if (!e || now - e->lastSeen > kStaleSeconds) return p;
-    const auto s = shown(*e, now);
+    if (!e || now - e->seen() > kStaleSeconds) return p;
+    const auto s = display(*e, now);
     p.position = s.position;
     p.velocity = s.velocity;
     p.headingDeg = s.headingDeg;
     p.pitchDeg = s.pitchDeg;
     p.bankDeg = s.bankDeg;
-    p.groundAltitude = e->last.groundAltitude;
-    p.onGround = e->last.onGround;
+    const bool framed = hasFrame(*e) && now - e->frame.at <= kFrameLeadSeconds + kBlendSeconds;
+    p.groundAltitude = framed && std::isfinite(e->frame.groundAltitude) ? e->frame.groundAltitude : e->last.groundAltitude;
+    p.onGround = framed ? e->frame.onGround : e->last.onGround;
     return p;
 }
 
 std::vector<std::uint32_t> Model::byDistance(const Geo& from, double now) const {
     std::vector<std::pair<double, std::uint32_t>> list;
     for (const auto& [id, e] : entries_) {
-        if (now - e.lastSeen > kStaleSeconds) continue;
+        if (now - e.seen() > kStaleSeconds) continue;
         const auto p = predict(id, now);
         double d = from.valid() && p.valid() ? std::hypot(local(from, p.position).x, local(from, p.position).y) : NAN;
         list.emplace_back(std::isfinite(d) ? d : std::numeric_limits<double>::infinity(), id);
@@ -326,13 +484,14 @@ std::optional<core::Pbh> aim(const Geo& from, const Geo& to) {
 }
 
 core::Vec3 chaseOffset(const Pose& target, double behind, double above) {
-    const double t = target.trackDeg() * core::kDegToRad;
+    const double t = chaseDirectionDeg(target) * core::kDegToRad;
     return {-std::cos(t) * behind, -std::sin(t) * behind, -above};
 }
 
 core::Vec3 follow(const core::Vec3& current, const core::Vec3& desired, double dt, double seconds) {
     if (!current.finite()) return desired;
     if (!(dt > 0) || !std::isfinite(dt)) return current;
+    if ((desired - current).length() < kSettledMeters) return desired;  // settled: exactly still, not creeping
     return current + (desired - current) * (-std::expm1(-dt / std::max(seconds, 1e-3)));
 }
 
@@ -359,12 +518,208 @@ double terrainFloor(double terrainA, double terrainB, double clearance) {
     return (a && b ? std::max(terrainA, terrainB) : a ? terrainA : terrainB) + clearance;
 }
 
+core::Vec3 smoothDamp(const core::Vec3& current, core::Vec3& velocity, const core::Vec3& target, double dt, double seconds) {
+    if (!current.finite() || !velocity.finite()) { velocity = {}; return target; }
+    if (!(dt > 0) || !std::isfinite(dt)) return current;
+    // Critically damped spring (Unity's SmoothDamp approximation of exp(-x) is stable at any frame time).
+    const double omega = 2 / std::max(seconds, 1e-3), x = omega * dt;
+    const double decay = 1 / (1 + x + .48 * x * x + .235 * x * x * x);
+    const auto change = current - target;
+    if (change.length() < kSettledMeters && velocity.length() < kSettledMeters) { velocity = {}; return target; }
+    const auto temp = (velocity + change * omega) * dt;
+    velocity = (velocity - temp * omega) * decay;
+    return target + (change + temp) * decay;
+}
+
 double autoZoomFov(double distance, double frameMeters, double minFovRad, double maxFovRad) {
     return core::clamp(2 * std::atan2(frameMeters, 2 * distance), minFovRad, maxFovRad);
 }
 
 double easeFov(double current, double target, double dt, double responseSeconds) {
+    if (std::abs(target - current) < 1e-7) return target;
     return current + (target - current) * (-std::expm1(-dt / responseSeconds));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Computed airport views
+
+namespace {
+double horizontalDistance(const Geo& a, const Geo& b) {
+    const auto d = local(a, b);
+    return std::hypot(d.x, d.y);
+}
+}  // namespace
+
+SpotAirport spotAirport(const json& f) {
+    SpotAirport a;
+    a.icao = js::str(f, "icao");
+    a.origin = profiles::airport::geo(f);
+    if (!a.origin.valid()) return a;
+    // The generator's runway geometry: thresholds at the runway ends, primary landing along the heading.
+    const json* longest = nullptr;
+    double longestLength = 0;
+    for (const auto& r : js::array(f, "runways")) {
+        const auto center = profiles::airport::geo(r);
+        const double length = js::num(r, "length", 0), heading = js::num(r, "heading", NAN), width = js::num(r, "width", 30);
+        if (!center.valid() || length < 50 || length > 10000 || !std::isfinite(heading)) continue;
+        if (length > longestLength) { longestLength = length; longest = &r; }
+        for (int side = 0; side < 2; ++side) {
+            RunwayEnd end;
+            end.icao = a.icao;
+            end.name = js::str(r, side ? "secondary" : "primary", side ? "Reciprocal" : "Runway");
+            end.headingDeg = core::wrapDeg(heading + (side ? 180 : 0));
+            const double t = end.headingDeg * core::kDegToRad;
+            end.threshold = world(center, core::Vec3{std::cos(t), std::sin(t), 0} * (-length / 2));
+            end.threshold.altitude = center.altitude;
+            end.lengthMeters = length;
+            end.widthMeters = std::isfinite(width) ? width : 30;
+            if (end.threshold.valid()) a.ends.push_back(std::move(end));
+        }
+    }
+    const auto tower = profiles::airport::geo(js::get(f, "tower"));
+    if (tower.valid() && (tower.lat != 0 || tower.lon != 0) && horizontalDistance(a.origin, tower) < 10000) {
+        a.tower = {tower.lat, tower.lon, a.origin.altitude};
+    } else if (longest) {
+        // As the generator: a virtual tower abeam the longest runway's midpoint, on the side with more parking.
+        const auto center = profiles::airport::geo(*longest);
+        const double h = js::num(*longest, "heading", 0) * core::kDegToRad;
+        const core::Vec3 right{-std::sin(h), std::cos(h), 0};
+        const auto c = local(a.origin, center);
+        int rightStands = 0, leftStands = 0;
+        for (const auto& p : js::array(f, "parking")) {
+            const double n = js::num(p, "north", NAN), e = js::num(p, "east", NAN);
+            if (!std::isfinite(n) || !std::isfinite(e)) continue;
+            const double across = (n - c.x) * right.x + (e - c.y) * right.y;
+            if (across > 0) ++rightStands; else if (across < 0) ++leftStands;
+        }
+        a.tower = world(a.origin, c + right * (rightStands > leftStands ? profiles::airport::kVirtualTowerAbeamMeters
+                                                                        : -profiles::airport::kVirtualTowerAbeamMeters));
+        a.tower.altitude = a.origin.altitude;
+        a.virtualTower = true;
+    }
+    return a;
+}
+
+const std::vector<std::string>& runwaySpotKinds() {
+    static const std::vector<std::string> kinds{"fence", "approach", "threshold", "custom"};
+    return kinds;
+}
+
+RunwaySpot runwaySpot(const RunwayEnd& end, const std::string& kind, double runwayHeight) {
+    RunwaySpot s;
+    s.icao = end.icao;
+    s.runwayEnd = end.name;
+    s.kind = kind;
+    const double height = std::isfinite(runwayHeight) ? core::clamp(runwayHeight, 0.0, 1000.0) : 3.0;
+    if (kind == "approach") {
+        // The generator's 1 NM spot: about 90 m below a 3-degree glidepath.
+        s.behindMeters = profiles::airport::kApproachDistanceMeters;
+        s.heightMeters = std::max(0.0, profiles::airport::kApproachDistanceMeters * std::tan(profiles::airport::kGlidepathDeg * core::kDegToRad) -
+                                           profiles::airport::kApproachBelowGlidepathMeters);
+    } else if (kind == "threshold") {
+        s.sideMeters = end.widthMeters / 2 + 12;  // the generator's threshold view offset
+        s.heightMeters = height;
+    } else {
+        s.behindMeters = profiles::airport::kFenceBehindMeters;
+        s.sideMeters = profiles::airport::kFenceSideMeters;
+        s.heightMeters = height;
+    }
+    return s;
+}
+
+Geo spotPosition(const RunwayEnd& end, const RunwaySpot& spot) {
+    const double t = end.headingDeg * core::kDegToRad;
+    const core::Vec3 landing{std::cos(t), std::sin(t), 0}, right{-std::sin(t), std::cos(t), 0};
+    return world(end.threshold, landing * -spot.behindMeters + right * spot.sideMeters + core::Vec3{0, 0, -spot.heightMeters});
+}
+
+json toJson(const RunwaySpot& s) {
+    return {{"icao", s.icao}, {"runwayEnd", s.runwayEnd}, {"kind", s.kind},
+            {"behindMeters", s.behindMeters}, {"sideMeters", s.sideMeters}, {"heightMeters", s.heightMeters}};
+}
+
+const RunwayEnd* findRunwayEnd(const std::vector<SpotAirport>& airports, const std::string& icao, const std::string& end) {
+    for (const auto& a : airports)
+        if (a.icao == icao)
+            for (const auto& e : a.ends) if (e.name == end) return &e;
+    return nullptr;
+}
+
+std::optional<RunwaySpot> parseRunwaySpot(const json& v, const std::vector<SpotAirport>& airports, double runwayHeight, std::string& error) {
+    if (!v.is_object()) { error = "A runway spot needs an airport and a runway end."; return std::nullopt; }
+    const auto* end = findRunwayEnd(airports, js::str(v, "icao"), js::str(v, "runwayEnd"));
+    if (!end) { error = "That runway end is not known. Wait for the airport's scenery data, or choose another end."; return std::nullopt; }
+    const auto kind = js::str(v, "kind", "fence");
+    const auto& kinds = runwaySpotKinds();
+    if (std::find(kinds.begin(), kinds.end(), kind) == kinds.end()) { error = "Choose a spot type: fence, approach, threshold or custom."; return std::nullopt; }
+    auto spot = runwaySpot(*end, kind == "custom" ? "fence" : kind, runwayHeight);
+    spot.kind = kind;
+    const auto offset = [&](const char* key, double& out, double low, double high) {
+        const auto& x = js::get(v, key);
+        if (x.is_null()) return true;
+        if (!x.is_number() || !std::isfinite(x.get<double>()) || x.get<double>() < low || x.get<double>() > high) {
+            error = std::string("The spot's ") + key + " is out of range.";
+            return false;
+        }
+        out = x.get<double>();
+        return true;
+    };
+    if (!offset("behindMeters", spot.behindMeters, -5000, 5000) || !offset("sideMeters", spot.sideMeters, -5000, 5000) ||
+        !offset("heightMeters", spot.heightMeters, 0, 1000))
+        return std::nullopt;
+    return spot;
+}
+
+const RunwayEnd* pickRunwayEnd(const std::vector<SpotAirport>& airports, const Pose& target, Status status, bool* aligned) {
+    if (aligned) *aligned = false;
+    if (!target.valid()) return nullptr;
+    const bool arriving = status == Status::Arriving || status == Status::Landing;
+    const bool departing = status == Status::Takeoff || status == Status::Departing;
+    const double track = target.trackDeg();
+    const RunwayEnd *best = nullptr, *nearest = nullptr;
+    double bestScore = std::numeric_limits<double>::infinity(), nearestDistance = bestScore;
+    for (const auto& a : airports)
+        for (const auto& e : a.ends) {
+            const auto rel = local(e.threshold, target.position);
+            const double distance = std::hypot(rel.x, rel.y);
+            if (!(distance <= kSpotAirportRangeMeters)) continue;
+            if (distance < nearestDistance) { nearestDistance = distance; nearest = &e; }
+            if (!arriving && !departing) continue;
+            // Arrivals land over this end in its landing direction; departures lift off over the reciprocal end's
+            // threshold, flying against that end's landing direction.
+            const double wanted = arriving ? e.headingDeg : core::wrapDeg(e.headingDeg + 180);
+            if (std::abs(core::wrapDeg(track - wanted)) > kRunwayAlignDeg) continue;
+            const double t = e.headingDeg * core::kDegToRad;
+            const double along = rel.x * std::cos(t) + rel.y * std::sin(t);  // < 0: on this end's approach side
+            const double lateral = std::abs(-rel.x * std::sin(t) + rel.y * std::cos(t));
+            // Up to the far end of the runway, and inside a cone round the extended centerline.
+            if (along > e.lengthMeters + 200 || lateral > 150 + .15 * std::max(0.0, -along)) continue;
+            const double score = lateral + .02 * std::abs(along);
+            if (score < bestScore) { bestScore = score; best = &e; }
+        }
+    if (best) {
+        if (aligned) *aligned = true;
+        return best;
+    }
+    return nearest;
+}
+
+const SpotAirport* pickTower(const std::vector<SpotAirport>& airports, const Pose& target) {
+    const SpotAirport* best = nullptr;
+    double bestDistance = kSpotAirportRangeMeters;
+    if (!target.valid()) return nullptr;
+    for (const auto& a : airports) {
+        if (!a.tower.valid()) continue;
+        const double d = horizontalDistance(a.tower, target.position);
+        if (d <= bestDistance) { bestDistance = d; best = &a; }
+    }
+    return best;
+}
+
+Geo towerPosition(const SpotAirport& a, double towerHeight) {
+    auto g = a.tower;
+    g.altitude += std::isfinite(towerHeight) ? core::clamp(towerHeight, 0.0, 1000.0) : 35.0;
+    return g;
 }
 
 }  // namespace fscs::host::traffic
