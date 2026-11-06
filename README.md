@@ -47,6 +47,9 @@ state held in the module, so the editor and the mini panel always agree.
 * **Bindings** provide independent Primary and Secondary slots for keyboard and controller inputs. Choose a
   controller from the visible list, select **Listen for button or hat**, press and release a button or return the hat
   to center, then **Assign**. Inputs work with the editor closed. See [binding guidance](doc/dual-bindings.md).
+* **Smart views:** mark instrument close-ups as **Glance view** (instrument views are by default). Hold
+  **Ctrl + Alt + G** to glance at the one nearest to where you are looking and release to return to the exact view and
+  look; **Ctrl + Alt + I** steps through them and **Ctrl + Alt + U** returns. See [smart views](doc/dual-bindings.md#smart-views-glance).
 * **Library layout:** category headers contain indented, single-line camera rows, with inline shortcuts and a
   distinct active-view indicator. The main editor shows every camera with its icon and name; the wide bottom mini
   panel shows starred cameras. Its Icons/Labels/Both preference applies only to categories.

@@ -12,7 +12,7 @@ namespace fscs::profiles {
 
 namespace {
 
-constexpr std::array<std::pair<Action, const char*>, 28> kActions{{
+constexpr std::array<std::pair<Action, const char*>, 31> kActions{{
     {Action::SaveViews, "saveViews"},
     {Action::ToggleHeadTracking, "toggleHeadTracking"}, {Action::ToggleAirportAuto, "toggleAirportAuto"},
     {Action::SelectView, "selectView"},       {Action::PeekView, "peekView"},
@@ -27,6 +27,7 @@ constexpr std::array<std::pair<Action, const char*>, 28> kActions{{
     {Action::MoveUp, "moveUp"},               {Action::MoveDown, "moveDown"},
     {Action::MoveFast, "moveFast"}, {Action::ZoomIn, "zoomIn"},               {Action::ZoomOut, "zoomOut"},
     {Action::PanicRelease, "panicRelease"},
+    {Action::GlanceHold, "glanceHold"}, {Action::GlanceNext, "glanceNext"}, {Action::GlanceReturn, "glanceReturn"},
 }};
 
 const char* povName(PovDirection d) {
@@ -258,7 +259,8 @@ json defaultBindingsDocument() {
         {"releaseCamera", {"R", "R"}},   {"toggleEditor", {"E", "E"}}, {"toggleMini", {"M", "M"}},
         {"recenterLook", {"C", "C"}},    {"lookLeft", {"VK_LEFT", "Left arrow"}}, {"lookRight", {"VK_RIGHT", "Right arrow"}},
         {"lookUp", {"VK_UP", "Up arrow"}}, {"lookDown", {"VK_DOWN", "Down arrow"}},
-        {"panicRelease", {"X", "X"}}};
+        {"panicRelease", {"X", "X"}},
+        {"glanceHold", {"G", "G"}}, {"glanceNext", {"I", "I"}}, {"glanceReturn", {"U", "U"}}};
     for (const auto& [action, k] : rest) list.push_back({{"action", action}, {"input", key(k.first, k.second)}});
     return upgradeMovementBindings({{"schemaVersion", kBindingsSchemaVersion}, {"bindings", list}});
 }

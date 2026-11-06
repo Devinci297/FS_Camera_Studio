@@ -25,3 +25,23 @@ Panic works with both panels closed (once a flight is loaded), while a panel tex
 * discards a camera recall queued behind an earlier release, so nothing re-activates. Use **Enable** or select a view to take control again.
 
 Release Camera already does all of this except two things: it leaves Auto switch on (paused until a camera is active again), and it keeps remembered looks so a retained look returns on the next recall. A panic while already released changes nothing and still succeeds. Each press sends a `PanicReleased` event (`state`, `reason`, `airportAutoStopped`). Both panels show "Camera released - simulator has control" for about 3 seconds after any release: the Release buttons, the Release or Panic binding, and automatic hand-backs (a change from Active, Paused by the simulator or Releasing to Observing). Coverage: `tests/test_coordinator.cpp`, `tests/test_module.cpp` and `ui/tests/panic-release.test.cjs`. Panic on a live simulator still needs verification.
+
+## Smart views (glance)
+
+MSFS does not list cockpit instruments or their positions, so smart views work from your own instrument close-ups. Turn on **Glance view** in a cockpit camera's Behavior settings (next to **Show in quick access**). Cockpit cameras whose icon is the instrument icon, or whose name gives that automatic icon (PFD, MFD, instrument, G1000, radio, avionics, autopilot), are glance views by default, so the C172 starter's four Instruments views work at once. Older profiles get the same default when they load; nothing is migrated. Exterior, orbit, fly-by and airport views are never glance views.
+
+| Binding | Default (new installs) | What it does |
+| --- | --- | --- |
+| **Glance at instrument (hold)** (`glanceHold`) | Ctrl + Alt + G | While held, shows the glance view nearest to where you are looking. Release returns to the exact view and look direction you left. |
+| **Next glance view** (`glanceNext`) | Ctrl + Alt + I | Steps through glance views in category order, wrapping. |
+| **Return from glance** (`glanceReturn`) | Ctrl + Alt + U | Goes back to the view and look direction you glanced from. |
+
+G, I and U were unused by every other default (1–9, P, N, B, R, X, E, M, C, the arrows, W/A/S/D/Q/E, Shift and Ctrl + S). Saved bindings are not migrated, so an existing setup has no glance inputs until they are assigned on the Bindings page, under **Glance - instrument close-ups**.
+
+* **Nearest view.** The current look direction includes temporary mouse look and keyboard movement. Each glance view is compared by the direction from the current eyepoint to the point 0.75 m in front of that camera (roughly the instrument it shows), so a close-up placed at the eyepoint compares by its own direction. The smallest angle wins; within half a degree, the camera that itself points closest to your look wins, then category order. The view you glanced from is never offered.
+* **Return.** Both directions use the smooth transition and take 0.35 s. A glance view opens at its saved pose; on return the saved pose of the original view and its temporary look are restored exactly. Saved poses are never changed.
+* **Ending a glance.** Release of the hold, **Return from glance**, recalling any view (a view binding, Next/Previous camera, a panel button, peek, automatic airport switching) ends glance mode; only release and Return go back. **Release camera control** and **Panic** cancel it: nothing returns afterwards, even if the glance key comes up later.
+* Glancing needs an active cockpit view. Text focus in a panel ends a held glance, like every held binding. Alternate inputs for **Glance at instrument (hold)** share one hold. The Bindings page's Test button glances and stays; test **Return from glance** to go back.
+* The mini panel shows **Glancing - release to return** above the instrument's name while a glance view is shown.
+
+Coverage: `tests/test_glance.cpp` (defaults, nearest-view selection, hold/release exactness, cycling, release and panic, the module path) and `ui/tests/glance-views.test.cjs`. Glancing in a live simulator still needs verification.

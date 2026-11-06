@@ -178,7 +178,8 @@ void Coordinator::emitActiveCamera() {
     emit_("ActiveCameraChanged", {{"profileId", profile_ ? json(profile_->profileId) : json(nullptr)},
                                   {"cameraId", activeCameraId_.empty() ? json(nullptr) : json(activeCameraId_)},
                                   {"peeking", peek_.has_value()},
-                                  {"transitioning", engine_.transitioning()}});
+                                  {"transitioning", engine_.transitioning()},
+                                  {"glance", glanceJson()}});
     lastTransitioning_ = engine_.transitioning();
 }
 
@@ -501,6 +502,7 @@ std::string Coordinator::activate(const std::string& cameraId, double now, bool 
     if (const auto block = blockReason(); !block.empty()) return block;
     if (cam->mode == profiles::CameraMode::Flyby && (targetAt_ < 0 || now-targetAt_ > 5 || !std::isfinite(targetHeading_)))
         return "Waiting for the aircraft position before starting a fly-by.";
+    glance_.reset(); glanceReturn_.reset();  // recalling any view ends a glance without returning
     if (!walkaroundAdvancing_) stopWalkaround();
     seedName_.clear();
     switch (state_) {
@@ -674,6 +676,7 @@ std::string Coordinator::nextCategory(double now) {
 }
 
 void Coordinator::release(const std::string& reason, double now) {
+    glance_.reset(); glanceReturn_.reset();  // never return from a glance after a release
     stopWalkaround();
     headTracking_.restore();
     if (!lookOwner_.empty()) rememberedLooks_[lookOwner_] = engine_.look();
@@ -1246,6 +1249,15 @@ void Coordinator::onAction(const ActionEvent& ev, double now) {
             if (!ev.pressed) return;
             release("Camera returned to the simulator", now);
             break;
+        case Action::GlanceHold:
+            if (!ev.pressed) {
+                glanceHoldReleased(ev.holdId, now);
+                return;
+            }
+            result = glanceHold(ev.holdId, now);
+            break;
+        case Action::GlanceNext: if (ev.pressed) result = glanceNext(now); else return; break;
+        case Action::GlanceReturn: if (ev.pressed) result = glanceReturn(now); else return; break;
         case Action::PanicRelease:
             if (!ev.pressed) return;
             panicRelease(now);
@@ -1360,6 +1372,7 @@ void Coordinator::tick(double now) {
         const bool manualActive = mouseHeld_ || manual_.lookRight != 0 || manual_.lookUp != 0 || manual_.moveForward != 0 ||
             manual_.moveRight != 0 || manual_.moveUp != 0 || manual_.zoomIn != 0;
         engine_.tick(dt, manual_, movement);
+        updateGlance(now);
         if (effectCamera && (effectCamera->mode == profiles::CameraMode::Orbit || effectCamera->mode == profiles::CameraMode::Flyby) && !engine_.transitioning() && !manualActive && !motionPaused_ && dt <= .1) {
             motionTime_ += dt;
             engine_.animateBase(motionPose(*effectCamera));
@@ -1395,6 +1408,199 @@ void Coordinator::tick(double now) {
         if (engine_.transitioning() != lastTransitioning_) emitActiveCamera();
         emitLook(now);
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Smart views (glance)
+
+namespace {
+constexpr const char* kNoGlanceViews =
+    "No glance views in this profile. Turn on Glance view for an instrument camera in its Behavior settings.";
+core::Vec3 lookDirection(const core::Quat& q) { return q.rotate({1, 0, 0}); }
+double angleBetweenDirections(const core::Vec3& a, const core::Vec3& b) {
+    const double n = a.length() * b.length();
+    return n > 1e-12 ? std::acos(core::clamp(core::dot(a, b) / n, -1.0, 1.0)) : std::numbers::pi;
+}
+}  // namespace
+
+std::vector<const CameraEntry*> glanceViews(const profiles::ProfileSnapshot& profile, const std::string& exclude) {
+    std::vector<const CameraEntry*> out;
+    for (const auto& category : profile.categories)
+        for (const auto& id : category.cameraIds) {
+            const auto* cam = profile.camera(id);
+            if (cam && cam->glance && cam->mode == profiles::CameraMode::AircraftCockpit && profiles::modeActivatable(cam->mode) &&
+                cam->id != exclude && std::find(out.begin(), out.end(), cam) == out.end())
+                out.push_back(cam);
+        }
+    return out;
+}
+
+double glanceAngle(const core::CameraPose& shown, const CameraEntry& camera) {
+    const auto aim = lookDirection(camera.pose.orientation);
+    auto toward = camera.pose.positionFRD + aim * kGlanceFocusMeters - shown.positionFRD;
+    if (toward.length() < 1e-3) toward = aim;
+    return angleBetweenDirections(lookDirection(shown.orientation), toward);
+}
+
+const CameraEntry* nearestGlanceView(const profiles::ProfileSnapshot& profile, const core::CameraPose& shown, const std::string& exclude) {
+    const CameraEntry* best = nullptr;
+    double bestAngle = 0, bestAim = 0;
+    const auto look = lookDirection(shown.orientation);
+    for (const auto* cam : glanceViews(profile, exclude)) {
+        const double angle = glanceAngle(shown, *cam);
+        const double aim = angleBetweenDirections(look, lookDirection(cam->pose.orientation));
+        const bool tie = best && std::abs(angle - bestAngle) <= kGlanceTieRadians;
+        if (!best || (tie ? aim < bestAim : angle < bestAngle)) {
+            best = cam;
+            bestAngle = angle;
+            bestAim = aim;
+        }
+    }
+    return best;
+}
+
+bool Coordinator::glanceCurrent() const {
+    return glance_ && !activeCameraId_.empty() && activeCameraId_ == glance_->cameraId &&
+           (state_ == Ownership::Active || state_ == Ownership::SimulatorSuspended);
+}
+
+void Coordinator::dropStaleGlance() {
+    if (glance_ && !glanceCurrent()) glance_.reset();
+    if (glanceReturn_ && (glanceReturn_->cameraId != activeCameraId_ || state_ != Ownership::Active)) glanceReturn_.reset();
+}
+
+json Coordinator::glanceJson() const {
+    if (!glanceCurrent()) return nullptr;
+    return {{"cameraId", glance_->cameraId}, {"returnCameraId", glance_->returnCameraId}, {"held", glance_->holdId != 0}};
+}
+
+std::string Coordinator::glanceBlock() const {
+    if (const auto block = blockReason(); !block.empty()) return block;
+    const CameraEntry* cam = activeEntry();
+    if (state_ != Ownership::Active || !cam || !engine_.hasPose()) return "Show a cockpit view first: a glance returns to the view you are in.";
+    if (cam->mode != profiles::CameraMode::AircraftCockpit) return "Glance views work from cockpit views.";
+    return {};
+}
+
+std::string Coordinator::glanceHold(std::uint64_t holdId, double) {
+    dropStaleGlance();
+    if (const auto block = glanceBlock(); !block.empty()) return block;
+    // Where the user is looking now, temporary mouse look and any running transition included.
+    const auto* target = nearestGlanceView(*profile_, engine_.sample().pose, glance_ ? glance_->returnCameraId : activeCameraId_);
+    if (!target) return kNoGlanceViews;
+    startGlance(*target);
+    glance_->holdId = holdId;
+    emitActiveCamera();
+    return {};
+}
+
+void Coordinator::glanceHoldReleased(std::uint64_t holdId, double now) {
+    dropStaleGlance();
+    // Ended or superseded (a recall, Release, Panic, Return): nothing to return to.
+    if (!glance_ || holdId == 0 || glance_->holdId != holdId) return;
+    glanceReturn(now);
+}
+
+std::string Coordinator::glanceNext(double) {
+    dropStaleGlance();
+    if (const auto block = glanceBlock(); !block.empty()) return block;
+    const auto views = glanceViews(*profile_, glance_ ? glance_->returnCameraId : activeCameraId_);
+    if (views.empty()) return kNoGlanceViews;
+    // Step in category order from the view on screen, wrapping.
+    std::vector<std::string> order;
+    for (const auto& category : profile_->categories) order.insert(order.end(), category.cameraIds.begin(), category.cameraIds.end());
+    const CameraEntry* target = views.front();
+    const auto anchor = std::find(order.begin(), order.end(), activeCameraId_);
+    if (anchor != order.end()) {
+        const auto start = static_cast<std::size_t>(anchor - order.begin());
+        for (std::size_t k = 1; k <= order.size(); ++k) {
+            const auto& id = order[(start + k) % order.size()];
+            const auto it = std::find_if(views.begin(), views.end(), [&](const CameraEntry* v) { return v->id == id; });
+            if (it != views.end()) {
+                target = *it;
+                break;
+            }
+        }
+    }
+    startGlance(*target);
+    emitActiveCamera();
+    return {};
+}
+
+std::string Coordinator::glanceReturn(double) {
+    dropStaleGlance();
+    if (!glance_) return "Not glancing: there is no view to return to.";
+    const Glance g = *glance_;
+    glance_.reset();
+    const CameraEntry* cam = profile_ ? profile_->camera(g.returnCameraId) : nullptr;
+    if (!cam || !profiles::modeActivatable(cam->mode) || !blockReason().empty()) {
+        emitActiveCamera();
+        return "The view you glanced from is no longer available.";
+    }
+    if (state_ == Ownership::SimulatorSuspended) {
+        activeCameraId_ = cam->id;  // shown when the simulator hands the camera back, as a recall would be
+        emitActiveCamera();
+        return {};
+    }
+    cancelMouseDrag();
+    glanceTransition(*cam, core::compose(effectiveAirportPose(*cam), g.returnLook));
+    glanceReturn_ = GlanceReturn{cam->id, g.returnLook};
+    emitActiveCamera();
+    return {};
+}
+
+void Coordinator::startGlance(const CameraEntry& target) {
+    cancelMouseDrag();
+    if (!glance_) {
+        Glance g;
+        if (glanceReturn_ && glanceReturn_->cameraId == activeCameraId_) {
+            g.returnCameraId = glanceReturn_->cameraId;  // still gliding back: keep the exact look it returns to
+            g.returnLook = glanceReturn_->look;
+        } else {
+            g.returnCameraId = activeCameraId_;
+            g.returnLook = engine_.look();
+        }
+        rememberedLooks_[g.returnCameraId] = g.returnLook;  // the view keeps its own look, as on any recall
+        glance_ = g;
+    }
+    glanceReturn_.reset();
+    glance_->cameraId = target.id;
+    // Glance views open at their saved pose.
+    if (target.id != activeCameraId_) glanceTransition(target, target.pose);
+}
+
+void Coordinator::glanceTransition(const CameraEntry& cam, const core::CameraPose& target) {
+    // Start from what is on screen, temporary look included, so neither direction jumps.
+    const auto shown = engine_.sample();
+    if (shown.valid) engine_.place(shown.pose);
+    lastSubmitted_.reset();
+    airportTrackingPosition_.reset();
+    airportAutoZoomFov_.reset();
+    effects_.reset();
+    backend_.setFlag(CameraFlag::Interaction, cam.interaction);
+    backend_.setFlag(CameraFlag::AboveGround, false);
+    engine_.select(target, {core::Easing::Smoothstep3, kGlanceTransitionSeconds, 0.0}, true);
+    activeCameraId_ = cam.id;
+    lookOwner_ = cam.id;
+}
+
+void Coordinator::updateGlance(double now) {
+    if (!glanceReturn_ || engine_.transitioning()) return;
+    const GlanceReturn r = *glanceReturn_;
+    glanceReturn_.reset();
+    const CameraEntry* cam = activeEntry();
+    if (!cam || cam->id != r.cameraId) return;
+    // Landed: give the look back to the temporary look, so the base is the saved pose and the look is exactly
+    // what it was. Anything moved during the return stays applied on top.
+    auto look = r.look;
+    const auto moved = engine_.look();
+    look.headingDeg = core::wrapDeg(look.headingDeg + moved.headingDeg);
+    look.pitchDeg += moved.pitchDeg;
+    look.translationHeadingFrame += moved.translationHeadingFrame;
+    look.fovDeltaRad += moved.fovDeltaRad;
+    engine_.place(effectiveAirportPose(*cam));
+    engine_.setLook(look);
+    emitLook(now, true);
 }
 
 }  // namespace fscs::host

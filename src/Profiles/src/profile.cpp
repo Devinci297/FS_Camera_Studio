@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <initializer_list>
 #include <map>
 #include <set>
 #include <sstream>
@@ -370,6 +371,9 @@ ValidationResult validateProfile(json& doc) {
                     c.error(p + ".followHorizon", "must be a number between 0 and 1");
             }
             if (!(cam["seedDefinitionName"].is_null() || cam["seedDefinitionName"].is_string())) cam["seedDefinitionName"] = nullptr;
+            // Optional, no schema bump: older profiles derive it from the icon or name.
+            if (!cam.contains("glance")) cam["glance"] = defaultGlance(cam);
+            else if (!cam["glance"].is_boolean()) c.error(p + ".glance", "must be true or false");
         }
     }
 
@@ -515,6 +519,7 @@ ProfileSnapshot toSnapshot(const json& doc) {
                      js::num(fx, "groundRoll", .35), js::num(fx, "touchdown", .5), js::num(fx, "acceleration", .35), js::num(fx, "engine", .2)};
         e.followHorizon = core::clamp(js::num(cam, "followHorizon", 1.0), 0., 1.);
         e.seedDefinitionName = js::str(cam, "seedDefinitionName");
+        e.glance = e.mode == CameraMode::AircraftCockpit && js::boolean(cam, "glance", defaultGlance(cam));
         s.cameras.push_back(std::move(e));
     }
     return s;
@@ -558,6 +563,20 @@ std::string newUuid() {
         s.push_back(hex[b[i] & 15]);
     }
     return s;
+}
+
+bool defaultGlance(const json& cam) {
+    if (!cam.is_object() || js::str(cam, "mode", "aircraftCockpit") != "aircraftCockpit") return false;
+    // A chosen icon decides; without one the editor picks the icon from the name (viewIcon() in ui/app.js).
+    if (const auto icon = js::str(cam, "icon"); !icon.empty()) return icon == "view-instrument";
+    std::string name = js::str(cam, "name");
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const auto has = [&](std::initializer_list<const char*> words) {
+        return std::any_of(words.begin(), words.end(), [&](const char* w) { return name.find(w) != std::string::npos; });
+    };
+    // Airport words take precedence in the editor's icon choice.
+    if (has({"runway", "threshold", "approach", "gate", "jetway", "apron", "parking", "ramp", "taxi", "tower", "airport"})) return false;
+    return has({"pfd", "mfd", "instrument", "g1000", "radio", "avionics", "autopilot"});
 }
 
 bool isUuid(const std::string& s) {

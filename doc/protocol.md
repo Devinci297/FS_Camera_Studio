@@ -57,7 +57,7 @@ There is no desktop application, tray app or external process.
     "projection": { "kind": "simulatorFovRadians", "value": 1.0821, "axis": "adapterDefined" },
     "transition": { "kind": "smoothstep3", "durationSeconds": 0.65, "delaySeconds": 0 },
     "interaction": true, "trackingPolicy": "nativeIfQualified", "effects": { "enabled": false },
-    "temporaryLookPolicy": "resetOnRecall", "followHorizon": 1, "seedDefinitionName": null
+    "temporaryLookPolicy": "resetOnRecall", "followHorizon": 1, "glance": false, "seedDefinitionName": null
   } ],
   "sequences": []
 }
@@ -80,6 +80,12 @@ There is no desktop application, tray app or external process.
   derived from these values (no stored preset name).
 * `mouseLookOnRelease`: optional `retain` (default) | `reset`. Per camera: keep temporary native right-drag look, or recenter it on button release. Does not overwrite the saved pose.
 * `temporaryLookPolicy`: `resetOnRecall` | `retain`.
+* `glance`: optional bool, no schema bump. Marks a cockpit view as a glance view for the smart-view bindings
+  (`glanceHold`, `glanceNext`, `glanceReturn`). When absent (older profiles, new cameras) validation stores the default:
+  true for `aircraftCockpit` cameras whose `icon` is `view-instrument`, or, without an icon, whose name gives the
+  editor's automatic instrument icon (pfd, mfd, instrument, g1000, radio, avionics, autopilot; airport words such as
+  tower or runway take precedence); false otherwise. A non-boolean is rejected. Other modes may store it but are never
+  offered. See [smart views](dual-bindings.md#smart-views-glance).
 * `followHorizon`: number 0–1, default 1 (finite; outside the range is rejected). How much of the aircraft's bank the
   view inherits: 1 banks fully with the aircraft (previous behaviour), 0 keeps the horizon level, 0.5 shows half the
   bank. Applies to `aircraftCockpit` (rolls about the aircraft's longitudinal axis, eye position unchanged),
@@ -108,9 +114,12 @@ There is no desktop application, tray app or external process.
 Actions: `selectView` (+`viewId`), `peekView` (+`viewId`), `nextCamera`, `previousCamera`, `nextCategory`,
 `returnToPilot`, `releaseCamera`, `recenterLook`, `toggleEditor`, `toggleMini`, `lookLeft`, `lookRight`, `lookUp`,
 `lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveFast`, `zoomIn`, `zoomOut`,
-`panicRelease`.
+`panicRelease`, `glanceHold`, `glanceNext`, `glanceReturn`.
 `panicRelease` ("Panic: release camera and restore simulator", default Ctrl + Alt + X) is a stronger `releaseCamera`;
 see [Panic release](dual-bindings.md#panic-release).
+`glanceHold` (held, default Ctrl + Alt + G), `glanceNext` (Ctrl + Alt + I) and `glanceReturn` (Ctrl + Alt + U) are the
+smart-view bindings; see [smart views](dual-bindings.md#smart-views-glance). `TestBinding` presses `glanceHold`
+without a release, so the glance stays until `glanceReturn`.
 An input definition and, for POVs, direction maps to at most one action. Bindings can carry
 `slot: "primary" | "secondary"`; each action has two independent UI slots. Legacy extra bindings are retained.
 Joystick `pov` is `up`, `right`, `down` or `left`; definitions use zero-based button and POV indices.
@@ -265,7 +274,7 @@ being edited.
 | `AircraftChanged` | `title`, `modelKey`, `matchProfileId`, `matchReason` (plain text, e.g. "Matched by aircraft package") |
 | `OwnershipChanged` | `state` (`Observing, Acquiring, Active, SimulatorSuspended, OtherClient, UserDisabled, Releasing, Faulted`), `gameControlled`, `reason` |
 | `CapabilitiesChanged` | `adapterQualified`, `adapterContract`, `captureQualified`, `allowUnqualifiedAdapter`, `canActivate`, `blockReason`, `simVersion`, `fovRangeDeg` [min,max], `levelHorizon` (bool, legacy name) and `followHorizon` (bool): per-camera follow horizon is applied, `modes` {mode: {available, preview, reason}} |
-| `ActiveCameraChanged` | `profileId`, `cameraId`, `peeking`, `transitioning`, `fromDraft` |
+| `ActiveCameraChanged` | `profileId`, `cameraId`, `peeking`, `transitioning`, `fromDraft`, `glance` (null, or `cameraId`, `returnCameraId`, `held` while a glance view is shown; also in `Snapshot.activeCamera`) |
 | `SelectionChanged` | `profileId`, `cameraId` |
 | `DraftChanged` | `draftRevision`, `dirty`, `ops` (as applied, so mirrors update without a snapshot), `origin` (uiInstanceId) |
 | `CommitCompleted` | `requestId`, `kind`, `status` (`Committed\|Failed`), `revisions`, `message`, `report`; kind `qualification` adds `g01`, `g03` (bool) |
