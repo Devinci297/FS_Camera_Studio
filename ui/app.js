@@ -114,6 +114,7 @@
     if (/orbit|walkaround|fly.by/.test(text)) return 'view-orbit';
     if (/window/.test(text)) return 'view-window';
     if (/gear|wheel/.test(text)) return 'view-wheel';
+    if (/drone/.test(text)) return 'view-drone';
     if (/pilot|cockpit|flight deck|landing/.test(text)) return 'view-cockpit';
     if (/exterior|external/.test(text)) return 'plane';
     return isCategory ? 'folder-open' : 'camera';
@@ -304,7 +305,7 @@
     flyby: { reference: 'World fixed fly-by', blurb: 'A stationary viewpoint ahead of the aircraft, tracking its pass.' },
     mounted: { reference: 'Airframe mounted - meters', blurb: 'An action cam fixed to the airframe: wing tip, tail, gear or belly.' },
     airport: { reference: 'Airport local - meters', blurb: 'A view anchored around the airport.' },
-    free: { reference: 'Scene origin - meters', blurb: 'Position this view freely.' },
+    free: { reference: 'World fixed - meters north, east, down from its origin', blurb: 'A drone you fly anywhere: world fixed, or following the aircraft.' },
   };
   const REASONS = {
     staleEpoch: 'The flight changed. Try again.', staleBoot: 'Camera Studio restarted. Try again.', staleDraft: 'The editor was refreshed. Try again.',
@@ -657,6 +658,7 @@
     if (!cam) return 'Choose a camera first.';
     const mode = modeAvailability(cam.mode);
     if (!mode.available) return mode.reason || NOT_AVAILABLE;
+    if (cam.mode === 'free' && !droneOriginValid(cam.worldOrigin)) return DRONE_UNPLACED;
     return controlBlockReason();
   }
   function fovRange() {
@@ -718,6 +720,97 @@
     if (document.activeElement !== $('mc-mount-vibration-number')) $('mc-mount-vibration-number').value = String(vibration);
     $('mc-mount-vibration-range').value = String(vibration);
     $('mc-mount-vibration-range').disabled = $('mc-mount-vibration-number').disabled = ro;
+  }
+
+  // Free cameras (drones): world fixed, or following the aircraft in world axes (doc/protocol.md 2.1). The module
+  // answers DroneHere with the current view's world origin and pose; the panel creates or moves the camera.
+  const DRONE_ICON = 'view-drone';
+  const DRONE_UNPLACED = 'This drone has no position yet. Use Move drone here to place it.';
+  const droneOriginValid = o => Boolean(o && [o.lat, o.lon, o.altitude].every(v => typeof v === 'number' && isFinite(v)) && Math.abs(o.lat) < 89.9 && Math.abs(o.lon) <= 180 && o.altitude > -1500 && o.altitude < 30000);
+  function applyDronePlacement(view, placed) {
+    view.mode = 'free';
+    view.worldOrigin = clone(placed.worldOrigin);
+    view.positionMetersFRD = placed.positionMetersFRD.slice();
+    view.orientationCameraToAnchorXYZW = placed.orientationCameraToAnchorXYZW.slice();
+    view.projection = Object.assign({}, view.projection, { value: placed.fovRad });
+    view.requiredCapabilities = ['fov'];
+    view.interaction = false;
+    if (typeof view.followAircraft !== 'boolean') view.followAircraft = false;
+    if (!view.iconCustomized && ['camera', 'plane'].indexOf(entityIcon(view, false)) >= 0) view.icon = DRONE_ICON;
+  }
+  async function droneHere() {
+    const ack = await command('DroneHere', {}, { quiet: true });
+    if (ack.status !== 'Completed' || !ack.result) { announce(reasonText(ack.reason), 'warn'); return null; }
+    return ack.result;
+  }
+  /** Drop drone here: a new free camera at the current view (or behind the aircraft), in the aircraft profile's Drones category. */
+  async function dropDrone() {
+    if (!P() || readOnly()) return;
+    if (P().cameras.length >= 500) { announce('This profile has no room for another camera.', 'warn'); return; }
+    const findGroup = () => P().categories.filter(g => !g.airportIcao && g.name === 'Drones')[0] || null;
+    if (!findGroup() && P().categories.length >= 100) { announce('This profile has no room for another category.', 'warn'); return; }
+    const placed = await droneHere();
+    if (!placed || !P() || readOnly()) return;
+    let group = findGroup();
+    if (!group) { group = { id: M.uuid(), name: 'Drones', icon: DRONE_ICON, cameraIds: [] }; P().categories.push(group); }
+    const names = P().cameras.map(c => c.name);
+    let n = 1;
+    while (names.indexOf('Drone ' + n) >= 0) n++;
+    const view = newCamera(group.id, 'Drone ' + n);
+    applyDronePlacement(view, placed);
+    view.icon = DRONE_ICON;
+    P().cameras.push(view);
+    group.cameraIds.push(view.id);
+    if (!group.defaultCameraId) group.defaultCameraId = view.id;
+    S.expanded[group.id] = true;
+    queueOps([{ op: 'setCamera', camera: view }, { op: 'setCategories', categories: P().categories }]);
+    selectCamera(view.id);
+    render();
+    // Already showing a view: continue from the same spot in the drone.
+    if (S.ownership.state === 'Active') activateCamera(view.id);
+    announce((placed.message || 'Drone placed.') + ' Fly it with the movement keys, then Save.');
+  }
+  /** Move drone here: re-place an existing free camera at the current view. */
+  async function moveDroneHere(view) {
+    if (!view || readOnly() || view.mode !== 'free') return;
+    const placed = await droneHere();
+    const cam = placed && camIn(view.id);
+    if (!cam || readOnly()) return;
+    applyDronePlacement(cam, placed);
+    saveCamera(cam);
+    renderDetails();
+    announce('Drone moved to the current view. Save to keep it.');
+  }
+  function renderFreeSettings(view, ro) {
+    let section = $('mc-free-settings');
+    if (!section) {
+      section = make('section', undefined, 'mc-mount-settings mc-free-settings'); section.id = 'mc-free-settings'; section.setAttribute('aria-label', 'Free camera');
+      add(section, make('h4', 'Free camera (drone)'), make('p', 'Fly it with the movement keys in its own frame: faster higher above the ground, Shift for more. Save adjusted view stores where it is. Flight effects, follow horizon and glance do not apply; aircraft tracking uses the global setting.', 'mc-note'));
+      const row = make('label', undefined, 'mc-switch-row'), copy = make('span', undefined, 'mc-switch-copy');
+      const note = make('small', "Keep the drone's offset from the aircraft in world axes, like a chase drone. It does not turn with the aircraft."); note.id = 'mc-free-follow-note';
+      add(copy, make('span', 'Follow aircraft'), note);
+      const input = make('input'); input.type = 'checkbox'; input.id = 'mc-free-follow'; input.className = 'mc-switch';
+      input.setAttribute('aria-label', 'Follow aircraft'); input.setAttribute('aria-describedby', 'mc-free-follow-note');
+      input.addEventListener('change', () => {
+        const cam = current();
+        if (!cam || readOnly() || cam.mode !== 'free') { renderDetails(); return; }
+        cam.followAircraft = input.checked; saveCamera(cam); renderDetails();
+      });
+      add(row, copy, input);
+      const move = button('Move drone here', () => moveDroneHere(current()), 'mc-secondary', DRONE_ICON); move.id = 'mc-free-move-here';
+      move.title = 'Place this drone at the view shown now, or behind the aircraft when Camera Studio shows no view.';
+      const status = make('p', undefined, 'mc-note'); status.id = 'mc-free-status';
+      add(section, row, move, status);
+      $('mc-mount-settings').after(section);
+    }
+    const free = view.mode === 'free';
+    section.hidden = !free;
+    if (!free) return;
+    $('mc-free-follow').checked = view.followAircraft === true;
+    $('mc-free-follow').disabled = ro;
+    $('mc-free-move-here').disabled = ro || !S.snapshot;
+    const o = view.worldOrigin;
+    $('mc-free-status').textContent = droneOriginValid(o) ? 'Origin ' + o.lat.toFixed(5) + ', ' + o.lon.toFixed(5) + ', ' + Math.round(o.altitude) + ' m.' + (view.followAircraft ? ' The pose is kept as the offset from the aircraft.' : '') : DRONE_UNPLACED;
   }
 
   /* ------------- Toast ------------- */
@@ -1348,7 +1441,7 @@
     $('mc-motion-destination').textContent = view.name;
     renderMotionSettings(view);
     // Behavior
-    $('mc-view-type').textContent = ({aircraftCockpit:'Cockpit',aircraftExterior:'Aircraft exterior',airport:'Airport (world fixed)',orbit:'Orbit',flyby:'Fly-by',mounted:'Mounted action cam',free:'Free camera'})[view.mode] || view.mode;
+    $('mc-view-type').textContent = ({aircraftCockpit:'Cockpit',aircraftExterior:'Aircraft exterior',airport:'Airport (world fixed)',orbit:'Orbit',flyby:'Fly-by',mounted:'Mounted action cam',free:'Free camera (drone)'})[view.mode] || view.mode;
     $('mc-view-type').disabled = ro || Boolean(view.airportIcao);
     $('mc-mode-pill').hidden = view.mode !== 'aircraftExterior';
     const note = $('mc-mode-note');
@@ -1361,7 +1454,7 @@
     $('mc-glance').checked = view.mode === 'aircraftCockpit' && glanceOf(view);
     $('mc-retain-look').checked = view.temporaryLookPolicy === 'retain';
     $$('[data-value]', $('mc-mouse-release')).forEach(b => { b.disabled = ro; b.setAttribute('aria-pressed', String(b.dataset.value === (view.mouseLookOnRelease || 'retain'))); });
-    const level = levelHorizonAvailable(), worldHorizon = view.mode === 'airport' || view.mode === 'flyby', mountedHorizon = view.mode === 'mounted';
+    const level = levelHorizonAvailable(), worldHorizon = view.mode === 'airport' || view.mode === 'flyby' || view.mode === 'free', mountedHorizon = view.mode === 'mounted';
     const follow = followHorizonOf(view);
     if (document.activeElement !== $('mc-follow-horizon-number')) $('mc-follow-horizon-number').value = String(Math.round(follow * 100) / 100);
     $('mc-follow-horizon-range').value = String(follow);
@@ -1379,6 +1472,7 @@
     // After the read-only pass: effects are also locked for views that cannot use them.
     renderEffects(view, ro);
     renderMountSettings(view, ro);
+    renderFreeSettings(view, ro);
     $('mc-default-view').disabled=ro||Boolean(view.airportIcao);
     $('mc-default-view').title=view.airportIcao?'Shared airport cameras cannot be the default view for an aircraft profile.':'';
     $('mc-glance').disabled = ro || view.mode !== 'aircraftCockpit';
@@ -1822,6 +1916,7 @@
         const updateRepeat=()=>{const on=view.motion&&typeof view.motion.repeat==='boolean'?view.motion.repeat:settings.repeat;repeat.textContent='Repeat back and forth: '+(on?'On':'Off');repeat.setAttribute('aria-pressed',String(on));};updateRepeat();repeat.disabled=readOnly();host.appendChild(repeat);
       }
     }
+    if(view.mode==='free')add(host,make('h4','Free camera (drone)'),make('p','Moves only when you fly it: the movement keys move it where it looks, faster higher above the ground. With Follow aircraft it keeps its offset from the aircraft in world axes. No flight effects apply. The transition below applies when you recall this view.','mc-note'));
     if(view.mode==='mounted')add(host,make('h4','Mounted action cam'),make('p','Rigid on the airframe: no automatic motion, aircraft tracking or flight effects. Set the gimbal and airframe vibration in Behavior. The transition below still applies when you recall this view.','mc-note'));
     if(walkaroundAvailable(view))host.appendChild(button(S.walkaround.running?'Walkaround: running':'Walkaround settings',walkaroundDialog,'mc-secondary','view-wheel'));
   }  function walkaroundDialog() {
@@ -2262,24 +2357,25 @@
       const override=view&&view.mode==='airport'&&view.airportOverrides&&view.airportOverrides.aircraftTracking;
       const effectiveTracking=override||aircraftTracking;
       effective.hidden=!view||(!editor&&view.mode!=='airport');
-      effective.textContent=!view?'':view.mode==='aircraftCockpit'?'Cockpit · aircraft tracking excluded':view.mode==='mounted'?'Mounted · aircraft tracking excluded':(view.mode==='airport'?'Airport':'Exterior')+' · '+(effectiveTracking==='off'?'fixed direction':effectiveTracking==='heading'?'tracks heading':'tracks heading + pitch')+(override?' · override':' · global');
+      effective.textContent=!view?'':view.mode==='aircraftCockpit'?'Cockpit · aircraft tracking excluded':view.mode==='mounted'?'Mounted · aircraft tracking excluded':(view.mode==='airport'?'Airport':view.mode==='free'?'Free camera':'Exterior')+' · '+(effectiveTracking==='off'?'fixed direction':effectiveTracking==='heading'?'tracks heading':'tracks heading + pitch')+(override?' · override':' · global');
       effective.title=override?'This camera overrides global aircraft tracking. Change it in Airport camera settings.':'Effective aircraft tracking for this camera. Cockpit and mounted cameras never track the aircraft.';
       if(!editor){
+        const drone=ensure('drone','Drop drone here',dropDrone);setIcon(drone,DRONE_ICON);drone.title='Drop drone here: a free camera at the current view, or behind the aircraft. Fly it with the movement keys.';drone.disabled=!S.snapshot||!P()||readOnly();
         const save=ensure('save','Save all',saveAdjustedViews);setIcon(save,'save');save.title='Save adjusted view and all pending changes (Ctrl+S)';save.disabled=!S.snapshot||!!S.pendingCommit;
         let viewTools=$(prefix+'view');
         if(!viewTools){viewTools=make('div',undefined,'mc-tool-group mc-view-controls');viewTools.id=prefix+'view';viewTools.setAttribute('role','group');viewTools.setAttribute('aria-label','Current camera actions');viewTools.appendChild(make('span','View','mc-tool-group-label'));globalTools.parentNode.appendChild(viewTools);}
-        [tour,anchor,save].forEach(b=>{if(b.parentNode!==viewTools)viewTools.appendChild(b);});
+        [tour,anchor,drone,save].forEach(b=>{if(b.parentNode!==viewTools)viewTools.appendChild(b);});
         let panelTools=$(prefix+'panel');
         if(!panelTools){panelTools=make('div',undefined,'mc-tool-group mc-panel-controls');panelTools.id=prefix+'panel';panelTools.setAttribute('role','group');panelTools.setAttribute('aria-label','Panel and camera control');globalTools.parentNode.appendChild(panelTools);}
         ['mc-mini-pin','mc-expand','mc-dock-release'].forEach(id=>{if($(id).parentNode!==panelTools)panelTools.appendChild($(id));});
         if(IS_MINI){
           const dock=$('mc-mini-panel'),tools=globalTools.parentNode,body=dock.querySelector('.mc-dock-body');
-          [head,tracking,tour,anchor].forEach(b=>b.classList.add('mc-mini-secondary'));
+          [head,tracking,tour,anchor,drone].forEach(b=>b.classList.add('mc-mini-secondary'));
           let more=$(prefix+'more');
           if(!more){
             more=button('More',()=>{
               const menu=openDialog('Mini panel controls');
-              const sections=[['Global settings',[prefix+'head',prefix+'aircraft']],['Camera',[prefix+'walkaround',anchorId]],['Panel',['mc-mini-pin','mc-expand','mc-dock-release']]];
+              const sections=[['Global settings',[prefix+'head',prefix+'aircraft']],['Camera',[prefix+'walkaround',anchorId,prefix+'drone']],['Panel',['mc-mini-pin','mc-expand','mc-dock-release']]];
               sections.forEach(([label,ids])=>{
                 const available=ids.map($).filter(b=>b&&!b.hidden);if(!available.length)return;
                 menu.appendChild(make('div',label,'mc-section-label'));
@@ -4233,7 +4329,7 @@
     $('mc-camera-binding').addEventListener('click', () => assignCameraBinding(current()));
     $('mc-view-in-sim').addEventListener('click', () => { const v = current(); if (v) activateCamera(v.id); });
     $('mc-recenter').addEventListener('click', () => command('RecenterLook', {}));
-    $('mc-add').addEventListener('click', () => actionDialog('Add to your library', [['New camera', 'camera', addCamera], ['New category', 'folder-plus', addCategory], ['External motion views', 'view-orbit', addExternalMotionViews], ['Create airport cameras', 'map-pin', airportDialog]]));
+    $('mc-add').addEventListener('click', () => actionDialog('Add to your library', [['New camera', 'camera', addCamera], ['New category', 'folder-plus', addCategory], ['External motion views', 'view-orbit', addExternalMotionViews], ['Create airport cameras', 'map-pin', airportDialog], ['Drop drone here', DRONE_ICON, dropDrone]]));
     $('mc-add-camera').addEventListener('click', addCamera);
     $('mc-save').addEventListener('click', () => saveChanges());
     $('mc-revert').addEventListener('click', () => confirmDialog('Revert unsaved changes?', 'Restore the last saved camera profile, settings and bindings?', revertChanges, 'Revert changes'));
@@ -4273,8 +4369,8 @@
     $('mc-view-type').addEventListener('click', () => {
       const view=current();if(!view||readOnly()||view.airportIcao)return;
       const body=openDialog('Camera view type');
-      [['aircraftCockpit','Cockpit'],['aircraftExterior','Aircraft exterior'],['orbit','Orbit'],['flyby','Fly-by'],['mounted','Mounted action cam']].forEach(([mode,label])=>{const b=button(label,()=>{view.mode=mode;if(mode==='orbit'||mode==='flyby'){view.requiredCapabilities=[];view.interaction=false;}if(mode==='mounted'){view.requiredCapabilities=['fov'];view.interaction=false;view.gimbal=gimbalOf(view);view.mountVibration=mountVibrationOf(view);if(!view.iconCustomized&&['camera','plane'].indexOf(entityIcon(view,false))>=0)view.icon='view-wing';}saveCamera(view);closeDialog();render();},'mc-secondary');b.setAttribute('aria-pressed',String(view.mode===mode));body.appendChild(b);});
-      body.appendChild(make('p','Set orbit and fly-by parameters on the Motion tab, and the gimbal of a mounted action cam in Behavior. Create airport views from the library + menu.','mc-note'));
+      [['aircraftCockpit','Cockpit'],['aircraftExterior','Aircraft exterior'],['orbit','Orbit'],['flyby','Fly-by'],['mounted','Mounted action cam'],['free','Free camera (drone)']].forEach(([mode,label])=>{const b=button(label,()=>{if(mode==='free'){closeDialog();if(view.mode!=='free')droneHere().then(placed=>{const cam=placed&&camIn(view.id);if(!cam||readOnly())return;applyDronePlacement(cam,placed);saveCamera(cam);render();announce('Now a free camera at the current view. Fly it with the movement keys, then Save.');});return;}view.mode=mode;if(mode==='orbit'||mode==='flyby'){view.requiredCapabilities=[];view.interaction=false;}if(mode==='mounted'){view.requiredCapabilities=['fov'];view.interaction=false;view.gimbal=gimbalOf(view);view.mountVibration=mountVibrationOf(view);if(!view.iconCustomized&&['camera','plane'].indexOf(entityIcon(view,false))>=0)view.icon='view-wing';}saveCamera(view);closeDialog();render();},'mc-secondary');b.setAttribute('aria-pressed',String(view.mode===mode));body.appendChild(b);});
+      body.appendChild(make('p','Set orbit and fly-by parameters on the Motion tab, and the gimbal of a mounted action cam in Behavior. A free camera (drone) starts at the current view. Create airport views from the library + menu.','mc-note'));
     });
     $('mc-view-id').addEventListener('change', e => {
       const view = current();

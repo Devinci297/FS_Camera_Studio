@@ -15,8 +15,8 @@ namespace fscs::host {
 namespace {
 
 enum : DWORD { kEvtAircraftLoaded = 1, kEvtFlightLoaded, kEvtSim, kEvtPause, kEvtMouseRight, kEvtMouseX, kEvtMouseY, kEvtTest = 900, kEvtTestPovRelease = 901, kEvtInputBase = 1000, kEvtPovReleaseBase = 4000 };
-enum : DWORD { kReqAircraftState = 1, kReqTitle, kReqTitleOnce, kReqMotion, kReqPosition };
-enum : DWORD { kDefTitle = 1, kDefMotion, kDefPosition };
+enum : DWORD { kReqAircraftState = 1, kReqTitle, kReqTitleOnce, kReqMotion, kReqPosition, kReqGround };
+enum : DWORD { kDefTitle = 1, kDefMotion, kDefPosition, kDefGround };
 enum : DWORD { kInputGroup = 1, kTestInputGroup = 2, kMouseInputGroup = 3, kMouseAxesGroup = 4, kCaptureInputGroup = 5 };
 enum : DWORD { kNotifyInput = 1 };
 enum : DWORD { kEvtZoomIn = 800, kEvtZoomOut, kEvtZoomPlus, kEvtZoomMinus };
@@ -91,6 +91,10 @@ void SimSession::setup() {
     for (const auto& [name, unit] : motionVars) SimConnect_AddToDataDefinition(h, kDefMotion, name, unit, SIMCONNECT_DATATYPE_FLOAT64);
     SimConnect_RequestDataOnSimObject(h, kReqMotion, kDefMotion, SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD_SIM_FRAME,
                                     SIMCONNECT_DATA_REQUEST_FLAG_DEFAULT, 0, 1);
+    // Free cameras: terrain under the aircraft for the drone's altitude floor. Read-only, about twice a second.
+    SimConnect_AddToDataDefinition(h, kDefGround, "GROUND ALTITUDE", "meters", SIMCONNECT_DATATYPE_FLOAT64);
+    SimConnect_RequestDataOnSimObject(h, kReqGround, kDefGround, SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD_SIM_FRAME,
+                                    SIMCONNECT_DATA_REQUEST_FLAG_DEFAULT, 0, 15);
 
     for (const DWORD id : {kEvtTest, kEvtTestPovRelease}) {
         SimConnect_MapClientEventToSimEvent(h, id, "");
@@ -430,6 +434,10 @@ void SimSession::onRecv(const void* raw, unsigned long size) {
                 // SimConnect's PLANE BANK DEGREES is positive for a left bank; FRD bank is positive right wing down.
                 // PLANE PITCH DEGREES is positive nose down; FRD pitch is positive nose up.
                 staged_.push_back(backend_event::MotionTelemetry{{v[0], v[1], v[2], v[3], v[4], v[5], v[6]}, -v[7], -v[8]});
+            }
+            if (d->dwRequestID == kReqGround && d->dwDefineCount == 1 && data->dwSize >= offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA, dwData) + sizeof(double)) {
+                double v; std::memcpy(&v, &d->dwData, sizeof(v));
+                staged_.push_back(backend_event::GroundElevation{v});
             }
             if (d->dwRequestID == kReqTitle || d->dwRequestID == kReqTitleOnce) {
                 const char* title = reinterpret_cast<const char*>(&d->dwData);

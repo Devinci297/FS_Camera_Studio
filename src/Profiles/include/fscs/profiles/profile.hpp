@@ -81,6 +81,8 @@ struct CameraEntry {
     std::string seedDefinitionName;
     bool glance = false;  // offered by the Glance bindings (instrument close-up); cockpit views only
     bool cinematic = true;  // offered by Cinematic mode (automatic view playlist)
+    bool followAircraft = false;    // free cameras only: keep the offset from the aircraft in world axes
+    bool worldOriginValid = false;  // worldOrigin is present and a valid geodetic point
 };
 
 struct CategoryEntry {

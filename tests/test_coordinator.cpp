@@ -319,7 +319,7 @@ TEST_CASE("coordinator: view-ID bindings select through the open profile; toggle
     CHECK(r.c.ownership() == Ownership::Releasing);
 }
 
-TEST_CASE("coordinator: unsupported free mode stays visible but cannot activate") {
+TEST_CASE("coordinator: a free camera without a world position stays visible but cannot activate") {
     Rig r;
     r.profile["cameras"][1]["mode"] = "free";
     r.connect();

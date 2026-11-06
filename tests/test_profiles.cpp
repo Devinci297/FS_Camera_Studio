@@ -471,7 +471,7 @@ TEST_CASE("exchange: export/import round trip remaps ids; bad codes are refused"
     auto rep = importProfileCode(exportProfileCode(p, true), &err);
     CHECK(rep.has_value());
     CHECK(rep->profile["profileId"] != p["profileId"]);
-    CHECK_EQ(rep->unsupportedCount, std::size_t{1});
+    CHECK_EQ(rep->unsupportedCount, std::size_t{0});  // free cameras can activate now
     CHECK(!importProfileCode("not json", &err));
     CHECK(!importProfileCode(R"({"schemaVersion": 9})", &err));
     CHECK(!importProfileCode(R"({"format":"fs-camera-studio-profile","profile":[1,2]})", &err));

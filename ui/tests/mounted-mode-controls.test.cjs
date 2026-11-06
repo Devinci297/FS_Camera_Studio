@@ -13,7 +13,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.equal(await page.locator('#mc-mount-settings').isHidden(),true,'mount settings only for mounted cameras');
   await page.locator('#mc-view-type').click();
   const modes=await page.locator('#mc-dialog-shade .mc-dialog button[aria-pressed]').allTextContents();
-  assert.deepEqual(modes.map(t=>t.trim()),['Cockpit','Aircraft exterior','Orbit','Fly-by','Mounted action cam']);
+  assert.deepEqual(modes.map(t=>t.trim()),['Cockpit','Aircraft exterior','Orbit','Fly-by','Mounted action cam','Free camera (drone)']);
   await page.getByRole('button',{name:'Mounted action cam',exact:true}).click();
   let saved=await cam();
   assert.equal(saved.mode,'mounted');assert.equal(saved.gimbal,'locked');assert.equal(saved.mountVibration,0.3);assert.equal(saved.interaction,false);
