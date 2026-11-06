@@ -84,11 +84,15 @@
   /* ------------- Transports ------------- */
   /** The only place that knows about the MSFS CommBus. */
   class CommBusTransport {
-    constructor() { this.listener = null; this.handlers = []; this.isOpen = false; }
+    constructor() { this.listener = null; this.handlers = []; this.isOpen = false; this.closing = false; }
     static available() { return typeof root.RegisterCommBusListener === 'function'; }
     start(onOpen) {
+      // A view being detached must not call the native CommBus (see app.js blur/pagehide note).
+      const close = () => { this.closing = true; this.isOpen = false; };
+      if (typeof root.addEventListener === 'function') ['pagehide', 'beforeunload', 'unload'].forEach(name => root.addEventListener(name, close, true));
       try {
         this.listener = root.RegisterCommBusListener(() => {
+          if (this.closing) return;
           this.isOpen = true;
           if (onOpen) onOpen();
         });
@@ -98,7 +102,7 @@
       }
     }
     send(frame) {
-      if (!this.listener || !this.isOpen) return false;
+      if (!this.listener || !this.isOpen || this.closing) return false;
       try { this.listener.callWasm('FSCS_UI_TO_HOST', frame); return true; } catch (error) { console.warn('CommBus send failed', error); return false; }
     }
     onMessage(cb) { this.handlers.push(cb); }

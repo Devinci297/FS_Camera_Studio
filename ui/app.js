@@ -3991,8 +3991,10 @@
     }, true);
     document.addEventListener('mouseleave', e => { if (e.target === document || e.target === document.documentElement) reportPanelPointer(false); }, true);
     document.addEventListener('mouseout', e => { if (!e.relatedTarget) reportPanelPointer(false); }, true);
-    window.addEventListener('blur', window.fscsClearPanelPointer);
-    window.addEventListener('pagehide', window.fscsClearPanelPointer);
+    // Never call into the module while the simulator tears this view down: MSFS 2024 1.9.24 crashed in
+    // CoherentUIGT when a pagehide listener sent a CommBus frame from a detaching panel. Blur is deferred so a
+    // view that is being destroyed never runs it; the bridge also drops sends once teardown has started.
+    window.addEventListener('blur', () => setTimeout(window.fscsClearPanelPointer, 0));
     $('mc-compact').addEventListener('click', enterFlightMode);
     $('mc-hide').addEventListener('click', closeEditor);
     $('mc-profile-picker').addEventListener('click', () => setPage('profiles'));
