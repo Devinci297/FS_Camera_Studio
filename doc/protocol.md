@@ -32,11 +32,11 @@ There is no desktop application, tray app or external process.
 
 ## 2. Documents (module-owned, stored in `\work`)
 
-### 2.1 Profile — schemaVersion 3
+### 2.1 Profile — schemaVersion 4
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "profileId": "b8cfa6d9-2fe2-48d1-8bd2-f4e3df83722a",
   "name": "My cameras",
   "aircraftMatch": { "strategy": "aircraftPath", "modelKey": "asobo-c172sp-classic", "variantKey": null,
@@ -68,7 +68,20 @@ There is no desktop application, tray app or external process.
 * `aircraftMatch.strategy`: `aircraftPath` | `userConfirmedModelVariant` | `none`.
 * `mode`: `aircraftCockpit` (MVP); `aircraftExterior` (Preview — cockpit audio limitation);
   `airport` (Preview — world-fixed coordinates, pending live qualification), `orbit` and `flyby`
-  (animated exterior modes, including a fly-by pass while parked). `free` cannot activate.
+  (animated exterior modes, including a fly-by pass while parked); `mounted` (Preview — an action cam rigidly fixed
+  to the airframe, see below). `free` cannot activate.
+* `mounted` cameras use the SimObject anchor like `aircraftExterior`: the position is a point on the airframe (wing
+  tip, tail, gear, belly) and never moves relative to it. Aircraft tracking never applies (the global preference is
+  ignored) and neither do `followHorizon` and `effects`. Two optional fields, defaulted for mounted cameras and
+  retained (validated, ignored) on other modes so a mode change does not lose them:
+  * `gimbal`: `locked` (default; the view moves with the aircraft) | `horizon` (keeps the world heading and pitch the
+    mount gives the lens but removes the bank, so the horizon stays level for any lens direction; a forward lens
+    equals `followHorizon` 0) | `yaw` (level in pitch and bank, follows the aircraft's heading only).
+  * `mountVibration`: number 0–1, default 0.3. Small, fast airframe vibration driven by engine 1 RPM and ground roll
+    (at most 6 mm per axis and 0.3° per angle at 1).
+  Both are presentation only, like follow horizon: never written into saved poses, captures or the temporary look.
+  The gimbal eases in and out with the follow-horizon 0.15 s time constant, uses the aircraft's pitch and bank, and
+  eases back to `locked` when attitude telemetry is older than 0.5 s; it is held through a simulator pause.
 * Airport profiles have `scope: "airport"`, `requiredSchemaFeatures: ["airport-world-v1"]`, and
   `airport: {icao, name, origin: {lat, lon, altitude}}`. Cameras retain a `worldOrigin`, `airportIcao`,
   and stable `generatedKey`. Position is local FRD about that geodetic origin; the SDK adapter converts
@@ -78,7 +91,7 @@ There is no desktop application, tray app or external process.
   `durationSeconds` 0.1–15 (ignored for `cut`); `delaySeconds` 0–30 = **start delay** before movement.
 * `effects`: `enabled` plus `intensity`, `turbulence`, `groundRoll`, `touchdown`, `acceleration`, `engine` (0–1;
   defaults .35/.5/.35/.5/.35/.2). Applied to `aircraftCockpit` at full strength and to `aircraftExterior` / `orbit`
-  at half strength; `airport`, `flyby` and `free` ignore them. The editor's Off/Subtle/Realistic/Action presets are
+  at half strength; `airport`, `flyby`, `free` and `mounted` (which has `mountVibration` instead) ignore them. The editor's Off/Subtle/Realistic/Action presets are
   derived from these values (no stored preset name).
   Optional head-model strengths (0–1, `aircraftCockpit` only, scaled by `intensity`): `headLag` (neck spring-damper:
   the head trails G and acceleration and settles in about a second), `turnLean` (a few degrees of lean with sustained
@@ -90,7 +103,7 @@ There is no desktop application, tray app or external process.
   view inherits: 1 banks fully with the aircraft (previous behaviour), 0 keeps the horizon level, 0.5 shows half the
   bank. Applies to `aircraftCockpit` (rolls about the aircraft's longitudinal axis, eye position unchanged),
   `aircraftExterior` and `orbit` (position and orientation swing about the aircraft's longitudinal axis, so the
-  aircraft stays framed). `airport` and `flyby` are world-fixed and ignore it. Presentation only: never written into
+  aircraft stays framed). `airport` and `flyby` are world-fixed and ignore it; `mounted` uses `gimbal` instead. Presentation only: never written into
   saved poses, captures or the temporary look; eased with a 0.15 s time constant; when bank telemetry is older than
   0.5 s the correction eases back to 0 (camera banks with the aircraft). Held through a simulator pause.
 * Validation: ≤ 10 MiB, finite numbers, |position| ≤ 10 000 m, FOV 0.1–2.8 rad, quaternion norm within 1e-3
@@ -100,6 +113,10 @@ There is no desktop application, tray app or external process.
   `viewId`, `smoothstep5` → `smoothstep3`, `smoothstep7` → `smoothstep5`) into a new revision; the input is retained.
   Schema 2 documents (and migrated schema 1) migrate to 3: `levelHorizon: true` → `followHorizon: 0`, `false` or
   absent → `1`, and `levelHorizon` is removed. Builds before schema 3 cannot open schema 3 documents.
+  Schema 3 documents (and migrated 1 and 2) migrate to 4 without field changes. Version 4 exists because a schema 3
+  reader rejects the whole document on an unknown `mode` (there is no read-only fallback for modes), so a profile
+  with a `mounted` camera must be refused by version rather than by a confusing validation error. Builds before
+  schema 4 cannot open schema 4 documents.
 
 ### 2.2 Bindings — schemaVersion 2
 
@@ -159,7 +176,7 @@ marks settings as unsaved.
 ### 2.4 Global tracking and airport defaults
 
 `host.globalHeadTrackingEnabled` defaults false; `host.globalAircraftTracking` defaults `both`
-(`off`/`heading`/`both`). Cockpit views are excluded from aircraft tracking. Global automatic airport
+(`off`/`heading`/`both`). Cockpit and mounted views are excluded from aircraft tracking. Global automatic airport
 switching remains independent of each camera. Airport defaults include `airportTrackingHorizonGuard` (true),
 `airportAutoZoomEnabled` (false), `airportAutoZoomFrameMeters` (40), `airportAutoZoomMinFovDeg` (10),
 `airportAutoZoomMaxFovDeg` (90), `airportAutoZoomResponseSeconds` (1), and `airportCategoryHeights`

@@ -115,6 +115,11 @@ void migrateFrom2(json& doc) {
     }
 }
 
+// Schema 3 -> 4: no field changes. Version 4 adds the "mounted" camera mode (with optional gimbal and
+// mountVibration), which a schema 3 reader rejects as an unknown mode; the bump makes older builds refuse the
+// whole document by version instead.
+void migrateFrom3(json& doc) { doc["schemaVersion"] = 4; }
+
 }  // namespace
 
 const char* toString(CameraMode m) {
@@ -125,6 +130,7 @@ const char* toString(CameraMode m) {
         case CameraMode::Flyby: return "flyby";
         case CameraMode::Airport: return "airport";
         case CameraMode::Free: return "free";
+        case CameraMode::Mounted: return "mounted";
     }
     return "aircraftCockpit";
 }
@@ -133,13 +139,14 @@ std::optional<CameraMode> parseMode(const std::string& s) {
     static const std::map<std::string, CameraMode> m = {
         {"aircraftCockpit", CameraMode::AircraftCockpit}, {"aircraftExterior", CameraMode::AircraftExterior},
         {"orbit", CameraMode::Orbit},                     {"flyby", CameraMode::Flyby},
-        {"airport", CameraMode::Airport},                 {"free", CameraMode::Free}};
+        {"airport", CameraMode::Airport},                 {"free", CameraMode::Free},
+        {"mounted", CameraMode::Mounted}};
     auto it = m.find(s);
     if (it == m.end()) return std::nullopt;
     return it->second;
 }
 
-bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior || m == CameraMode::Airport || m == CameraMode::Orbit || m == CameraMode::Flyby; }
+bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior || m == CameraMode::Airport || m == CameraMode::Orbit || m == CameraMode::Flyby || m == CameraMode::Mounted; }
 
 std::string ValidationResult::summary() const {
     if (errors.empty()) return "valid";
@@ -159,11 +166,12 @@ ValidationResult validateProfile(json& doc) {
     }
     const auto version = js::integer(doc, "schemaVersion", -1);
     if (version == 1) migrateFrom1(doc);
-    if (version == 1 || version == 2) {
-        migrateFrom2(doc);
+    if (version == 1 || version == 2) migrateFrom2(doc);
+    if (version >= 1 && version <= 3) {
+        migrateFrom3(doc);
         r.migrated = true;
     } else if (version != kSchemaVersion) {
-        c.error("$.schemaVersion", "unsupported schema version (this build reads versions 1 to 3)");
+        c.error("$.schemaVersion", "unsupported schema version (this build reads versions 1 to 4)");
         return r;
     }
     if (c.text(doc, "profileId", "$", 36, 36) && !isUuid(doc["profileId"].get<std::string>())) c.error("$.profileId", "must be a UUID");
@@ -373,6 +381,18 @@ ValidationResult validateProfile(json& doc) {
                     c.error(p + ".followHorizon", "must be a number between 0 and 1");
             }
             if (!(cam["seedDefinitionName"].is_null() || cam["seedDefinitionName"].is_string())) cam["seedDefinitionName"] = nullptr;
+            // Mounted cameras get their defaults; other modes keep (and ignore) values left by a mode change.
+            if (js::str(cam, "mode") == "mounted") {
+                if (!cam.contains("gimbal")) cam["gimbal"] = "locked";
+                if (!cam.contains("mountVibration")) cam["mountVibration"] = core::kDefaultMountVibration;
+            }
+            if (cam.contains("gimbal") && (!cam["gimbal"].is_string() || !core::parseGimbal(cam["gimbal"].get<std::string>())))
+                c.error(p + ".gimbal", "must be locked, horizon or yaw");
+            if (cam.contains("mountVibration")) {
+                const double vibration = js::num(cam, "mountVibration", NAN);
+                if (!cam["mountVibration"].is_number() || !std::isfinite(vibration) || vibration < 0 || vibration > 1)
+                    c.error(p + ".mountVibration", "must be a number between 0 and 1");
+            }
         }
     }
 
@@ -518,6 +538,8 @@ ProfileSnapshot toSnapshot(const json& doc) {
                      js::num(fx, "groundRoll", .35), js::num(fx, "touchdown", .5), js::num(fx, "acceleration", .35), js::num(fx, "engine", .2),
                      js::num(fx, "headLag", .5), js::num(fx, "turnLean", .5), js::num(fx, "taxiBob", .5), js::num(fx, "idleSway", 0.)};
         e.followHorizon = core::clamp(js::num(cam, "followHorizon", 1.0), 0., 1.);
+        e.gimbal = core::parseGimbal(js::str(cam, "gimbal", "locked")).value_or(core::Gimbal::Locked);
+        e.mountVibration = core::clamp(js::num(cam, "mountVibration", core::kDefaultMountVibration), 0., 1.);
         e.seedDefinitionName = js::str(cam, "seedDefinitionName");
         s.cameras.push_back(std::move(e));
     }

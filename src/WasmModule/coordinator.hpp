@@ -8,6 +8,7 @@
 #include "input_router.hpp"
 #include "fscs/core/engine.hpp"
 #include "fscs/core/horizon.hpp"
+#include "fscs/core/mount.hpp"
 #include "fscs/profiles/bindings.hpp"
 #include "fscs/profiles/profile.hpp"
 #include "fscs/protocol/protocol.hpp"
@@ -92,6 +93,7 @@ public:
     std::string blockReason() const;
     const core::CameraEngine& engine() const { return engine_; }
     const core::CameraEffects& effects() const { return effects_; }
+    const core::MountVibration& mountVibration() const { return mountVibration_; }
     const Aircraft& aircraft() const { return aircraft_; }
     std::uint64_t submissions() const { return submissions_; }
     // Binoculars (hold-to-zoom): held while any binding hold is down; progress 0 = camera FOV, 1 = fully zoomed.
@@ -128,6 +130,7 @@ private:
     void updateBinoculars(double dt);
     double binocularsFov(double shownFov, double cameraFov);
     void emitBinoculars();
+    void updateGimbal(double dt, double now);
     core::CameraPose effectiveAirportPose(const profiles::CameraEntry& cam) const;
     void emitCapabilities(bool force = false);
     void emitActiveCamera();
@@ -189,6 +192,9 @@ private:
     double aircraftBankDeg_ = NAN;  // FRD, right wing down > 0; NAN while unknown
     core::HorizonFilter horizon_;  // follow-horizon counter-roll, applied at submission only
     double submittedHorizonRollDeg_ = 0;  // the counter-roll inside lastSubmitted_
+    double aircraftPitchDeg_ = NAN;  // FRD, nose up > 0; NAN while unknown
+    core::GimbalFilter gimbal_;  // mounted cameras: gimbal stabilisation, applied at submission only
+    core::MountVibration mountVibration_;  // mounted cameras: airframe vibration, applied at submission only
     core::ManualInput manual_;
     bool mouseMapped_ = false, mouseHeld_ = false, mouseBlocked_ = false, mouseMoved_ = false;
     std::string mouseCameraId_;

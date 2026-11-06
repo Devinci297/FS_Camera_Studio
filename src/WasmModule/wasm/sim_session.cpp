@@ -86,7 +86,8 @@ void SimSession::setup() {
     const std::pair<const char*, const char*> motionVars[] = {
         {"SIM ON GROUND", "Bool"}, {"GROUND VELOCITY", "meters per second"}, {"VERTICAL SPEED", "meters per second"},
         {"G FORCE", "GForce"}, {"ACCELERATION BODY Z", "meters per second squared"},
-        {"ACCELERATION BODY X", "meters per second squared"}, {"GENERAL ENG RPM:1", "rpm"}, {"PLANE BANK DEGREES", "degrees"}};
+        {"ACCELERATION BODY X", "meters per second squared"}, {"GENERAL ENG RPM:1", "rpm"}, {"PLANE BANK DEGREES", "degrees"},
+        {"PLANE PITCH DEGREES", "degrees"}};
     for (const auto& [name, unit] : motionVars) SimConnect_AddToDataDefinition(h, kDefMotion, name, unit, SIMCONNECT_DATATYPE_FLOAT64);
     SimConnect_RequestDataOnSimObject(h, kReqMotion, kDefMotion, SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD_SIM_FRAME,
                                     SIMCONNECT_DATA_REQUEST_FLAG_DEFAULT, 0, 1);
@@ -424,10 +425,11 @@ void SimSession::onRecv(const void* raw, unsigned long size) {
             if(d->dwRequestID==kReqPosition && d->dwDefineCount==4 && data->dwSize>=offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA,dwData)+4*sizeof(double)){
                 double v[4];std::memcpy(v,&d->dwData,sizeof(v));staged_.push_back(backend_event::AircraftPosition{v[0],v[1],v[2],v[3]});
             }
-            if (d->dwRequestID == kReqMotion && d->dwDefineCount == 8 && data->dwSize >= offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA, dwData) + 8 * sizeof(double)) {
-                double v[8]; std::memcpy(v, &d->dwData, sizeof(v));
+            if (d->dwRequestID == kReqMotion && d->dwDefineCount == 9 && data->dwSize >= offsetof(SIMCONNECT_RECV_SIMOBJECT_DATA, dwData) + 9 * sizeof(double)) {
+                double v[9]; std::memcpy(v, &d->dwData, sizeof(v));
                 // SimConnect's PLANE BANK DEGREES is positive for a left bank; FRD bank is positive right wing down.
-                staged_.push_back(backend_event::MotionTelemetry{{v[0], v[1], v[2], v[3], v[4], v[5], v[6]}, -v[7]});
+                // PLANE PITCH DEGREES is positive nose down; FRD pitch is positive nose up.
+                staged_.push_back(backend_event::MotionTelemetry{{v[0], v[1], v[2], v[3], v[4], v[5], v[6]}, -v[7], -v[8]});
             }
             if (d->dwRequestID == kReqTitle || d->dwRequestID == kReqTitleOnce) {
                 const char* title = reinterpret_cast<const char*>(&d->dwData);
