@@ -49,11 +49,11 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.equal(await rows.first().locator('small').innerText(),'0.1 NM, Parked');
   assert.equal(await page.locator('.mc-dock-traffic-stop').isHidden(),true,'Stop only while spotting');
 
-  // Views: Chase is the default; Tower and Runway need airport cameras, Track an airport or free view.
+  // Views: Chase is the default; Tower and Runway need airport cameras or known runway/tower data, Track an airport or free view.
   const view=v=>page.locator('.mc-dock-traffic-views [data-view='+v+']');
   assert.equal(await view('chase').getAttribute('aria-pressed'),'true');
   for(const v of ['tower','runway','track'])assert.equal(await view(v).isDisabled(),true,v+' is gated');
-  assert.match(await view('tower').getAttribute('title'),/airport cameras/);
+  assert.match(await view('tower').getAttribute('title'),/airport cameras|tower position is known/);
   assert.equal(await view('flyby').isDisabled(),false);
 
   // Rows update in place at the 1 Hz traffic rate, so a pointer or focus on them survives.
