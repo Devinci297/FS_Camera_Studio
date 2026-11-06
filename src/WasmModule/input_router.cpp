@@ -97,7 +97,7 @@ const std::vector<std::string>& InputRouter::setBindings(std::vector<profiles::B
 std::vector<ActionEvent> InputRouter::press(std::size_t b, const std::string& physical) {
     if (mustRelease_.count(physical)) return {};
     const auto& binding = bindings_[b];
-    if (textFocus_ && binding.action != Action::ReleaseCamera) return {};
+    if (textFocus_ && binding.action != Action::ReleaseCamera && binding.action != Action::PanicRelease) return {};
     if (held_.count(physical)) return {};
     // Alternate bindings share one logical hold (particularly Peek). Releasing either
     // physical input must not restore the view while the other is still pressed.
@@ -203,7 +203,7 @@ std::vector<ActionEvent> InputRouter::setTextFocus(bool focused) {
     std::set<std::uint64_t> released;
     for (auto it = held_.begin(); it != held_.end();) {
         const auto& b = bindings_[it->second.binding];
-        if (b.action != Action::ReleaseCamera) {
+        if (b.action != Action::ReleaseCamera && b.action != Action::PanicRelease) {
             if (released.insert(it->second.holdId).second) out.push_back({b.action, b.viewId, false, it->second.holdId});
             mustRelease_.insert(it->first);
             it = held_.erase(it);

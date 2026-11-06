@@ -693,6 +693,38 @@ TEST_CASE("module: global airport auto acquires nearest view from released or co
     CHECK_EQ(js::str(m.ackFor(m.panel("SetAirportAuto",{{"enabled",true}})),"status"),std::string("Rejected"));
 }
 
+TEST_CASE("module: panic binding with panels closed stops airport auto switch and stays released") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});m.panel("CreateProfile",{{"name","Panic"},{"forAircraft",true}});
+    m.app.onEvent(be::AircraftPosition{40,-90,100},m.t);
+    m.panel("PreviewAirportSource",{{"facility",airportFixture()}});auto preview=m.lastEvent("AirportPreview")["payload"]["profile"];
+    json ids=json::array();for(auto& cam:preview["cameras"])ids.push_back(cam["id"]);
+    m.panel("SaveAirportPreview",{{"icao","KAAA"},{"cameraIds",ids}});
+    auto pose=preview["cameras"][1]["positionMetersFRD"];
+    const auto near=fscs::profiles::airport::world({40,-90,100},{pose[0],pose[1],pose[2]});
+    m.app.onEvent(be::AircraftPosition{near.lat,near.lon,near.altitude},m.t);
+    CHECK_EQ(js::str(m.ackFor(m.panel("SetAirportAuto",{{"enabled",true}})),"status"),std::string("Completed"));
+    m.app.onEvent(be::CameraStatus{SdkAvailability::Acquired,false},m.t);m.frame();
+    CHECK(m.app.coordinator().ownership()==Ownership::Active);
+    m.panel("TextFocus",{{"focused",true}});  // a focused text field must not block the panic binding
+    m.drain();
+    const auto panic=static_cast<std::size_t>(std::find(m.services.mapped.begin(),m.services.mapped.end(),"VK_LCONTROL+VK_LMENU+X")-m.services.mapped.begin());
+    CHECK(panic<m.services.mapped.size());
+    m.app.onEvent(be::InputEvent{panic,true},m.t);m.app.onEvent(be::InputEvent{panic,false},m.t);
+    auto event=m.lastEvent("PanicReleased");
+    CHECK(event["payload"]["airportAutoStopped"].get<bool>());
+    CHECK(m.app.coordinator().ownership()==Ownership::Releasing);
+    m.app.onEvent(be::CameraStatus{SdkAvailability::NotAcquired,false},m.t);
+    const auto acquires=m.camera.count("acquire");
+    for(int i=0;i<300;++i){m.app.onEvent(be::AircraftPosition{near.lat,near.lon,near.altitude},m.t);m.frame();}
+    CHECK(m.app.coordinator().ownership()==Ownership::Observing);
+    CHECK_EQ(m.camera.count("acquire"),acquires);
+    m.panel("RequestSnapshot");CHECK(!m.lastEvent("Snapshot")["payload"]["airports"]["autoSwitch"].get<bool>());
+    // Pressing it again changes nothing and still reports.
+    m.app.onEvent(be::InputEvent{panic,true},m.t);m.app.onEvent(be::InputEvent{panic,false},m.t);
+    event=m.lastEvent("PanicReleased");CHECK(!event["payload"]["airportAutoStopped"].get<bool>());
+    CHECK(m.app.coordinator().ownership()==Ownership::Observing);
+}
+
 TEST_CASE("module: auto switch is shared across camera selections panels and mouse look") {
     ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});m.panel("Hello",{{"surface","mini"}},"mini-1");
     m.panel("CreateProfile",{{"name","Shared auto"},{"forAircraft",true}});

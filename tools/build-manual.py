@@ -105,7 +105,7 @@ text('Set the view type and View ID, the default view for the profile, quick-acc
 heading('Head tracking')
 text('Head tracking is global and off by default. Its button or binding toggles the MSFS TrackIR-compatible channel for every camera and profile. Hardware and drivers must already work in MSFS; this does not provide a tracking driver or control independent VR systems.')
 heading('Transitions and effects live under Motion')
-text('Choose Instant, Smooth or Cinematic transitions and set duration/delay. Flight effects add temporary cockpit movement driven by telemetry. Start with Gentle and increase individual effects gradually. Effects do not overwrite your saved pose. Test interaction with any other camera-motion add-on.')
+text('Choose Instant, Smooth or Cinematic transitions and set duration/delay. Flight effects add temporary camera movement driven by telemetry to cockpit views, and at half strength to exterior and orbit views. Start with the Subtle preset and adjust individual effects; changed sliders show Custom. Effects do not overwrite your saved pose. Test interaction with any other camera-motion add-on.')
 text('Some modes and capabilities are marked Preview or unavailable until qualified. Respect the in-app status: the presence of an option is not confirmation that your simulator build or aircraft supports it.',True)
 end()
 

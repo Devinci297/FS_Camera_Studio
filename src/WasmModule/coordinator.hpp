@@ -7,6 +7,7 @@
 #include "head_tracking.hpp"
 #include "input_router.hpp"
 #include "fscs/core/engine.hpp"
+#include "fscs/core/horizon.hpp"
 #include "fscs/profiles/bindings.hpp"
 #include "fscs/profiles/profile.hpp"
 #include "fscs/protocol/protocol.hpp"
@@ -50,6 +51,9 @@ public:
     json handle(const protocol::Command& cmd, double now);
     // Fast path: never queued behind other work.
     void release(const std::string& reason, double now);
+    // Panic binding: release() plus forgetting every remembered temporary look. Valid in every ownership state and
+    // idempotent; never re-activates afterwards. Emits PanicReleased so the host stops automatic switching.
+    void panicRelease(double now);
     void onBackendEvent(const BackendEvent& ev, double now);
     void onAction(const ActionEvent& ev, double now);
     // The working profile (drafts included) the coordinator recalls from. Each call is an immutable revision;
@@ -86,6 +90,7 @@ public:
     bool canActivate() const { return blockReason().empty(); }
     std::string blockReason() const;
     const core::CameraEngine& engine() const { return engine_; }
+    const core::CameraEffects& effects() const { return effects_; }
     const Aircraft& aircraft() const { return aircraft_; }
     std::uint64_t submissions() const { return submissions_; }
 
@@ -110,6 +115,7 @@ private:
     const std::string& aircraftTrackingFor(const profiles::CameraEntry& cam) const;
     void updateAirportAutoZoom(double dt);
     void updateAirportTrackingPosition();
+    void updateHorizon(double dt, double now);
     core::CameraPose effectiveAirportPose(const profiles::CameraEntry& cam) const;
     void emitCapabilities(bool force = false);
     void emitActiveCamera();
@@ -168,6 +174,9 @@ private:
     core::CameraEffects effects_;
     core::FlightMotion flightMotion_;
     double motionReceivedAt_ = -1;
+    double aircraftBankDeg_ = NAN;  // FRD, right wing down > 0; NAN while unknown
+    core::HorizonFilter horizon_;  // follow-horizon counter-roll, applied at submission only
+    double submittedHorizonRollDeg_ = 0;  // the counter-roll inside lastSubmitted_
     core::ManualInput manual_;
     bool mouseMapped_ = false, mouseHeld_ = false, mouseBlocked_ = false, mouseMoved_ = false;
     std::string mouseCameraId_;

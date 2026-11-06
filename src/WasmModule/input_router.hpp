@@ -3,7 +3,7 @@
 // (SimConnect_MapInputEventToClientEvent_EX1); the simulator reports down/up per mapped definition, and POV events
 // carry the hat angle. This class turns those into logical actions with deterministic edges:
 //  * one down edge per press, every hold has a matching release (paired by holdId, used as the peek token);
-//  * text entry in a panel suppresses everything except Release Camera;
+//  * text entry in a panel suppresses everything except Release Camera and Panic release;
 //  * context loss releases all holds, and inputs still held afterwards must return to neutral first.
 
 #include "fscs/core/engine.hpp"

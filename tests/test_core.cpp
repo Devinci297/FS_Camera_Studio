@@ -3,6 +3,7 @@
 #include "adapter.hpp"
 #include "fscs/core/engine.hpp"
 #include "fscs/core/effects.hpp"
+#include "fscs/core/horizon.hpp"
 
 using namespace fscs::core;
 using fscs::host::AdapterContract;
@@ -14,6 +15,64 @@ namespace {
 constexpr double kEps = 1e-9;
 CameraPose pose(Vec3 p, Pbh a, double fov = 1.0) { return {p, Quat::fromPbh(a), fov}; }
 }  // namespace
+
+TEST_CASE("horizon: counter-roll leaves the aircraft's bank times follow horizon at 0, 0.5 and 1") {
+    // Aircraft attitude in the local level frame, FRD: banked 30 degrees right, nose up 10, heading 40.
+    const Quat aircraft = Quat::fromPbh({10, 30, 40});
+    CHECK_NEAR(horizonCounterRollDeg(30, 0), -30, kEps);
+    CHECK_NEAR(horizonCounterRollDeg(30, .5), -15, kEps);
+    CHECK_NEAR(horizonCounterRollDeg(30, 1), 0, kEps);
+    CHECK_NEAR(horizonCounterRollDeg(-20, 0), 20, kEps);
+    CHECK_NEAR(horizonCounterRollDeg(30, 7), 0, kEps);  // clamped
+    CHECK_NEAR(horizonCounterRollDeg(NAN, 0), 0, kEps);
+    for (const double follow : {0., .5, 1.}) {
+        // Forward view: the world bank is exactly bank * follow, and pitch/heading are untouched.
+        const auto forward = counterRoll(pose({}, {}), horizonCounterRollDeg(30, follow), false);
+        const auto world = (aircraft * forward.orientation).toPbh();
+        CHECK_NEAR(world.bankDeg, 30 * follow, 1e-7);
+        CHECK_NEAR(world.pitchDeg, 10, 1e-7);
+        CHECK_NEAR(world.headingDeg, 40, 1e-7);
+        // Cockpit views keep the eye where it is.
+        const auto eye = counterRoll(pose({.3, .7, .1}, {-12, 0, 0}), horizonCounterRollDeg(30, follow), false);
+        CHECK_NEAR(eye.positionFRD.y, .7, kEps);
+        if (follow == 0) CHECK_NEAR((aircraft * eye.orientation).toPbh().bankDeg, 0, 1e-7);
+    }
+    // A side-facing view in a level-pitch bank sees a level horizon instead of a pitched one.
+    const Quat banked = Quat::fromPbh({0, 30, 0});
+    const auto side = counterRoll(pose({}, {0, 0, 90}), horizonCounterRollDeg(30, 0), false);
+    const auto sideWorld = (banked * side.orientation).toPbh();
+    CHECK_NEAR(sideWorld.pitchDeg, 0, 1e-7);
+    CHECK_NEAR(sideWorld.bankDeg, 0, 1e-7);
+    CHECK(std::abs((banked * Quat::fromPbh({0, 0, 90})).toPbh().pitchDeg) > 20);
+    // Exterior views swing about the aircraft and stay aimed at it.
+    const Vec3 at{0, 10, -2};
+    const CameraPose wing{at, Quat::fromPbh({std::atan2(-2., 10.) * -kRadToDeg, 0, -90}), 1.};
+    const auto swung = counterRoll(wing, -30, true);
+    CHECK_NEAR(swung.positionFRD.length(), at.length(), 1e-9);
+    const Vec3 aim = swung.orientation.rotate({1, 0, 0}), toAircraft = swung.positionFRD * (-1 / swung.positionFRD.length());
+    const Vec3 aimBefore = wing.orientation.rotate({1, 0, 0}), toBefore = at * (-1 / at.length());
+    CHECK_NEAR(dot(aim, toAircraft), dot(aimBefore, toBefore), 1e-9);
+    CHECK_NEAR(swung.fovRad, 1., kEps);
+    // Zero roll is the identity.
+    const auto same = counterRoll(wing, 0, true);
+    CHECK_NEAR(angleBetween(same.orientation, wing.orientation), 0, kEps);
+}
+
+TEST_CASE("horizon: the filter eases with a 0.15 s time constant independent of frame rate") {
+    HorizonFilter a, b;
+    a.tick(.15, 10);
+    CHECK_NEAR(a.rollDeg(), 10 * (1 - std::exp(-1.)), 1e-9);
+    for (int i = 0; i < 15; ++i) b.tick(.01, 10);
+    CHECK_NEAR(b.rollDeg(), a.rollDeg(), 1e-9);
+    for (int i = 0; i < 200; ++i) b.tick(.01, 10);
+    CHECK_NEAR(b.rollDeg(), 10, 1e-4);
+    b.tick(0, -50);
+    CHECK_NEAR(b.rollDeg(), 10, 1e-4);
+    b.tick(.01, NAN);  // invalid target eases toward 0
+    CHECK(b.rollDeg() < 10);
+    b.reset();
+    CHECK_NEAR(b.rollDeg(), 0, kEps);
+}
 
 TEST_CASE("movement: WASD follows yaw and pitch while QE remains vertical") {
     CameraEngine e; e.place(pose({},{}));e.offsetLook(90,30);
@@ -260,6 +319,27 @@ TEST_CASE("effects: stationary aircraft is still and touchdown does not trigger 
     settings.intensity=0;
     for (int i=0;i<100;++i) fx.tick(.02,motion,settings,true);
     CHECK_NEAR(fx.offset().length(),0.,1e-9);
+}
+TEST_CASE("effects: scale reduces offsets and pitch proportionally for exterior views") {
+    EffectsSettings settings; settings.enabled=true; FlightMotion motion; motion.forwardAcceleration=5.;
+    const auto run=[&](double scale) {
+        CameraEffects fx; FlightMotion m=motion;
+        for (int i=0;i<50;++i) fx.tick(.02,m,settings,true,scale);
+        m.onGround=0; m.verticalSpeed=-3.; fx.tick(.02,m,settings,true,scale);
+        m.onGround=1; m.verticalSpeed=0.; for (int i=0;i<5;++i) fx.tick(.02,m,settings,true,scale);
+        return fx;
+    };
+    const auto full=run(1.), exterior=run(kExteriorEffectsScale);
+    CHECK(full.offset().length()>1e-4);
+    CHECK_NEAR(exterior.offset().x,full.offset().x*kExteriorEffectsScale,1e-12);
+    CHECK_NEAR(exterior.offset().z,full.offset().z*kExteriorEffectsScale,1e-12);
+    const CameraPose base=pose({1,2,3},{},1.);
+    const double fullPitch=full.apply(base).orientation.toPbh().pitchDeg, exteriorPitch=exterior.apply(base).orientation.toPbh().pitchDeg;
+    CHECK(std::abs(fullPitch)>1e-6);
+    CHECK_NEAR(exteriorPitch,fullPitch*kExteriorEffectsScale,1e-6);
+    CHECK_NEAR(run(0.).offset().length(),0.,1e-12);
+    CHECK_NEAR(run(std::numeric_limits<double>::quiet_NaN()).offset().length(),0.,1e-12);
+    CHECK_NEAR(run(4.).offset().x,full.offset().x,1e-12);
 }
 TEST_CASE("adapter: automatic mapping ignores accumulated visual wizard corrections") {
     fscs::host::AdapterContract wrong;wrong.pitchSign=1;wrong.headingSign=-1;wrong.axisSign={-1,1,1};

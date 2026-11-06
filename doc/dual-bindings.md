@@ -11,3 +11,17 @@ Existing bindings without a slot remain usable. The first two legacy inputs for 
 Browser regression coverage: `ui/tests/dual-bindings.test.cjs`, `binding-dialog-layout.test.cjs`, `movement-bindings.test.cjs`, and `key-capture.test.mjs`. Hardware input and simulator control masking still need live verification. In particular, the latest T.16000M hat-release fix has automated coverage but has not yet been confirmed on the physical controller. After assigning a hat, start another listening session and test a normal button to check that capture has fully reset.
 
 Hat capture, manual testing, and saved hat bindings explicitly subscribe to both movement and release. The release event is normalized to center, so returning the hat clears capture and held camera movement even when the simulator supplies a zero release payload. This follows the [SimConnect input-event contract](https://docs.flightsimulator.com/html/Programming_Tools/SimConnect/API_Reference/InputEvents/SimConnect_MapInputEventToClientEvent_EX1.htm). Native registration tests cover the missing-release regression. Rejected listener registrations now report an error and add bounded details to Diagnostics.
+
+## Panic release
+
+**Panic: release camera and restore simulator** (`panicRelease`) is a stronger form of **Release camera control** for when a view misbehaves. It has Primary and Secondary slots like every other command. New installs get **Ctrl + Alt + X**, following the Ctrl + Alt default convention; no other default uses X. Saved bindings are not migrated, so an existing setup has no panic input until one is assigned on the Bindings page.
+
+Panic works with both panels closed (once a flight is loaded), while a panel text field has focus, and in every ownership state. Like every binding, it is ignored while the assignment dialog is listening for a controller button. One press:
+
+* returns the camera exactly as Release Camera does — Releasing, then Observing once the simulator confirms;
+* restores MSFS head tracking to the value it had before Camera Studio changed it (a change made in the simulator since then is respected);
+* stops walkaround, orbit and fly-by motion and turns airport **Auto switch** off;
+* clears the temporary mouse look, including looks remembered for cameras that retain them, and ends any mouse drag;
+* discards a camera recall queued behind an earlier release, so nothing re-activates. Use **Enable** or select a view to take control again.
+
+Release Camera already does all of this except two things: it leaves Auto switch on (paused until a camera is active again), and it keeps remembered looks so a retained look returns on the next recall. A panic while already released changes nothing and still succeeds. Each press sends a `PanicReleased` event (`state`, `reason`, `airportAutoStopped`). Both panels show "Camera released - simulator has control" for about 3 seconds after any release: the Release buttons, the Release or Panic binding, and automatic hand-backs (a change from Active, Paused by the simulator or Releasing to Observing). Coverage: `tests/test_coordinator.cpp`, `tests/test_module.cpp` and `ui/tests/panic-release.test.cjs`. Panic on a live simulator still needs verification.

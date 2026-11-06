@@ -16,7 +16,7 @@ using json = nlohmann::json;
 enum class Action {
     SelectView, PeekView, NextCamera, PreviousCamera, NextCategory, ReturnToPilot, ReleaseCamera, RecenterLook,
     ToggleEditor, ToggleMini, ToggleMouseLook, LookLeft, LookRight, LookUp, LookDown, MoveForward, MoveBack, MoveLeft, MoveRight,
-    MoveUp, MoveDown, ZoomIn, ZoomOut, MoveFast, ToggleHeadTracking, ToggleAirportAuto, SaveViews
+    MoveUp, MoveDown, ZoomIn, ZoomOut, MoveFast, ToggleHeadTracking, ToggleAirportAuto, SaveViews, PanicRelease
 };
 const char* toString(Action a);
 std::optional<Action> parseAction(const std::string& s);

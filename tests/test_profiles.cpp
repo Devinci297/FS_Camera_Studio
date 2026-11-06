@@ -131,11 +131,11 @@ TEST_CASE("profile: structural errors are rejected") {
     CHECK(!validateProfile(p).ok());
 
     p = twoCameraProfile();
-    p["schemaVersion"] = 3;
+    p["schemaVersion"] = 4;
     CHECK(!validateProfile(p).ok());
 }
 
-TEST_CASE("profile: schema 1 documents migrate to schema 2") {
+TEST_CASE("profile: schema 1 documents migrate to the current schema") {
     json p = twoCameraProfile();
     p["schemaVersion"] = 1;
     for (auto& cam : p["cameras"]) {
@@ -146,9 +146,87 @@ TEST_CASE("profile: schema 1 documents migrate to schema 2") {
     auto r = validateProfile(p);
     CHECK(r.ok());
     CHECK(r.migrated);
-    CHECK_EQ(p["schemaVersion"].get<int>(), 2);
+    CHECK_EQ(p["schemaVersion"].get<int>(), 3);
     CHECK_EQ(p["cameras"][1]["viewId"].get<int>(), 2);
     CHECK_EQ(p["cameras"][0]["transition"]["kind"].get<std::string>(), std::string("smoothstep5"));
+    CHECK_EQ(p["cameras"][0]["followHorizon"], json(1.0));
+}
+
+TEST_CASE("profile: schema 2 levelHorizon migrates to followHorizon") {
+    json p = twoCameraProfile();
+    p["schemaVersion"] = 2;
+    p["cameras"][0].erase("followHorizon");
+    p["cameras"][1].erase("followHorizon");
+    p["cameras"][0]["levelHorizon"] = true;
+    p["cameras"][1]["levelHorizon"] = false;
+    json third = p["cameras"][1];
+    third["id"] = newUuid();
+    third["viewId"] = 3;
+    third.erase("levelHorizon");  // absent in v2 means the default: banks with the aircraft
+    p["cameras"].push_back(third);
+    p["categories"][0]["cameraIds"].push_back(third["id"]);
+    auto r = validateProfile(p);
+    CHECK(r.ok());
+    CHECK(r.migrated);
+    CHECK_EQ(p["schemaVersion"], json(3));
+    CHECK_EQ(p["cameras"][0]["followHorizon"], json(0.0));
+    CHECK_EQ(p["cameras"][1]["followHorizon"], json(1.0));
+    CHECK_EQ(p["cameras"][2]["followHorizon"], json(1.0));
+    for (const auto& cam : p["cameras"]) CHECK(!cam.contains("levelHorizon"));
+    const auto snap = toSnapshot(p);
+    CHECK_NEAR(snap.cameras[0].followHorizon, 0, 1e-12);
+    CHECK_NEAR(snap.cameras[1].followHorizon, 1, 1e-12);
+
+    // A v3 document validates unchanged and is not reported as upgraded.
+    json again = p;
+    auto r3 = validateProfile(again);
+    CHECK(r3.ok());
+    CHECK(!r3.migrated);
+    CHECK(again == p);
+
+    // Profile codes: a v2 export imports migrated, a v3 export round-trips.
+    json v2 = twoCameraProfile();
+    v2["schemaVersion"] = 2;
+    v2["cameras"][0].erase("followHorizon");
+    v2["cameras"][0]["levelHorizon"] = true;
+    std::string err;
+    auto imported = importProfileCode(exportProfileCode(v2, false), &err);
+    CHECK(imported.has_value());
+    if (!imported) return;
+    CHECK_EQ(imported->profile["schemaVersion"], json(3));
+    CHECK_EQ(imported->profile["cameras"][0]["followHorizon"], json(0.0));
+    CHECK(!imported->profile["cameras"][0].contains("levelHorizon"));
+    json v3 = twoCameraProfile();
+    v3["cameras"][1]["followHorizon"] = 0.25;
+    imported = importProfileCode(exportProfileCode(v3, false), &err);
+    CHECK(imported.has_value());
+    if (!imported) return;
+    CHECK_EQ(imported->profile["cameras"][1]["followHorizon"], json(0.25));
+    for (const auto& note : imported->notes) CHECK(note.find("older version") == std::string::npos);
+}
+
+TEST_CASE("profile: followHorizon must be a finite number from 0 to 1") {
+    for (const auto& doc : {makeStarterProfile("Starter", "test", "Test"), makeC172Profile("c172", "C172"), makeA320Profile("a320", "A320")})
+        for (const auto& camera : doc["cameras"]) {
+            CHECK_EQ(camera["followHorizon"], json(1.0));
+            CHECK(!camera.contains("levelHorizon"));
+        }
+    const json starter = makeStarterProfile("Starter", "", "");
+    CHECK_EQ(starter["schemaVersion"], json(3));
+    for (const json& good : {json(0), json(0.5), json(1)}) {
+        json p = twoCameraProfile();
+        p["cameras"][0]["followHorizon"] = good;
+        CHECK(validateProfile(p).ok());
+    }
+    for (const json& bad : {json(-0.01), json(1.01), json(NAN), json(INFINITY), json(true), json("1"), json(nullptr)}) {
+        json p = twoCameraProfile();
+        p["cameras"][0]["followHorizon"] = bad;
+        CHECK(!validateProfile(p).ok());
+    }
+    json p = twoCameraProfile();
+    p["cameras"][0].erase("followHorizon");
+    CHECK(validateProfile(p).ok());
+    CHECK_EQ(p["cameras"][0]["followHorizon"], json(1.0));
 }
 
 TEST_CASE("profile: unknown required feature opens read-only") {

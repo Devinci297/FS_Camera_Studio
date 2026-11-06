@@ -186,6 +186,8 @@
       'mc-duration':'Time taken to transition to this camera, in seconds.',
       'mc-delay':'Pause before the transition begins, in seconds.',
       'mc-retain-look':'Remember the temporary look direction when revisiting this camera.',
+      'mc-follow-horizon-range':FOLLOW_HORIZON_HELP,
+      'mc-follow-horizon-number':FOLLOW_HORIZON_HELP,
       'mc-search':'Filter the camera library by name.',
       'mc-binding-search':'Find bindings by action, camera name or assigned input.',
       'mc-setting-mini-opacity':'Set only the mini panel background opacity. Camera names and controls stay readable.',
@@ -209,6 +211,7 @@
       'mc-nav-settings':'Customize appearance, mouse look and camera controls.',
       'mc-tab-position':'Move, rotate and zoom the selected camera.',
       'mc-tab-motion':'Configure transitions and camera motion effects.',
+      'mc-effects-preset':'Set every flight effect at once. Off disables effects; Custom shows after you adjust a slider.',
       'mc-tab-behavior':'Configure view bindings, defaults and camera behavior.'
     };
     // A disabled control's existing reason is more useful than a generic action description.
@@ -315,6 +318,7 @@
     ['nextCategory', 'Next category', 'Jump to the next category'],
     ['returnToPilot', 'Return to default view', 'The starting view for this profile'],
     ['releaseCamera', 'Release camera control', 'Give control back to the simulator'],
+    ['panicRelease', 'Panic: release camera and restore simulator', 'Release, restore head tracking, stop motion and auto switching; works with both panels closed'],
     ['recenterLook', 'Recenter look', 'Clear the temporary mouse look'],
     ['toggleEditor', 'Toggle editor', 'Open or hide the Camera Studio editor'],
     ['saveViews', 'Save adjusted view and all changes', 'Ctrl+S stores the current position, look and zoom, then saves pending changes'],
@@ -490,6 +494,8 @@
     bridge.context.sessionEpoch = p.sessionEpoch;
     S.session = p.session || 'Ready';
     S.aircraft = p.aircraft || null;
+    // A paused simulator delivers no events: a fresh snapshot can be the first sign of an automatic hand-back.
+    if (!firstSnapshot && p.ownership && p.ownership.state === 'Observing' && HELD_STATES.indexOf(S.ownership.state) >= 0) announceReleased();
     S.ownership = p.ownership || S.ownership;
     if (S.ownership.state !== 'Active') stopMouseLook();
     S.caps = p.capabilities || S.caps;
@@ -540,7 +546,9 @@
       if (S.page === 'profiles') { renderProfiles(); renderAirportSummary(); }
     },
     OwnershipChanged(p) {
+      const handedBack = HELD_STATES.indexOf(S.ownership.state) >= 0 && p.state === 'Observing';
       S.ownership = p;
+      if (handedBack) announceReleased();
       if (p.state !== 'Active') stopMouseLook();
       if (p.state === 'Active' || p.state === 'Acquiring') S.userReleased = false;
       if (p.state === 'Observing' && p.reason === 'userReleased') S.userReleased = true;
@@ -587,6 +595,11 @@
     InputTest: onInputTest,
     ControllerInputCaptured: onControllerInputCaptured,
     ControllerCaptureStatus: onControllerCaptureStatus,
+    PanicReleased(p) {
+      S.userReleased = true;
+      if (p.state === 'Observing' || p.state === 'Releasing') announceReleased();
+      render();
+    },
     BindingTriggered(p) { if (S.page === 'bindings') setBindingResult('Triggered "' + actionName(p.action, p.viewId) + '"' + (p.result === 'recalled' ? ' - the view was recalled.' : '.')); },
     SurfaceRequest: onSurfaceRequest,
     FaultRaised(p) { S.fault = p; announce(p.message || 'The camera stopped after an error.', 'error'); render(); },
@@ -629,11 +642,13 @@
     if (r && r.length === 2 && r[0] < r[1]) return [Math.max(UI_FOV[0], Math.ceil(r[0])), Math.min(UI_FOV[1], Math.floor(r[1]))];
     return UI_FOV.slice();
   }
-  const levelHorizonAvailable = () => Boolean((S.caps.features && S.caps.features.levelHorizon) || S.caps.levelHorizon === true);
+  const levelHorizonAvailable = () => Boolean((S.caps.features && (S.caps.features.levelHorizon || S.caps.features.followHorizon)) || S.caps.levelHorizon === true || S.caps.followHorizon === true);
+  const FOLLOW_HORIZON_HELP = 'How much this view banks with the aircraft: 1 = banks fully with the aircraft, 0 = the horizon stays level. Display only; never changes the saved pose.';
+  const followHorizonOf = view => (view && typeof view.followHorizon === 'number' && isFinite(view.followHorizon) ? M.clamp(view.followHorizon, 0, 1) : 1);
 
   /* ------------- Toast ------------- */
   let toastTimer = 0;
-  function announce(message, tone) {
+  function announce(message, tone, ms) {
     if (!message) return;
     clearTimeout(toastTimer);
     const el = $('mc-toast');
@@ -641,9 +656,17 @@
     el.setAttribute('data-tone', tone || 'ok');
     setIcon(el, !tone || tone === 'ok' ? 'check-circle-2' : 'alert-triangle');
     el.hidden = false;
-    toastTimer = setTimeout(() => { el.hidden = true; }, !tone || tone === 'ok' ? 2600 : 4200);
+    toastTimer = setTimeout(() => { el.hidden = true; }, ms || (!tone || tone === 'ok' ? 2600 : 4200));
   }
   const toast = announce;
+  // Confirms every hand-back to the simulator: Release button or binding, Panic release and automatic releases.
+  const RELEASED_TEXT = 'Camera released - simulator has control';
+  const HELD_STATES = ['Active', 'SimulatorSuspended', 'Releasing'];
+  function announceReleased() {
+    const el = $('mc-toast');
+    if (!el.hidden && el.getAttribute('data-tone') === 'error') return; // keep a fault message readable
+    announce(RELEASED_TEXT, 'ok', 3000);
+  }
 
   /* ------------- Mini dock presentation (mockup sec. 4.5 behaviour) ------------- */
   // Mini surface presentation: hover (handle + reveal, default) | always (fixed dock) | off (note only).
@@ -1249,7 +1272,6 @@
     $('mc-duration').disabled = ro || view.transition.kind === 'cut';
     if (document.activeElement !== $('mc-delay')) $('mc-delay').value = String(view.transition.delaySeconds);
     $('mc-motion-destination').textContent = view.name;
-    renderEffects(view, ro);
     renderMotionSettings(view);
     // Behavior
     $('mc-view-type').textContent = ({aircraftCockpit:'Cockpit',aircraftExterior:'Aircraft exterior',airport:'Airport (world fixed)',orbit:'Orbit',flyby:'Fly-by',free:'Free camera'})[view.mode] || view.mode;
@@ -1264,19 +1286,23 @@
     $('mc-quick-access').checked = Boolean(view.favorite);
     $('mc-retain-look').checked = view.temporaryLookPolicy === 'retain';
     $$('[data-value]', $('mc-mouse-release')).forEach(b => { b.disabled = ro; b.setAttribute('aria-pressed', String(b.dataset.value === (view.mouseLookOnRelease || 'retain'))); });
-    const level = levelHorizonAvailable();
-    $('mc-level').checked = Boolean(view.levelHorizon);
-    $('mc-level').disabled = ro || !level;
-    $('mc-level-note').textContent = level ? 'Stabilize roll for this camera.' : 'Not available until qualified.';
+    const level = levelHorizonAvailable(), worldHorizon = view.mode === 'airport' || view.mode === 'flyby';
+    const follow = followHorizonOf(view);
+    if (document.activeElement !== $('mc-follow-horizon-number')) $('mc-follow-horizon-number').value = String(Math.round(follow * 100) / 100);
+    $('mc-follow-horizon-range').value = String(follow);
+    ['mc-follow-horizon-range', 'mc-follow-horizon-number'].forEach(id => { $(id).disabled = ro || !level || worldHorizon; });
+    $('mc-follow-horizon-note').textContent = !level ? 'Not available with this camera module.' : worldHorizon ? 'World-fixed views always keep the horizon level.' : '1 = banks with the aircraft, 0 = horizon stays level.';
     $('mc-interaction').checked = Boolean(view.interaction);
     $('mc-tracking').value = S.working.settings.host.globalHeadTrackingEnabled === true ? 'on' : 'off';
     let airportSettings=$('mc-camera-airport-settings');
     if(!airportSettings){airportSettings=button('Airport camera settings',()=>airportCameraSettings(current()),'mc-secondary','view-tower');airportSettings.id='mc-camera-airport-settings';$('mc-detail-behavior').appendChild(airportSettings);}
     airportSettings.hidden=view.mode!=='airport';airportSettings.disabled=ro;
     $$('#mc-inspector input, #mc-inspector select, #mc-inspector .mc-stepper button, #mc-inspector .mc-select-card button, #mc-inspector .mc-precision button', document).forEach(el => {
-      if (el.id === 'mc-tracking' || el.id === 'mc-level' || el.id === 'mc-duration' || el.hasAttribute('data-fov')) return;
+      if (el.id === 'mc-tracking' || el.id === 'mc-follow-horizon-range' || el.id === 'mc-follow-horizon-number' || el.id === 'mc-duration' || el.hasAttribute('data-fov')) return;
       el.disabled = ro;
     });
+    // After the read-only pass: effects are also locked for views that cannot use them.
+    renderEffects(view, ro);
     $('mc-default-view').disabled=ro||Boolean(view.airportIcao);
     $('mc-default-view').title=view.airportIcao?'Shared airport cameras cannot be the default view for an aircraft profile.':'';
   }
@@ -1541,15 +1567,30 @@
     renderDetails();
   }
 
+  // Keep EFFECT_DEFAULTS in step with fscs::core::EffectsSettings (src/CameraCore/include/fscs/core/effects.hpp).
   const EFFECT_DEFAULTS = { enabled: false, intensity: .35, turbulence: .5, groundRoll: .35, touchdown: .5, acceleration: .35, engine: .2 };
+  // Presets are complete effect settings. The selector shows whichever preset the camera's values match, otherwise Custom.
+  const EFFECT_PRESETS = {
+    off: Object.assign({}, EFFECT_DEFAULTS),
+    subtle: { enabled: true, intensity: .18, turbulence: .25, groundRoll: .18, touchdown: .25, acceleration: .18, engine: .1 },
+    realistic: Object.assign({}, EFFECT_DEFAULTS, { enabled: true }),
+    action: { enabled: true, intensity: .63, turbulence: .9, groundRoll: .63, touchdown: .9, acceleration: .63, engine: .36 }
+  };
+  // Views that move with the aircraft. World-fixed airport and fly-by views never shake.
+  const EFFECT_MODES = { aircraftCockpit: 'cockpit', aircraftExterior: 'exterior', orbit: 'exterior' };
   const EFFECT_FIELDS = [
     ['intensity', 'Overall intensity', 'Scale all effects together'],
     ['turbulence', 'Turbulence response', 'React to changes in vertical G load'],
     ['groundRoll', 'Runway & taxi bumps', 'Speed-based vibration while rolling'],
-    ['touchdown', 'Touchdown', 'A brief head dip based on landing vertical speed'],
-    ['acceleration', 'Acceleration & braking', 'Head movement under forward and lateral acceleration'],
+    ['touchdown', 'Touchdown', 'A brief dip based on landing vertical speed'],
+    ['acceleration', 'Acceleration & braking', 'Camera movement under forward and lateral acceleration'],
     ['engine', 'Engine vibration', 'Fine vibration driven by engine 1 RPM']
   ];
+  function effectPreset(fx) {
+    if (!fx.enabled) return 'off';
+    const same = preset => EFFECT_FIELDS.every(([key]) => Math.round(fx[key] * 100) === Math.round(preset[key] * 100));
+    return ['subtle', 'realistic', 'action'].find(name => same(EFFECT_PRESETS[name])) || 'custom';
+  }
   function editEffects(patch) {
     const view = current(); if (!view || readOnly()) return;
     view.effects = Object.assign({}, EFFECT_DEFAULTS, view.effects || {}, patch);
@@ -1566,15 +1607,15 @@
       add(row, text, range, value); $('mc-effects-controls').appendChild(row);
     });
     $('mc-effects-enabled').addEventListener('change', e => editEffects({ enabled: e.target.checked }));
-    $('mc-effects-gentle').addEventListener('click', () => editEffects(Object.assign({}, EFFECT_DEFAULTS, {enabled:true, intensity:.2})));
-    $('mc-effects-reset').addEventListener('click', () => editEffects(EFFECT_DEFAULTS));
+    $('mc-effects-preset').addEventListener('change', e => { const preset = EFFECT_PRESETS[e.target.value]; if (preset) editEffects(Object.assign({}, preset)); });
   }
   function renderEffects(view, ro) {
-    const fx = Object.assign({}, EFFECT_DEFAULTS, view.effects || {}), cockpit = view.mode === 'aircraftCockpit';
-    $('mc-effects-enabled').checked = fx.enabled; $('mc-effects-enabled').disabled = ro || !cockpit;
-    $('mc-effects-status').textContent = !cockpit ? 'Effects are available for cockpit cameras.' : !fx.enabled ? 'Effects are off for this camera.' : isLive(view.id) ? 'Enabled for this live view. Motion responds when flight telemetry is available.' : 'Ready. Select View in sim to use these effects.';
-    $$('[data-effect]').forEach(control => { const key = control.getAttribute('data-effect'); control.value = String(Math.round(fx[key] * 100)); control.disabled = ro || !cockpit; $('mc-effect-value-' + key).textContent = control.value + '%'; });
-    $('mc-effects-gentle').disabled = ro || !cockpit; $('mc-effects-reset').disabled = ro;
+    const fx = Object.assign({}, EFFECT_DEFAULTS, view.effects || {}), kind = EFFECT_MODES[view.mode], locked = ro || !kind;
+    $('mc-effects-enabled').checked = fx.enabled; $('mc-effects-enabled').disabled = locked;
+    $('mc-effects-preset').value = effectPreset(fx); $('mc-effects-preset').disabled = locked;
+    const strength = kind === 'exterior' ? ' Exterior and orbit views use half strength.' : '';
+    $('mc-effects-status').textContent = !kind ? 'Effects are available for cockpit, exterior and orbit cameras. Airport and fly-by views stay fixed.' : !fx.enabled ? 'Effects are off for this camera.' : (isLive(view.id) ? 'Enabled for this live view. Motion responds when flight telemetry is available.' : 'Ready. Select View in sim to use these effects.') + strength;
+    $$('[data-effect]').forEach(control => { const key = control.getAttribute('data-effect'); control.value = String(Math.round(fx[key] * 100)); control.disabled = locked; $('mc-effect-value-' + key).textContent = control.value + '%'; });
   }
 
   /* Motion preview (same easing as the module) */
@@ -1605,7 +1646,7 @@
       projection: { kind: 'simulatorFovRadians', value: DEFAULT_FOV_RAD, axis: 'adapterDefined' },
       transition: { kind: 'smoothstep3', durationSeconds: 0.65, delaySeconds: 0 },
       interaction: true, trackingPolicy: 'nativeIfQualified', effects: { enabled: false },
-      temporaryLookPolicy: 'resetOnRecall', levelHorizon: false, seedDefinitionName: null,
+      temporaryLookPolicy: 'resetOnRecall', followHorizon: 1, seedDefinitionName: null,
     };
     return Object.assign(base, { id: M.uuid(), categoryId, name, viewId: 0, favorite: true });
   }
@@ -1767,7 +1808,7 @@
   function copyCameraSettings(view) {
     if(!view||!P())return;
     cameraSettingsClipboard={version:1,source:{name:view.name,modelKey:(P().aircraftMatch||{}).modelKey||null,calibration:clone(P().calibration||null)},camera:{}};
-    const fields=['mode','airportIcao','worldOrigin','seedDefinitionName','positionMetersFRD','orientationCameraToAnchorXYZW','projection','transition','effects','interaction','trackingPolicy','temporaryLookPolicy','mouseLookOnRelease','levelHorizon','aircraftTracking'];
+    const fields=['mode','airportIcao','worldOrigin','seedDefinitionName','positionMetersFRD','orientationCameraToAnchorXYZW','projection','transition','effects','interaction','trackingPolicy','temporaryLookPolicy','mouseLookOnRelease','followHorizon','aircraftTracking'];
     fields.forEach(key=>{if(view[key]!==undefined)cameraSettingsClipboard.camera[key]=clone(view[key]);});
     try {window.localStorage.setItem(CAMERA_SETTINGS_KEY,JSON.stringify(cameraSettingsClipboard));}catch(error){/* In-memory fallback. */}
     announce('Copied settings from '+view.name+'. Choose another camera and use Paste settings.');
@@ -1809,7 +1850,7 @@
       if(choices.lens.checked)assign(['projection']);
       if(choices.motion.checked){assign(['transition']);if(source.mode===next.mode)assign(['effects']);}
       if(choices.behavior.checked){
-        assign(['temporaryLookPolicy','mouseLookOnRelease','levelHorizon']);
+        assign(['temporaryLookPolicy','mouseLookOnRelease','followHorizon']);
         if(source.mode===next.mode)assign(['interaction']);
       }
       if(next.mode!=='airport')next.aircraftTracking='off';
@@ -3950,8 +3991,10 @@
     }, true);
     document.addEventListener('mouseleave', e => { if (e.target === document || e.target === document.documentElement) reportPanelPointer(false); }, true);
     document.addEventListener('mouseout', e => { if (!e.relatedTarget) reportPanelPointer(false); }, true);
-    window.addEventListener('blur', window.fscsClearPanelPointer);
-    window.addEventListener('pagehide', window.fscsClearPanelPointer);
+    // Never call into the module while the simulator tears this view down: MSFS 2024 1.9.24 crashed in
+    // CoherentUIGT when a pagehide listener sent a CommBus frame from a detaching panel. Blur is deferred so a
+    // view that is being destroyed never runs it; the bridge also drops sends once teardown has started.
+    window.addEventListener('blur', () => setTimeout(window.fscsClearPanelPointer, 0));
     $('mc-compact').addEventListener('click', enterFlightMode);
     $('mc-hide').addEventListener('click', closeEditor);
     $('mc-profile-picker').addEventListener('click', () => setPage('profiles'));
@@ -4054,12 +4097,21 @@
     });
     $('mc-quick-access').addEventListener('change', () => { const v = current(); if (v) setFavorite(v); });
     $$('[data-value]', $('mc-mouse-release')).forEach(b => b.addEventListener('click', () => { const view = current(); if (!view || readOnly()) return; view.mouseLookOnRelease = b.dataset.value; saveCamera(view); renderDetails(); }));
-    [['mc-retain-look', v => (v ? 'retain' : 'resetOnRecall'), 'temporaryLookPolicy'], ['mc-level', v => v, 'levelHorizon'], ['mc-interaction', v => v, 'interaction']].forEach(entry => $(entry[0]).addEventListener('change', e => {
+    [['mc-retain-look', v => (v ? 'retain' : 'resetOnRecall'), 'temporaryLookPolicy'], ['mc-interaction', v => v, 'interaction']].forEach(entry => $(entry[0]).addEventListener('change', e => {
       const view = current();
       if (!view) return;
       view[entry[2]] = entry[1](e.target.checked);
       saveCamera(view);
     }));
+    const setFollowHorizon = value => {
+      const view = current();
+      if (!view || readOnly() || !isFinite(value)) { renderDetails(); return; }
+      view.followHorizon = Math.round(M.clamp(value, 0, 1) * 100) / 100;
+      saveCamera(view);
+      renderDetails();
+    };
+    $('mc-follow-horizon-range').addEventListener('input', e => setFollowHorizon(Number(e.target.value)));
+    $('mc-follow-horizon-number').addEventListener('change', e => setFollowHorizon(e.target.value === '' ? NaN : Number(e.target.value)));
     ['shortcuts', 'contrast', 'backups', 'remember'].forEach(key => $('mc-setting-' + key).addEventListener('change', e => { S.working.settings.ui[key] = e.target.checked; settingChanged(); }));
     $('mc-setting-precision').addEventListener('change', e => { S.working.settings.ui.precision = e.target.value; setPrecision(e.target.value); settingChanged(); });
     $$('[data-value]', $('mc-setting-theme')).forEach(b => b.addEventListener('click', () => { S.working.settings.ui.theme = b.dataset.value; settingChanged(); }));
