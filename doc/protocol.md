@@ -69,7 +69,7 @@ There is no desktop application, tray app or external process.
 * `mode`: `aircraftCockpit` (MVP); `aircraftExterior` (Preview — cockpit audio limitation);
   `airport` (Preview — world-fixed coordinates, pending live qualification), `orbit` and `flyby`
   (animated exterior modes, including a fly-by pass while parked); `mounted` (Preview — an action cam rigidly fixed
-  to the airframe, see below). `free` cannot activate.
+  to the airframe, see below); `free` (Preview — a world-fixed drone, see below).
 * `mounted` cameras use the SimObject anchor like `aircraftExterior`: the position is a point on the airframe (wing
   tip, tail, gear, belly) and never moves relative to it. Aircraft tracking never applies (the global preference is
   ignored) and neither do `followHorizon` and `effects`. Two optional fields, defaulted for mounted cameras and
@@ -82,6 +82,24 @@ There is no desktop application, tray app or external process.
   Both are presentation only, like follow horizon: never written into saved poses, captures or the temporary look.
   The gimbal eases in and out with the follow-horizon 0.15 s time constant, uses the aircraft's pitch and bank, and
   eases back to `locked` when attitude telemetry is older than 0.5 s; it is held through a simulator pause.
+* `free` cameras (drones) live in aircraft profiles and are world-referential like `airport`: `worldOrigin`
+  {`lat`, `lon`, `altitude`} plus a local FRD pose about it (north, east, down). A free camera without a
+  `worldOrigin` is kept but cannot activate ("Use Drop drone here"); an invalid one is a validation error. Optional
+  `followAircraft` (bool, default false): when true the origin moves with the aircraft position (world axes; the
+  aircraft's attitude is not followed) so the drone keeps its offset; when false it stays fixed in the world.
+  Aircraft tracking (global setting) aims the camera. `effects`, `followHorizon` and the mounted gimbal do not
+  apply; binoculars works; glance cannot be used from a free camera.
+  * Flying: the move/look/zoom bindings and `moveFast` (×4) move the drone in its own frame (forward/right along
+    the view, up is world up), smoothed, at the move speed × precision × (1 + 0.5 per meter above ground, at most
+    ×400). Height is above terrain when known, otherwise above the lower of the origin and aircraft altitudes.
+  * Bounds (stop movement only, never move a saved pose): 20 km horizontally from the origin, 10 km above it, and
+    not below terrain + 2 m when terrain is known (SimConnect `GROUND ALTITUDE` under the user aircraft, fresh
+    within 5 s, used while the drone is within 2 km of the aircraft), otherwise not below the origin altitude
+    − 300 m. The simulator's above-ground camera flag is set. A following drone is also shown at least 2 m above
+    known terrain.
+  * The flight is a temporary adjustment (`TemporaryLookChanged` reports it); recentering or a recall returns to
+    the saved place. `BakeTemporaryLook` ("Save adjusted view") stores a new `worldOrigin` (the aircraft position
+    when within 9 km) and pose; saved poses never change otherwise.
 * Airport profiles have `scope: "airport"`, `requiredSchemaFeatures: ["airport-world-v1"]`, and
   `airport: {icao, name, origin: {lat, lon, altitude}}`. Cameras retain a `worldOrigin`, `airportIcao`,
   and stable `generatedKey`. Position is local FRD about that geodetic origin; the SDK adapter converts
@@ -274,6 +292,7 @@ Rules:
 | `QualificationRestore` | — | Returns the active view to its draft pose |
 | `QualificationRecord` | `answers` {axis: `correct\|reversed\|wrong`}, `recall` (`pass\|fail`), `notes` | Flips reversed signs, records G01/G03 for this simulator build (Pending → `CommitCompleted` kind `qualification`) |
 | `QualificationEnd` | — | Ends the session; releases if the build is still unqualified and testing is not allowed |
+| `DroneHere` | — | `result`: `worldOrigin`, `positionMetersFRD`, `orientationCameraToAnchorXYZW`, `fovRad`, `source` (`view`: the Camera Studio view on screen; `behindAircraft`: 40 m behind and 12 m above the aircraft), `message`. Read only: the panel creates or moves the free camera with `UpdateDraft`. Rejected without an aircraft position |
 
 ### 5.1 Draft operations
 

@@ -9,6 +9,7 @@
 #include "fscs/core/engine.hpp"
 #include "fscs/core/horizon.hpp"
 #include "fscs/core/mount.hpp"
+#include "fscs/profiles/airport.hpp"
 #include "fscs/profiles/bindings.hpp"
 #include "fscs/profiles/profile.hpp"
 #include "fscs/protocol/protocol.hpp"
@@ -118,6 +119,20 @@ public:
     static constexpr double kBinocularsEaseSeconds = 0.3;
     // Current glance (null when not glancing): {cameraId, returnCameraId, held}. Sent with ActiveCameraChanged.
     json glanceJson() const;
+
+    // Free cameras (drones), world-fixed or following the aircraft in world axes. Keyboard flight is unsaved
+    // drone movement in meters (north, east, down) about the anchor until Save adjusted view folds it into the pose.
+    static constexpr double kFreeRadiusMeters = 20000;          // horizontal reach from the anchor
+    static constexpr double kFreeCeilingMeters = 10000;         // highest point above the anchor
+    static constexpr double kFreeFloorMarginMeters = 300;       // without terrain: lowest point below the anchor
+    static constexpr double kFreeTerrainClearanceMeters = 2;    // with terrain: lowest point above it
+    static constexpr double kFreeTerrainRadiusMeters = 2000;    // terrain under the aircraft counts this far from it
+    static constexpr double kFreeTerrainFreshSeconds = 5;
+    static constexpr double kFreeSpeedPerMeterAboveGround = 0.5;  // speed factor 1 + h * this, h = height above ground
+    static constexpr double kFreeMaxSpeedFactor = 400;
+    const core::Vec3& freeOffset() const { return freeOffset_; }
+    // Terrain height used for the active free camera at `drone` (meters MSL); NAN when none is available.
+    double freeTerrainAltitude(const profiles::airport::Geo& drone, double now) const;
 
 private:
     enum class ReadPurpose { None, PreAcquire, Capture, Resume, Seed };
@@ -277,6 +292,26 @@ private:
     std::string seedName_;
 
     json lastCapabilities_;
+
+    // Free cameras (drones). The world pose is world(anchor, engine pose + freeOffset_); the anchor is the saved world
+    // origin, or the aircraft position while following it.
+    core::Vec3 freeOffset_, freeVelocity_;
+    double freeAccumulator_ = 0;
+    std::string freeCameraId_;
+    profiles::airport::Geo freeOrigin_{NAN, NAN, NAN}, freeAnchor_{NAN, NAN, NAN};
+    bool freeFollowing_ = false;
+    std::optional<profiles::airport::Geo> freeSavedOrigin_;  // a Save's new origin until the profile carries it
+    double groundAltitude_ = NAN, groundAt_ = -100;
+    profiles::airport::Geo aircraftGeo() const { return {targetLat_, targetLon_, targetAltitude_}; }
+    bool aircraftPositionFresh(double now) const;
+    profiles::airport::Geo freeAnchor(const profiles::CameraEntry& cam) const;
+    profiles::airport::Geo freeWorld(const profiles::CameraEntry& cam, const core::Vec3& local, double now) const;
+    std::string freeBlock(const profiles::CameraEntry& cam, double now) const;
+    void updateFreeCamera(double dt, double now);
+    void resetFreeMotion();
+    json dronePlacement(const profiles::airport::Geo& drone, const core::Quat& orientation, double fovRad) const;
+    json droneHere(double now, std::string& error) const;
+    json bakeFreeCamera(const protocol::Command& c, const profiles::CameraEntry& cam, const core::CameraPose& shown, double now);
 };
 
 }  // namespace fscs::host

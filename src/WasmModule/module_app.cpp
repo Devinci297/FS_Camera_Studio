@@ -470,6 +470,10 @@ void ModuleApp::handle(const Command& c, double now) {
         send(forward(c, now));
         return;
     }
+    if (a == "DroneHere") {  // read-only: where a free camera dropped now would be (doc/protocol.md 5)
+        send(forward(c, now));
+        return;
+    }
     if (a == "BeginGesture" || a == "RenewGesture") {
         const std::string token = js::str(p, "gestureToken");
         if (token.empty()) return reply(c, AckStatus::Rejected, "missing gestureToken");
@@ -875,6 +879,8 @@ void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
                 }
                 updated["orientationCameraToAnchorXYZW"] = js::get(payload, "orientationCameraToAnchorXYZW");
                 updated["projection"]["value"] = js::num(payload, "fovRad", 1.0);
+                // Free cameras (drones) save a new world origin with the pose.
+                if (js::str(cam, "mode") == "free" && js::get(payload, "worldOrigin").is_object()) updated["worldOrigin"] = js::get(payload, "worldOrigin");
                 json applied;
                 std::string err;
                 if (applyOps(json::array({{{"op", "setCamera"}, {"camera", updated}}}), applied, err)) {

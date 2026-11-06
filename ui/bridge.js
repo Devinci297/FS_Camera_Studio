@@ -212,8 +212,12 @@
     aircraftExterior: { available: true, reason: 'Preview - exterior views keep cockpit sound in the current simulator build.' },
     orbit: { available: true, reason: null }, flyby: { available: true, reason: null },
     mounted: { available: true, reason: 'Preview - mounted views keep cockpit sound and need live checking of the gimbal and vibration.' },
-    airport: { available: false, reason: NOT_AVAILABLE }, free: { available: false, reason: NOT_AVAILABLE },
+    airport: { available: false, reason: NOT_AVAILABLE },
+    free: { available: true, reason: 'Preview - free cameras need live checking of world placement and terrain clearance.' },
   };
+  // Free cameras (drones) keep a geodetic world origin, as the module validates it.
+  const validOrigin = o => Boolean(o && [o.lat, o.lon, o.altitude].every(Number.isFinite) && Math.abs(o.lat) < 89.9 && Math.abs(o.lon) <= 180 && o.altitude > -1500 && o.altitude < 30000);
+  const DEMO_AIRCRAFT_ORIGIN = { lat: 47.4582, lon: 8.5481, altitude: 432 };  // the demo aircraft, heading north and level
   const MOTION_ACTIONS = new Set(['ActivateCamera', 'EnableCamera', 'BeginPeek', 'CycleCamera', 'NextCategory', 'ReturnToPilot', 'CaptureView', 'SeedFromDefinition', 'BakeTemporaryLook']);
   const NEUTRAL_LOOK = () => ({ active: false, positionMetersFRD: [0, 0, 0], pbhDeg: [0, 0, 0], fovDeltaRad: 0 });
   const round = (value, digits) => { const r = Number(value.toFixed(digits)); return Object.is(r, -0) ? 0 : r; };
@@ -341,6 +345,8 @@
       if (c.gimbal !== undefined && ['locked', 'horizon', 'yaw'].indexOf(c.gimbal) < 0) return '"' + c.name + '" needs a gimbal of locked, horizon or yaw.';
       if (c.mountVibration !== undefined && !(typeof c.mountVibration === 'number' && c.mountVibration >= 0 && c.mountVibration <= 1)) return '"' + c.name + '" needs an airframe vibration from 0 to 1.';
       if (c.glance !== undefined && typeof c.glance !== 'boolean') return '"' + c.name + '" needs Glance view on or off.';
+      if (c.mode === 'free' && c.worldOrigin !== undefined && !validOrigin(c.worldOrigin)) return '"' + c.name + '" needs a valid world origin.';
+      if (c.followAircraft !== undefined && typeof c.followAircraft !== 'boolean') return '"' + c.name + '" needs Follow aircraft on or off.';
     }
     if (seen.size !== p.cameras.length) return 'A category lists a camera that does not exist.';
     if (!p.cameras.some(c => c.id === p.defaultCameraId)) return 'Choose a default camera.';
@@ -382,6 +388,7 @@
     if (p && p.schemaVersion === 3) p.schemaVersion = 4;
     (p && p.cameras || []).forEach(c => {
       if (c && c.mode === 'mounted') { if (c.gimbal === undefined) c.gimbal = 'locked'; if (c.mountVibration === undefined) c.mountVibration = 0.3; }
+      if (c && c.mode === 'free' && c.followAircraft === undefined) c.followAircraft = false;
     });
     // Optional glance flag (no schema bump): derived from the icon or name when absent.
     if (p && Array.isArray(p.cameras)) p.cameras.forEach(c => { if (c && c.glance === undefined) c.glance = defaultGlance(c); });
@@ -557,6 +564,7 @@
       if (!caps.canActivate) return ack(env, 'Rejected', caps.blockReason);
       if (!camera) return ack(env, 'Rejected', 'unknownCamera');
       if (!activatable(camera)) return ack(env, 'Rejected', MODE_CAPS[camera.mode] ? MODE_CAPS[camera.mode].reason : 'modeNotSupported');
+      if (camera.mode === 'free' && !validOrigin(camera.worldOrigin)) return ack(env, 'Rejected', 'This drone has no position yet. Use Drop drone here to place it.');
       ack(env, 'Accepted');
       clearMotion();
       m.glance = null;
@@ -929,6 +937,19 @@
           ack(env, 'Accepted');
           const pose = m.ownership.state === 'Active' && m.live ? composedPose() : { positionMetersFRD: [0.012, -0.004, 0.006], orientationCameraToAnchorXYZW: M.quatFromHpb(1.5, -4, 0).map(v => round(v, 7)), fovRad: round(M.degToRad(64), 5) };
           return event('ViewCaptured', Object.assign({ ok: true }, pose, { frame: FRAME_CONTRACT, qualified: m.captureQualified, source: action === 'SeedFromDefinition' ? 'definition:' + payload.name : (m.ownership.state === 'Active' ? 'addOnCamera' : 'simulatorView'), message: m.captureQualified ? null : 'View capture is not qualified for this simulator build yet. Check the values before you use them.' }), env.uiInstanceId, 150);
+        }
+        case 'DroneHere': {
+          // The demo aircraft sits at DEMO_AIRCRAFT_ORIGIN heading north, level: its frame is north, east, down.
+          if (!m.aircraft || !m.aircraft.modelKey) return ack(env, 'Rejected', 'Load a flight and wait for the aircraft position before placing a drone.');
+          const live = m.ownership.state === 'Active' && m.live ? composedPose() : null;
+          const drone = live && m.live.mode === 'free' && validOrigin(m.live.worldOrigin);
+          return ack(env, 'Completed', null, live ? {
+            worldOrigin: clone(drone ? m.live.worldOrigin : DEMO_AIRCRAFT_ORIGIN), positionMetersFRD: live.positionMetersFRD,
+            orientationCameraToAnchorXYZW: live.orientationCameraToAnchorXYZW, fovRad: live.fovRad, source: 'view', message: 'Drone placed at the current view.',
+          } : {
+            worldOrigin: clone(DEMO_AIRCRAFT_ORIGIN), positionMetersFRD: [-40, 0, -12], orientationCameraToAnchorXYZW: M.quatFromHpb(0, -16.7, 0).map(v => round(v, 7)),
+            fovRad: round(M.degToRad(62), 5), source: 'behindAircraft', message: 'No Camera Studio view was on screen: drone placed behind and above the aircraft.',
+          });
         }
         case 'EnumerateDefinitions': ack(env, 'Completed'); return event('DefinitionsListed', { names: ['Pilot', 'Copilot', 'Instrument_01', 'Instrument_02'] }, env.uiInstanceId);
         case 'BakeTemporaryLook': {

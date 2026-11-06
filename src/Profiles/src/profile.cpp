@@ -147,7 +147,7 @@ std::optional<CameraMode> parseMode(const std::string& s) {
     return it->second;
 }
 
-bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior || m == CameraMode::Airport || m == CameraMode::Orbit || m == CameraMode::Flyby || m == CameraMode::Mounted; }
+bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior || m == CameraMode::Airport || m == CameraMode::Orbit || m == CameraMode::Flyby || m == CameraMode::Mounted || m == CameraMode::Free; }
 
 std::string ValidationResult::summary() const {
     if (errors.empty()) return "valid";
@@ -260,6 +260,18 @@ ValidationResult validateProfile(json& doc) {
                 if(!std::isfinite(lat)||std::abs(lat)>=89.9||!std::isfinite(lon)||std::abs(lon)>180||!std::isfinite(alt)||alt< -1500||alt>30000)
                     c.error(p+".worldOrigin", "Airport camera needs a valid world origin in degrees/meters.");
             }
+            // Free cameras (drones) reuse the airport world fields: worldOrigin plus a local NED pose about it. A free
+            // camera without one (made before free cameras could activate) stays valid but cannot activate until
+            // it is placed with Drop drone here.
+            if (js::str(cam, "mode") == "free") {
+                if (cam.contains("worldOrigin") && !airport::geo(js::get(cam, "worldOrigin")).valid())
+                    c.error(p + ".worldOrigin", "Free camera needs a valid world origin in degrees/meters.");
+                else if (!cam.contains("worldOrigin"))
+                    c.warn(p + ".worldOrigin", "This free camera has no world position yet. Use Drop drone here to place it.");
+                if (!cam.contains("followAircraft")) cam["followAircraft"] = false;
+            }
+            if (cam.contains("followAircraft") && !cam["followAircraft"].is_boolean())
+                c.error(p + ".followAircraft", "must be true or false");
             if (c.numbers(cam, "positionMetersFRD", 3, p))
                 for (const auto& v : cam["positionMetersFRD"])
                     if (std::abs(v.get<double>()) > core::kMaxPositionMeters) c.error(p + ".positionMetersFRD", "is more than 10 km from the anchor");
@@ -546,6 +558,8 @@ ProfileSnapshot toSnapshot(const json& doc) {
         e.mountVibration = core::clamp(js::num(cam, "mountVibration", core::kDefaultMountVibration), 0., 1.);
         e.seedDefinitionName = js::str(cam, "seedDefinitionName");
         e.glance = e.mode == CameraMode::AircraftCockpit && js::boolean(cam, "glance", defaultGlance(cam));
+        e.followAircraft = e.mode == CameraMode::Free && js::boolean(cam, "followAircraft", false);
+        e.worldOriginValid = cam.contains("worldOrigin") && airport::geo(js::get(cam, "worldOrigin")).valid();
         s.cameras.push_back(std::move(e));
     }
     return s;

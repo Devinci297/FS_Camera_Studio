@@ -80,6 +80,8 @@ struct CameraEntry {
     double mountVibration = core::kDefaultMountVibration;  // mounted cameras only, 0..1
     std::string seedDefinitionName;
     bool glance = false;  // offered by the Glance bindings (instrument close-up); cockpit views only
+    bool followAircraft = false;    // free cameras only: keep the offset from the aircraft in world axes
+    bool worldOriginValid = false;  // worldOrigin is present and a valid geodetic point
 };
 
 struct CategoryEntry {

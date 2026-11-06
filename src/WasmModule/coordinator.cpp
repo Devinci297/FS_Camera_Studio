@@ -57,6 +57,8 @@ double effectsScaleFor(profiles::CameraMode mode) {
 }
 // The biomechanical head model belongs to the pilot's eye: cockpit views only.
 bool headModelFor(profiles::CameraMode mode) { return mode == profiles::CameraMode::AircraftCockpit; }
+// Free cameras fly with their own integrator (Coordinator::updateFreeCamera); the engine keeps look and zoom.
+core::ManualInput lookOnly(core::ManualInput in) { in.moveForward = in.moveRight = in.moveUp = 0; return in; }
 
 
 }  // namespace
@@ -132,7 +134,7 @@ const CameraEntry* Coordinator::activeEntry() const {
 }
 
 Referential Coordinator::referentialFor(const CameraEntry& cam) const {
-    if(cam.mode==profiles::CameraMode::Airport || cam.mode==profiles::CameraMode::Flyby)return Referential::World;
+    if(cam.mode==profiles::CameraMode::Airport || cam.mode==profiles::CameraMode::Flyby || cam.mode==profiles::CameraMode::Free)return Referential::World;
     return cam.mode == profiles::CameraMode::AircraftExterior || cam.mode == profiles::CameraMode::Orbit || cam.mode == profiles::CameraMode::Mounted ? Referential::SimObject : Referential::Eyepoint;
 }
 
@@ -155,9 +157,10 @@ json Coordinator::capabilitiesJson() const {
                    profiles::CameraMode::Flyby, profiles::CameraMode::Airport, profiles::CameraMode::Free, profiles::CameraMode::Mounted}) {
         const bool ok = profiles::modeActivatable(m);
         modes[profiles::toString(m)] = {{"available", ok},
-                                        {"preview", m == profiles::CameraMode::AircraftExterior || m == profiles::CameraMode::Airport || m == profiles::CameraMode::Mounted},
+                                        {"preview", m == profiles::CameraMode::AircraftExterior || m == profiles::CameraMode::Airport || m == profiles::CameraMode::Mounted || m == profiles::CameraMode::Free},
                                         {"reason", ok ? (m == profiles::CameraMode::AircraftExterior ? json("Preview: exterior views keep cockpit sound in the current simulator build.")
                                                          : m == profiles::CameraMode::Mounted ? json("Preview: mounted views keep cockpit sound and need live checking of the gimbal and vibration.")
+                                                         : m == profiles::CameraMode::Free ? json("Preview: free cameras need live checking of world placement and terrain clearance.")
                                                                                               : json(nullptr))
                                                       : json("Not available in this version. Saved with the profile but cannot be activated.")}};
     }
@@ -233,14 +236,15 @@ core::CameraPose Coordinator::motionPose(const CameraEntry& cam) const {
 
 void Coordinator::emitLook(double now, bool force) {
     const auto& l = engine_.look();
-    const bool active = l.active();
+    const bool active = l.active() || freeOffset_.length() > 0;  // a flown drone is a temporary adjustment too
     if (!force && !active && !lastLookActive_) return;
     if (!force && now - lastLookEmit_ < 0.1) return;
     lastLookEmit_ = now;
     lastLookActive_ = active;
     emit_("TemporaryLookChanged",
           {{"active", active},
-           {"positionMetersFRD", {l.translationHeadingFrame.x, l.translationHeadingFrame.y, l.translationHeadingFrame.z}},
+           {"positionMetersFRD", {l.translationHeadingFrame.x + freeOffset_.x, l.translationHeadingFrame.y + freeOffset_.y,
+                                  l.translationHeadingFrame.z + freeOffset_.z}},
            {"pbhDeg", {l.pitchDeg, 0.0, l.headingDeg}},
            {"fovDeltaRad", l.fovDeltaRad}});
 }
@@ -383,6 +387,11 @@ json Coordinator::handle(const protocol::Command& c, double now) {
         return ack(c, AckStatus::Completed);
     }
 
+    if (c.action == "DroneHere") {
+        std::string error;
+        json result = droneHere(now, error);
+        return error.empty() ? protocol::makeAck(c, AckStatus::Completed, {}, std::move(result)) : ack(c, AckStatus::Rejected, error);
+    }
     if (c.action == "ActivateCamera") {
         const auto r = activate(js::str(p, "cameraId"), now, false);
         return r.empty() ? ack(c, AckStatus::Accepted) : ack(c, AckStatus::Rejected, r);
@@ -426,6 +435,7 @@ json Coordinator::handle(const protocol::Command& c, double now) {
     }
     if (c.action == "RecenterLook") {
         engine_.recenterLook();
+        resetFreeMotion();  // a drone returns to its saved place
         emitLook(now, true);
         return ack(c, AckStatus::Completed);
     }
@@ -435,6 +445,7 @@ json Coordinator::handle(const protocol::Command& c, double now) {
             return ack(c, AckStatus::Rejected, "Select a camera in the simulator first.");
         const auto s = engine_.sample();
         if (!s.valid) return ack(c, AckStatus::Rejected, "The current view is outside the allowed range.");
+        if (cam->mode == profiles::CameraMode::Free) return bakeFreeCamera(c, *cam, s.pose, now);
         json payload = poseJson(s.pose);
         payload["cameraId"] = cam->id;
         engine_.recenterLook();
@@ -451,7 +462,9 @@ json Coordinator::handle(const protocol::Command& c, double now) {
         if (state_ == Ownership::Active && engine_.hasPose() && activeEntry() && referentialFor(*activeEntry()) == requestedFrame) {
             const auto s = engine_.sample();
             const CameraEntry* cam = activeEntry();
-            json payload = poseJson(s.pose);
+            auto shown = s.pose;
+            if (cam && cam->mode == profiles::CameraMode::Free) shown.positionFRD += freeOffset_;  // about the drone's anchor
+            json payload = poseJson(shown);
             payload.update({{"ok", s.valid}, {"frame", referentialName(cam ? referentialFor(*cam) : Referential::Eyepoint)},
                             {"qualified", true}, {"source", "addonCamera"},
                             {"message", "Captured the view Camera Studio is showing."}});
@@ -510,13 +523,14 @@ std::string Coordinator::activate(const std::string& cameraId, double now, bool 
     if (const auto block = blockReason(); !block.empty()) return block;
     if (cam->mode == profiles::CameraMode::Flyby && (targetAt_ < 0 || now-targetAt_ > 5 || !std::isfinite(targetHeading_)))
         return "Waiting for the aircraft position before starting a fly-by.";
+    if (const auto freeError = freeBlock(*cam, now); !freeError.empty()) return freeError;
     glance_.reset(); glanceReturn_.reset();  // recalling any view ends a glance without returning
     if (!walkaroundAdvancing_) stopWalkaround();
     seedName_.clear();
     switch (state_) {
         case Ownership::Active: {
             const auto* old=activeEntry();
-            const bool cut=!old || referentialFor(*old)!=referentialFor(*cam) || old->originLat!=cam->originLat || old->originLon!=cam->originLon || old->originAltitude!=cam->originAltitude;
+            const bool cut=!old || referentialFor(*old)!=referentialFor(*cam) || old->originLat!=cam->originLat || old->originLon!=cam->originLon || old->originAltitude!=cam->originAltitude || old->followAircraft!=cam->followAircraft;
             activeCameraId_ = cameraId;
             startTransition(*cam, cut);
             emitActiveCamera();
@@ -562,7 +576,7 @@ void Coordinator::beginAcquire(double now) {
     preAcquirePose_.reset();
     setState(Ownership::Acquiring, "Taking camera control…");
     const CameraEntry* cam = profile_ ? profile_->camera(pendingCameraId_) : nullptr;
-    if (cam && cam->mode != profiles::CameraMode::Airport && cam->mode != profiles::CameraMode::Flyby && qual_.captureQualified && !readsUnreliable_ && read_ == ReadPurpose::None) {
+    if (cam && cam->mode != profiles::CameraMode::Airport && cam->mode != profiles::CameraMode::Flyby && cam->mode != profiles::CameraMode::Free && qual_.captureQualified && !readsUnreliable_ && read_ == ReadPurpose::None) {
         requestRead(ReadPurpose::PreAcquire, referentialFor(*cam), now, kPreAcquireReadTimeout);
         if (read_ == ReadPurpose::PreAcquire) return;  // acquire once the read answers
     }
@@ -583,12 +597,20 @@ void Coordinator::startTransition(const CameraEntry& cam, bool cut) {
         flybyLat_ = targetLat_; flybyLon_ = targetLon_; flybyAltitude_ = targetAltitude_; flybyHeading_ = targetHeading_;
     }
     const auto target = cam.mode == profiles::CameraMode::Orbit || cam.mode == profiles::CameraMode::Flyby ? motionPose(cam) : effectiveAirportPose(cam);
+    if (engine_.hasPose() && freeOffset_.length() > 0) {
+        // Leaving a flown drone: start any transition from where it is on screen (same anchor; otherwise a cut).
+        auto shown = engine_.sample().pose;
+        shown.positionFRD += freeOffset_;
+        if (shown.withinLimits()) engine_.place(shown);
+    }
+    resetFreeMotion();
+    freeCameraId_.clear();  // a recall: the saved pose and follow setting decide
     if (!lookOwner_.empty()) rememberedLooks_[lookOwner_] = engine_.look();
     const auto remembered = rememberedLooks_.find(cam.id);
     const auto look = cam.retainLook && remembered != rememberedLooks_.end() ? remembered->second : core::TemporaryLook{};
     lookOwner_ = cam.id;
     backend_.setFlag(CameraFlag::Interaction, cam.interaction);
-    backend_.setFlag(CameraFlag::AboveGround, cam.mode==profiles::CameraMode::Airport);
+    backend_.setFlag(CameraFlag::AboveGround, cam.mode==profiles::CameraMode::Airport || cam.mode==profiles::CameraMode::Free);
     core::TransitionSpec spec = cam.transition;
     if (cut || cam.mode == profiles::CameraMode::Flyby) spec.easing = core::Easing::Cut;
     effects_.reset();
@@ -843,6 +865,8 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                 if (e.motion.finite()) { flightMotion_ = e.motion; motionReceivedAt_ = now; }
                 aircraftBankDeg_ = e.motion.finite() ? e.bankDeg : NAN;
                 aircraftPitchDeg_ = e.motion.finite() ? e.pitchDeg : NAN;
+            } else if constexpr (std::is_same_v<T, backend_event::GroundElevation>) {
+                if (std::isfinite(e.meters) && e.meters > -1500 && e.meters < 10000) { groundAltitude_ = e.meters; groundAt_ = now; }
             } else if constexpr (std::is_same_v<T, backend_event::Connected>) {
                 simConnected_ = true;
                 simVersion_ = e.simVersion;
@@ -1014,9 +1038,13 @@ void Coordinator::onCameraData(const backend_event::CameraData& d, double) {
     core::CameraPose pose = fromSdk(d.pose, qual_.contract);
     const auto* target=purpose==ReadPurpose::PreAcquire && profile_ ? profile_->camera(pendingCameraId_) :
         purpose==ReadPurpose::Capture && profile_ ? profile_->camera(readCameraId_) : activeEntry();
-    if(d.pose.referential==Referential::World && target && target->mode==profiles::CameraMode::Airport){
-        pose.positionFRD=profiles::airport::local({target->originLat,target->originLon,target->originAltitude},{d.pose.x,d.pose.y,d.pose.z});
+    if(d.pose.referential==Referential::World && target && (target->mode==profiles::CameraMode::Airport || target->mode==profiles::CameraMode::Free)){
+        const bool free = target->mode==profiles::CameraMode::Free;
+        pose.positionFRD=profiles::airport::local(free ? freeAnchor(*target) : profiles::airport::Geo{target->originLat,target->originLon,target->originAltitude},{d.pose.x,d.pose.y,d.pose.z});
         pose.orientation=core::Quat::fromPbh({-d.pose.pitchDeg,d.pose.bankDeg,d.pose.headingDeg});
+        // A drone read back beyond the engine's anchor limits cannot seed a pose: recall from the saved one instead.
+        if (free && !pose.withinLimits()) pose.positionFRD = {NAN, NAN, NAN};
+        if (free && purpose == ReadPurpose::Resume) resetFreeMotion();  // the read already includes the flight
     }
     const bool finite = pose.finite() && pose.fovRad > 0;
     switch (purpose) {
@@ -1244,12 +1272,13 @@ void Coordinator::submit(bool refreshTrackingPosition) {
         submittedPose = mountVibration_.apply(submittedPose);
     }
     SdkPose sdk = toSdk(submittedPose, qual_.contract, referentialFor(*cam));
-    if(cam->mode==profiles::CameraMode::Airport || cam->mode==profiles::CameraMode::Flyby){
+    if(cam->mode==profiles::CameraMode::Airport || cam->mode==profiles::CameraMode::Flyby || cam->mode==profiles::CameraMode::Free){
         // Keep WORLD translation and FOV independent of aircraft tracking. Submit the
         // explicit look-at PBH below rather than the SDK's combined TARGETED mode.
         sdk.trackUserAircraft = false;
         const bool flyby = cam->mode==profiles::CameraMode::Flyby;
-        auto w=profiles::airport::world(flyby ? profiles::airport::Geo{flybyLat_,flybyLon_,flybyAltitude_} : profiles::airport::Geo{cam->originLat,cam->originLon,cam->originAltitude},s.pose.positionFRD);
+        auto w=cam->mode==profiles::CameraMode::Free ? freeWorld(*cam,s.pose.positionFRD,lastTick_) :
+            profiles::airport::world(flyby ? profiles::airport::Geo{flybyLat_,flybyLon_,flybyAltitude_} : profiles::airport::Geo{cam->originLat,cam->originLon,cam->originAltitude},s.pose.positionFRD);
         sdk.x=w.lat;sdk.y=w.lon;sdk.z=w.altitude;
         // Keep the requested translation intact; only look-at/zoom use the
         // simulator's terrain-adjusted position. No profile height is rewritten.
@@ -1265,7 +1294,7 @@ void Coordinator::submit(bool refreshTrackingPosition) {
                 p.headingDeg=std::atan2(d.y,d.x)*core::kRadToDeg;
                 if(aircraftTracking=="both") {
                     p.pitchDeg=core::clamp(std::atan2(-d.z,horizontal)*core::kRadToDeg,-89.0,89.0);
-                    if (!flyby && cam->airportOverrides.trackingHorizonGuard.value_or(settings_.airportTrackingHorizonGuard) && d.z>20) {
+                    if (cam->mode==profiles::CameraMode::Airport && cam->airportOverrides.trackingHorizonGuard.value_or(settings_.airportTrackingHorizonGuard) && d.z>20) {
                         // Across distant terrain the aircraft can be below the visible
                         // horizon. Gradually level the view instead of zooming into dirt.
                         // Preserve exact nearby tracking and all upward tracking.
@@ -1356,6 +1385,7 @@ void Coordinator::onAction(const ActionEvent& ev, double now) {
         case Action::RecenterLook:
             if (!ev.pressed) return;
             engine_.recenterLook();
+            resetFreeMotion();
             emitLook(now, true);
             break;
         case Action::ToggleEditor:
@@ -1466,7 +1496,8 @@ void Coordinator::tick(double now) {
         }
         const bool manualActive = mouseHeld_ || manual_.lookRight != 0 || manual_.lookUp != 0 || manual_.moveForward != 0 ||
             manual_.moveRight != 0 || manual_.moveUp != 0 || manual_.zoomIn != 0;
-        engine_.tick(dt, manual_, movement);
+        engine_.tick(dt, effectCamera && effectCamera->mode == profiles::CameraMode::Free ? lookOnly(manual_) : manual_, movement);
+        updateFreeCamera(dt, now);
         updateGlance(now);
         if (effectCamera && (effectCamera->mode == profiles::CameraMode::Orbit || effectCamera->mode == profiles::CameraMode::Flyby) && !engine_.transitioning() && !manualActive && !motionPaused_ && dt <= .1) {
             motionTime_ += dt;
@@ -1698,6 +1729,250 @@ void Coordinator::updateGlance(double now) {
     engine_.place(effectiveAirportPose(*cam));
     engine_.setLook(look);
     emitLook(now, true);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Free cameras (drones)
+//
+// A free camera is world referential like an airport camera: worldOrigin plus a local NED pose about it. Drop drone
+// here and Save adjusted view anchor the origin at the aircraft, so the pose is also the drone's offset from the
+// aircraft and Follow aircraft can keep that offset in world axes. Keyboard flight is integrated here, not by the
+// engine (whose anchor-relative limit is 10 km): it is unsaved movement on top of the engine pose until a Save.
+
+namespace {
+double clampUnitRate(double v) { return std::isfinite(v) ? core::clamp(v, -1.0, 1.0) : 0.0; }
+constexpr double kFreeAccelerationPerSec = 6.0;   // as the engine's manual movement
+constexpr double kFreeMaxPlacementMeters = 9000;  // keeps a placed pose inside the profile's 10 km limit
+constexpr double kDroneDefaultFovRad = 1.0821;
+}  // namespace
+
+bool Coordinator::aircraftPositionFresh(double now) const {
+    return targetAt_ >= 0 && now - targetAt_ <= 5 && aircraftGeo().valid() && std::isfinite(targetHeading_);
+}
+
+profiles::airport::Geo Coordinator::freeAnchor(const CameraEntry& cam) const {
+    if (cam.followAircraft) {
+        // The aircraft, or where it was last seen while its position is unavailable.
+        if (targetAt_ >= 0 && aircraftGeo().valid()) return aircraftGeo();
+        if (freeCameraId_ == cam.id && freeAnchor_.valid()) return freeAnchor_;
+        return {NAN, NAN, NAN};
+    }
+    if (freeSavedOrigin_ && freeCameraId_ == cam.id) return *freeSavedOrigin_;
+    return {cam.originLat, cam.originLon, cam.originAltitude};
+}
+
+double Coordinator::freeTerrainAltitude(const profiles::airport::Geo& drone, double now) const {
+    // SimConnect reports the terrain under the aircraft only, so it stands in for the terrain under a drone near it.
+    if (!(groundAt_ >= 0) || now - groundAt_ > kFreeTerrainFreshSeconds || !std::isfinite(groundAltitude_)) return NAN;
+    if (!(targetAt_ >= 0) || !aircraftGeo().valid() || !drone.valid()) return NAN;
+    const auto d = profiles::airport::local(aircraftGeo(), drone);
+    return std::hypot(d.x, d.y) <= kFreeTerrainRadiusMeters ? groundAltitude_ : NAN;
+}
+
+profiles::airport::Geo Coordinator::freeWorld(const CameraEntry& cam, const core::Vec3& local, double now) const {
+    auto w = profiles::airport::world(freeAnchor(cam), local + freeOffset_);
+    if (cam.followAircraft) {
+        // The aircraft can carry a chase drone into the ground (a landing): presentation keeps it above terrain.
+        const double terrain = freeTerrainAltitude(w, now);
+        if (std::isfinite(terrain)) w.altitude = std::max(w.altitude, terrain + kFreeTerrainClearanceMeters);
+    }
+    return w;
+}
+
+std::string Coordinator::freeBlock(const CameraEntry& cam, double now) const {
+    if (cam.mode != profiles::CameraMode::Free) return {};
+    if (!cam.worldOriginValid) return "This drone has no position yet. Use Drop drone here to place it.";
+    if (cam.followAircraft && !aircraftPositionFresh(now)) return "Waiting for the aircraft position before a drone can follow it.";
+    return {};
+}
+
+void Coordinator::resetFreeMotion() {
+    freeOffset_ = {};
+    freeVelocity_ = {};
+    freeAccumulator_ = 0;
+}
+
+void Coordinator::updateFreeCamera(double dt, double now) {
+    const CameraEntry* cam = activeEntry();
+    if (!cam || cam->mode != profiles::CameraMode::Free) {
+        if (!freeCameraId_.empty()) {
+            resetFreeMotion();
+            freeCameraId_.clear();
+            freeSavedOrigin_.reset();
+        }
+        return;
+    }
+    const profiles::airport::Geo origin{cam->originLat, cam->originLon, cam->originAltitude};
+    const bool sameCamera = freeCameraId_ == cam->id;
+    if (freeSavedOrigin_ && (!sameCamera || (origin.lat == freeSavedOrigin_->lat && origin.lon == freeSavedOrigin_->lon &&
+                                             origin.altitude == freeSavedOrigin_->altitude)))
+        freeSavedOrigin_.reset();  // the profile carries the saved origin now
+    const bool originMoved = !sameCamera || origin.lat != freeOrigin_.lat || origin.lon != freeOrigin_.lon ||
+                             origin.altitude != freeOrigin_.altitude;
+    const auto anchor = freeAnchor(*cam);
+    const auto base = engine_.sample().pose.positionFRD;
+    if (originMoved) {
+        resetFreeMotion();  // another drone, Drop drone here on this one, or a Save: the saved pose decides
+    } else if (freeFollowing_ != cam->followAircraft && freeAnchor_.valid() && anchor.valid()) {
+        // Follow aircraft switched in flight: keep the drone where it is, unless that is out of reach of the new anchor.
+        const auto offset = profiles::airport::local(anchor, profiles::airport::world(freeAnchor_, base + freeOffset_)) - base;
+        const auto total = base + offset;
+        const bool reachable = std::hypot(total.x, total.y) <= kFreeRadiusMeters && std::abs(total.z) <= kFreeCeilingMeters;
+        freeOffset_ = reachable ? offset : core::Vec3{};
+        freeVelocity_ = {};
+    }
+    freeCameraId_ = cam->id;
+    freeOrigin_ = origin;
+    freeFollowing_ = cam->followAircraft;
+    freeAnchor_ = anchor;
+    if (!anchor.valid() || !(dt > 0) || !std::isfinite(dt)) return;
+    if (dt > core::ManualMover::kMaxGapSeconds) {  // a stall: reseed from rest rather than catch up
+        freeVelocity_ = {};
+        freeAccumulator_ = 0;
+        return;
+    }
+    // Held movement in the drone's own frame: forward and right follow where it looks (aircraft tracking included),
+    // up is world up. Diagonals are not faster.
+    core::Vec3 in{clampUnitRate(manual_.moveForward), clampUnitRate(manual_.moveRight), clampUnitRate(manual_.moveUp)};
+    if (in.length() > 1) in = in * (1 / in.length());
+    const auto orientation = lastSubmitted_ && lastSubmitted_->referential == Referential::World
+                                 ? core::Quat::fromPbh({-lastSubmitted_->pitchDeg, lastSubmitted_->bankDeg, lastSubmitted_->headingDeg})
+                                 : engine_.sample().pose.orientation;
+    const auto direction = orientation.rotate({in.x, in.y, 0}) + core::Vec3{0, 0, -in.z};
+    // Speed grows with height above the ground: terrain when known, otherwise the lower of the anchor and the aircraft.
+    const auto drone = profiles::airport::world(anchor, base + freeOffset_);
+    const double terrain = freeTerrainAltitude(drone, now);
+    const double ground = std::isfinite(terrain)                       ? terrain
+                          : targetAt_ >= 0 && aircraftGeo().valid() ? std::min(anchor.altitude, targetAltitude_)
+                                                                     : anchor.altitude;
+    const double height = std::max(0.0, drone.altitude - ground);
+    const double speed = settings_.moveSpeedMetersPerSec * settings_.movementPrecisionScale * (manual_.fast ? 4.0 : 1.0) *
+                         core::clamp(1 + height * kFreeSpeedPerMeterAboveGround, 1.0, kFreeMaxSpeedFactor);
+    const auto target = direction * speed;
+    // Bounds stop movement and never push a saved pose: within kFreeRadiusMeters of the anchor horizontally, at most
+    // kFreeCeilingMeters above it, and not below terrain + clearance (terrain known) or the anchor less
+    // kFreeFloorMarginMeters (no terrain).
+    const double floor = std::isfinite(terrain) ? terrain + kFreeTerrainClearanceMeters : anchor.altitude - kFreeFloorMarginMeters;
+    const double lowest = anchor.altitude - floor;  // the largest "down" offset
+    const double alpha = -std::expm1(-core::ManualMover::kStep * kFreeAccelerationPerSec);
+    freeAccumulator_ += dt;
+    while (freeAccumulator_ >= core::ManualMover::kStep) {
+        freeAccumulator_ -= core::ManualMover::kStep;
+        freeVelocity_ = freeVelocity_ + (target - freeVelocity_) * alpha;
+        const auto current = base + freeOffset_;
+        auto next = current + freeVelocity_ * core::ManualMover::kStep;
+        const double radius = std::hypot(next.x, next.y), reach = std::max(kFreeRadiusMeters, std::hypot(current.x, current.y));
+        if (radius > reach) {
+            next.x *= reach / radius;
+            next.y *= reach / radius;
+            freeVelocity_.x = freeVelocity_.y = 0;
+        }
+        const double down = std::max(lowest, current.z), up = std::min(-kFreeCeilingMeters, current.z);
+        if (next.z > down) { next.z = down; freeVelocity_.z = 0; }
+        if (next.z < up) { next.z = up; freeVelocity_.z = 0; }
+        freeOffset_ = next - base;
+    }
+    if (target.length() == 0 && freeVelocity_.length() < 1e-4) freeVelocity_ = {};  // a released key fully stops
+}
+
+json Coordinator::dronePlacement(const profiles::airport::Geo& drone, const core::Quat& orientation, double fovRad) const {
+    profiles::airport::Geo origin = drone;
+    core::Vec3 position;
+    if (targetAt_ >= 0 && aircraftGeo().valid()) {
+        // Anchored at the aircraft: the pose is the drone's offset from it, which Follow aircraft keeps.
+        auto offset = profiles::airport::local(aircraftGeo(), drone);
+        if (std::max({std::abs(offset.x), std::abs(offset.y), std::abs(offset.z)}) <= kFreeMaxPlacementMeters) {
+            origin = aircraftGeo();
+            position = offset;
+        } else {
+            offset = {core::clamp(offset.x, -kFreeMaxPlacementMeters, kFreeMaxPlacementMeters),
+                      core::clamp(offset.y, -kFreeMaxPlacementMeters, kFreeMaxPlacementMeters),
+                      core::clamp(offset.z, -kFreeMaxPlacementMeters, kFreeMaxPlacementMeters)};
+            origin = profiles::airport::world(drone, offset * -1);
+            position = profiles::airport::local(origin, drone);
+        }
+    }
+    const auto q = orientation.normalized();
+    return {{"worldOrigin", profiles::airport::asJson(origin)},
+            {"positionMetersFRD", {position.x, position.y, position.z}},
+            {"orientationCameraToAnchorXYZW", {q.x, q.y, q.z, q.w}},
+            {"fovRad", core::clamp(std::isfinite(fovRad) ? fovRad : kDroneDefaultFovRad, core::kMinFovRad, core::kMaxFovRad)}};
+}
+
+json Coordinator::droneHere(double now, std::string& error) const {
+    const bool aircraftKnown = aircraftPositionFresh(now);
+    const CameraEntry* cam = activeEntry();
+    profiles::airport::Geo drone{NAN, NAN, NAN};
+    core::Quat orientation;
+    double fov = kDroneDefaultFovRad;
+    std::string source, message;
+    if (eligibleToSubmit() && cam && lastSubmitted_ && engine_.hasPose()) {
+        // The view on screen, as last submitted (aircraft tracking, follow horizon and gimbal included).
+        const SdkPose& sdk = *lastSubmitted_;
+        fov = engine_.sample().pose.fovRad;
+        if (sdk.referential == Referential::World) {
+            drone = {sdk.x, sdk.y, sdk.z};
+            orientation = core::Quat::fromPbh({-sdk.pitchDeg, sdk.bankDeg, sdk.headingDeg});
+        } else {
+            if (!aircraftKnown) {
+                error = "Waiting for the aircraft position before placing a drone.";
+                return nullptr;
+            }
+            // Aircraft-relative view: rotate by the aircraft attitude (FRD body axes to north, east, down).
+            const auto attitude = core::Quat::fromPbh({std::isfinite(aircraftPitchDeg_) ? aircraftPitchDeg_ : 0.0,
+                                                       std::isfinite(aircraftBankDeg_) ? aircraftBankDeg_ : 0.0, targetHeading_});
+            const auto shown = fromSdk(sdk, qual_.contract);
+            drone = profiles::airport::world(aircraftGeo(), attitude.rotate(shown.positionFRD));
+            orientation = (attitude * shown.orientation).normalized();
+        }
+        // Prefer where the simulator actually shows the camera (terrain lift, eyepoint offset) when it agrees.
+        if (const auto actual = backend_.worldCameraPosition()) {
+            const profiles::airport::Geo seen{actual->x, actual->y, actual->z};
+            if (seen.valid() && drone.valid() && profiles::airport::local(drone, seen).length() < 50) drone = seen;
+        }
+        source = "view";
+        message = "Drone placed at the current view.";
+    } else {
+        if (!aircraftKnown) {
+            error = "Load a flight and wait for the aircraft position before placing a drone.";
+            return nullptr;
+        }
+        // No Camera Studio view on screen: a chase position behind and above the aircraft, looking at it.
+        constexpr double kBehind = 40, kAbove = 12;
+        drone = profiles::airport::world(aircraftGeo(), core::Quat::fromPbh({0, 0, targetHeading_}).rotate({-kBehind, 0, -kAbove}));
+        orientation = core::Quat::fromPbh({-std::atan2(kAbove, kBehind) * core::kRadToDeg, 0, targetHeading_});
+        source = "behindAircraft";
+        message = "No Camera Studio view was on screen: drone placed behind and above the aircraft.";
+    }
+    if (!drone.valid()) {
+        error = "The current view has no usable world position.";
+        return nullptr;
+    }
+    json out = dronePlacement(drone, orientation, fov);
+    out["source"] = source;
+    out["message"] = message;
+    return out;
+}
+
+json Coordinator::bakeFreeCamera(const protocol::Command& c, const CameraEntry& cam, const core::CameraPose& shown, double now) {
+    // Save adjusted view: the new world origin and pose of where the drone is now, re-anchored at the aircraft.
+    const auto drone = freeWorld(cam, shown.positionFRD, now);
+    if (!drone.valid()) return ack(c, AckStatus::Rejected, "Waiting for the aircraft position before saving this drone.");
+    const json placed = dronePlacement(drone, shown.orientation, shown.fovRad);
+    const auto& position = placed["positionMetersFRD"];
+    const core::CameraPose saved{{position[0].get<double>(), position[1].get<double>(), position[2].get<double>()},
+                                 shown.orientation.normalized(), placed["fovRad"].get<double>()};
+    json payload = poseJson(saved);
+    payload["worldOrigin"] = placed["worldOrigin"];
+    payload["cameraId"] = cam.id;
+    engine_.recenterLook();
+    engine_.place(saved);
+    resetFreeMotion();
+    // Until the profile carries the new origin, a world-fixed drone is already shown about it (no jump).
+    if (!cam.followAircraft) freeSavedOrigin_ = profiles::airport::geo(placed["worldOrigin"]);
+    emit_("TemporaryLookBaked", payload);
+    emitLook(now, true);
+    return ack(c, AckStatus::Completed);
 }
 
 }  // namespace fscs::host
