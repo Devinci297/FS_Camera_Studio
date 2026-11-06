@@ -283,6 +283,7 @@
     list.push({ action: 'previousCamera', input: ctrlAlt('B', 'B') });
     list.push({ action: 'releaseCamera', input: ctrlAlt('R', 'R') });
     list.push({ action: 'panicRelease', input: ctrlAlt('X', 'X') });
+    list.push({ action: 'binoculars', input: ctrlAlt('Z', 'Z') });
     list.push({ action: 'toggleEditor', input: ctrlAlt('E', 'E') });
     list.push({ action: 'toggleMini', input: ctrlAlt('M', 'M') });
     list.push({ action: 'recenterLook', input: ctrlAlt('C', 'C') });
@@ -408,7 +409,7 @@
     addRepo(mine, 3, [{ revision: 1, savedAt: new Date(now - 3 * 86400e3).toISOString(), profile: r1 }, { revision: 2, savedAt: new Date(now - 86400e3 - 5 * 3600e3).toISOString(), profile: r2 }]);
     addRepo(cinematic, 1);
     addRepo(airport, 1);
-    repo.settings = { schemaVersion: 2, ui: { shortcuts: true, contrast: false, backups: true, remember: true, precision: 'normal', theme: 'dark', reducedMotion: false, miniEnabled: true, miniHover: true, miniPinned: false, miniOpacity: 0.65, nameDisplay: 'both' }, host: { allowUnqualifiedAdapter: false, lookSpeedDegPerSec: 60, moveSpeedMetersPerSec: 0.5 } };
+    repo.settings = { schemaVersion: 2, ui: { shortcuts: true, contrast: false, backups: true, remember: true, precision: 'normal', theme: 'dark', reducedMotion: false, miniEnabled: true, miniHover: true, miniPinned: false, miniOpacity: 0.65, nameDisplay: 'both' }, host: { allowUnqualifiedAdapter: false, lookSpeedDegPerSec: 60, moveSpeedMetersPerSec: 0.5, binocularsFovDeg: 10 } };
     repo.bindings = seedBindings();
 
     const m = {
@@ -494,7 +495,7 @@
     const clearMotion = () => { m.timers.forEach(clearTimeout); m.timers.clear(); };
     const broadcastSnapshot = () => event('Snapshot', snapshot());
     const broadcastProfiles = () => event('ProfilesChanged', { profiles: summaries() });
-    const setOwnership = (state, reason) => { m.ownership = { state, gameControlled: state !== 'Active', reason: reason || null }; event('OwnershipChanged', m.ownership); };
+    const setOwnership = (state, reason) => { m.ownership = { state, gameControlled: state !== 'Active', reason: reason || null }; event('OwnershipChanged', m.ownership); if (state !== 'Active') setBinoculars(false); };
     const sendActive = () => event('ActiveCameraChanged', m.active);
     const workingCamera = id => m.working.profile.cameras.find(c => c.id === id);
     const categoryOf = id => m.working.profile.categories.find(c => c.cameraIds.indexOf(id) >= 0);
@@ -543,6 +544,7 @@
     function release(env, reason) {
       if (env) ack(env, 'Accepted');
       clearMotion();
+      setBinoculars(false);  // releasing the camera (or Panic) cancels the zoom immediately
       m.peek = null;
       if (m.ownership.state === 'Observing') return;
       setOwnership('Releasing');
@@ -553,6 +555,12 @@
         m.look = NEUTRAL_LOOK();
         event('TemporaryLookChanged', m.look);
       }, 260);
+    }
+    // Binoculars hold, as the module reports it. Driven by FSCApp.bridge.demo.binoculars(down) in the demo.
+    function setBinoculars(active) {
+      if (Boolean(m.binoculars) === Boolean(active)) return;
+      m.binoculars = Boolean(active);
+      event('BinocularsChanged', { active: m.binoculars, fovDeg: (m.working.settings.host && m.working.settings.host.binocularsFovDeg) || 10 });
     }
     function cycle(env, delta) {
       const current = m.active.cameraId || m.selection.cameraId || m.working.profile.defaultCameraId;
@@ -582,6 +590,7 @@
     const draftChanged = (ops, origin) => event('DraftChanged', { draftRevision: m.working.draftRevision, dirty: dirty(), ops, origin: origin || null });
     function testBinding(env, binding) {
       const action = binding && binding.action;
+      if (action === 'binoculars') return ack(env, 'Completed', null, { dispatched: false, message: 'Close the editor and use the assigned input in the simulator to test this held or wheel control.' });
       const caps = capabilities();
       const camera = binding && binding.viewId ? m.working.profile.cameras.find(c => c.viewId === binding.viewId) : null;
       let recalled = false, message = 'Command sent.';
@@ -937,6 +946,7 @@
       newEpoch() { m.epoch++; event('SessionChanged', { moduleBootId: m.bootId, sessionEpoch: m.epoch, session: m.session, reason: 'flightRestarted' }); },
       reboot() { m.bootId = 'demo-' + randomHex(8); },
       setOwnership(state, reason) { setOwnership(state, reason); },
+      binoculars(down) { setBinoculars(Boolean(down) && m.ownership.state === 'Active'); return Boolean(m.binoculars); },
       raiseFault(code, message) { clearMotion(); setOwnership('Faulted', code || 'adapterError'); event('FaultRaised', { code: code || 'adapterError', message: message || 'The simulator rejected a camera update.' }); },
       get state() { return clone({ session: m.session, ownership: m.ownership, active: m.active, selection: m.selection, draftRevision: m.working.draftRevision, dirty: dirty(), instances: Array.from(m.instances.keys()) }); },
     };

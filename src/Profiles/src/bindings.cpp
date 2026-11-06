@@ -12,7 +12,7 @@ namespace fscs::profiles {
 
 namespace {
 
-constexpr std::array<std::pair<Action, const char*>, 28> kActions{{
+constexpr std::array<std::pair<Action, const char*>, 29> kActions{{
     {Action::SaveViews, "saveViews"},
     {Action::ToggleHeadTracking, "toggleHeadTracking"}, {Action::ToggleAirportAuto, "toggleAirportAuto"},
     {Action::SelectView, "selectView"},       {Action::PeekView, "peekView"},
@@ -27,6 +27,7 @@ constexpr std::array<std::pair<Action, const char*>, 28> kActions{{
     {Action::MoveUp, "moveUp"},               {Action::MoveDown, "moveDown"},
     {Action::MoveFast, "moveFast"}, {Action::ZoomIn, "zoomIn"},               {Action::ZoomOut, "zoomOut"},
     {Action::PanicRelease, "panicRelease"},
+    {Action::Binoculars, "binoculars"},
 }};
 
 const char* povName(PovDirection d) {
@@ -258,7 +259,8 @@ json defaultBindingsDocument() {
         {"releaseCamera", {"R", "R"}},   {"toggleEditor", {"E", "E"}}, {"toggleMini", {"M", "M"}},
         {"recenterLook", {"C", "C"}},    {"lookLeft", {"VK_LEFT", "Left arrow"}}, {"lookRight", {"VK_RIGHT", "Right arrow"}},
         {"lookUp", {"VK_UP", "Up arrow"}}, {"lookDown", {"VK_DOWN", "Down arrow"}},
-        {"panicRelease", {"X", "X"}}};
+        {"panicRelease", {"X", "X"}},
+        {"binoculars", {"Z", "Z"}}};
     for (const auto& [action, k] : rest) list.push_back({{"action", action}, {"input", key(k.first, k.second)}});
     return upgradeMovementBindings({{"schemaVersion", kBindingsSchemaVersion}, {"bindings", list}});
 }
@@ -267,7 +269,7 @@ json defaultSettingsDocument() {
     return {{"schemaVersion", kSettingsSchemaVersion},
             {"ui", {{"shortcuts", true}, {"contrast", false}, {"backups", true}, {"remember", true}, {"precision", "normal"},
                     {"theme", "dark"}, {"reducedMotion", false}, {"miniEnabled", true}, {"miniHover", true}, {"miniPinned", false}, {"miniOpacity", 0.65}, {"mainOpacity", 1.0}, {"nameDisplay", "both"}}},
-            {"host", {{"allowUnqualifiedAdapter", false}, {"lookSpeedDegPerSec", 60.0}, {"moveSpeedMetersPerSec", 0.5}, {"airportRadiusNm", 25.0}, {"mouseSensitivity", 1.0}, {"mouseSmoothingMs", 55.0}, {"mouseLookEnabled", true}, {"mouseInvertY", false}, {"globalHeadTrackingEnabled", false}, {"globalAircraftTracking", "both"}, {"airportTrackingHorizonGuard", true}, {"airportAutoZoomEnabled", false}, {"airportAutoZoomFrameMeters", 40.0}, {"airportAutoZoomMinFovDeg", 10.0}, {"airportAutoZoomMaxFovDeg", 90.0}, {"airportAutoZoomResponseSeconds", 1.0}, {"airportCategoryHeights", {{"runways",3.0},{"gates",3.0},{"apron",3.0},{"taxi",3.0},{"tower",35.0}}}}}};
+            {"host", {{"allowUnqualifiedAdapter", false}, {"lookSpeedDegPerSec", 60.0}, {"moveSpeedMetersPerSec", 0.5}, {"airportRadiusNm", 25.0}, {"mouseSensitivity", 1.0}, {"mouseSmoothingMs", 55.0}, {"mouseLookEnabled", true}, {"mouseInvertY", false}, {"globalHeadTrackingEnabled", false}, {"globalAircraftTracking", "both"}, {"airportTrackingHorizonGuard", true}, {"airportAutoZoomEnabled", false}, {"airportAutoZoomFrameMeters", 40.0}, {"airportAutoZoomMinFovDeg", 10.0}, {"airportAutoZoomMaxFovDeg", 90.0}, {"airportAutoZoomResponseSeconds", 1.0}, {"airportCategoryHeights", {{"runways",3.0},{"gates",3.0},{"apron",3.0},{"taxi",3.0},{"tower",35.0}}}, {"binocularsFovDeg", 10.0}}}};
 }
 
 json normalizeSettings(const json& doc) {
@@ -291,7 +293,8 @@ json normalizeSettings(const json& doc) {
                    {"airportTrackingHorizonGuard", h.airportTrackingHorizonGuard},
                    {"airportAutoZoomEnabled", h.airportAutoZoomEnabled}, {"airportAutoZoomFrameMeters", h.airportAutoZoomFrameMeters},
                    {"airportAutoZoomMinFovDeg", h.airportAutoZoomMinFovDeg}, {"airportAutoZoomMaxFovDeg", h.airportAutoZoomMaxFovDeg},
-                   {"airportAutoZoomResponseSeconds", h.airportAutoZoomResponseSeconds}, {"airportCategoryHeights",h.airportCategoryHeights}};
+                   {"airportAutoZoomResponseSeconds", h.airportAutoZoomResponseSeconds}, {"airportCategoryHeights",h.airportCategoryHeights},
+                   {"binocularsFovDeg", h.binocularsFovDeg}};
     return out;
 }
 
@@ -319,6 +322,7 @@ HostSettings parseHostSettings(const json& doc) {
     s.moveSpeedMetersPerSec = std::clamp(js::num(host, "moveSpeedMetersPerSec", 0.5), 0.05, 20.0);
     const auto precision = js::str(js::object(doc, "ui"), "precision", "normal");
     s.movementPrecisionScale = precision == "fine" ? 0.1 : precision == "coarse" ? 10.0 : 1.0;
+    s.binocularsFovDeg = std::clamp(js::num(host, "binocularsFovDeg", 10.0), kBinocularsMinFovDeg, kBinocularsMaxFovDeg);
     return s;
 }
 

@@ -497,7 +497,7 @@ void ModuleApp::handle(const Command& c, double now) {
         auto action = profiles::parseAction(js::str(b, "action"));
         if (!action) return reply(c, AckStatus::Rejected, "Unknown action.");
         const int viewId = static_cast<int>(js::integer(b, "viewId", 0));
-        if (profiles::actionIsContinuous(*action)) {
+        if (profiles::actionIsContinuous(*action) || *action == profiles::Action::Binoculars) {
             return reply(c, AckStatus::Completed, {}, {{"dispatched", false}, {"message", "Close the editor and use the assigned input in the simulator to test this held or wheel control."}});
         }
         coord_.onAction({*action, viewId, true, 0}, now);

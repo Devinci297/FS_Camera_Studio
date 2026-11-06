@@ -825,3 +825,38 @@ TEST_CASE("profiles: airport horizon protection defaults and explicit overrides 
     camera["airportOverrides"]["trackingHorizonGuard"]=true;camera["mode"]="aircraftCockpit";
     CHECK(validateProfile(profile).ok());CHECK(!camera.contains("airportOverrides"));
 }
+
+TEST_CASE("settings: binoculars FOV defaults to 10 degrees, clamps to 2-60 and roundtrips") {
+    auto settings = defaultSettingsDocument();
+    CHECK_EQ(settings["host"]["binocularsFovDeg"], json(10.0));
+    CHECK_NEAR(parseHostSettings(json::object()).binocularsFovDeg, 10, 1e-12);  // older settings files
+    for (const auto& [input, expected] : std::vector<std::pair<json, double>>{
+             {json(15), 15}, {json(1), 2}, {json(0.5), 2}, {json(-20), 2}, {json(100), 60}, {json("12"), 10}, {json(nullptr), 10}, {json(true), 10}}) {
+        settings["host"]["binocularsFovDeg"] = input;
+        const auto normalized = normalizeSettings(settings);
+        CHECK_NEAR(normalized["host"]["binocularsFovDeg"].get<double>(), expected, 1e-12);
+        CHECK_NEAR(parseHostSettings(json::parse(normalized.dump())).binocularsFovDeg, expected, 1e-12);
+    }
+    CHECK(fscs::profiles::kBinocularsMinFovDeg < 30);  // may go below the editor's FOV floor
+}
+
+TEST_CASE("bindings: binoculars has a Ctrl+Alt+Z default and saved bindings are not migrated") {
+    const auto doc = defaultBindingsDocument();
+    int found = 0;
+    for (const auto& b : doc["bindings"]) {
+        if (b["action"] == "binoculars") {
+            ++found;
+            CHECK_EQ(b["input"]["definition"].get<std::string>(), std::string("VK_LCONTROL+VK_LMENU+Z"));
+            CHECK_EQ(b["input"]["label"].get<std::string>(), std::string("Ctrl + Alt + Z"));
+        } else {
+            CHECK(b["input"]["definition"] != "VK_LCONTROL+VK_LMENU+Z");
+        }
+    }
+    CHECK_EQ(found, 1);
+    const auto parsed = parseBindings(doc);
+    CHECK(parsed.problems.empty());
+    json saved = {{"schemaVersion", 2}, {"movementDefaultsVersion", 2},
+                  {"bindings", {{{"action", "releaseCamera"}, {"input", {{"kind", "key"}, {"definition", "VK_LCONTROL+VK_LMENU+R"}, {"label", "Ctrl + Alt + R"}}}}}}};
+    const auto upgraded = upgradeMovementBindings(saved);
+    for (const auto& b : upgraded["bindings"]) CHECK(b["action"] != "binoculars");
+}

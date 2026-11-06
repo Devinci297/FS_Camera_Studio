@@ -149,6 +149,7 @@
           <div class="mc-switch-row"><span class="mc-switch-copy"><span>Simulator axis check</span><small id="mc-qual-state">Axis mapping for this simulator build: not checked yet</small></span><button type="button" class="mc-secondary" id="mc-qual-run">Run axis check</button></div>
           <label class="mc-inline-field"><span>Look speed<small>Manual look bindings</small></span><span class="mc-unit"><input type="number" id="mc-setting-look-speed" min="5" max="360" step="5">deg/s</span></label>
           <label class="mc-inline-field"><span>Move speed<small>Manual move bindings</small></span><span class="mc-unit"><input type="number" id="mc-setting-move-speed" min="0.05" max="10" step="0.05">m/s</span></label>
+          <label class="mc-inline-field"><span>Binoculars zoom<small>Field of view while Binoculars is held (2-60)</small></span><span class="mc-unit"><input type="number" id="mc-setting-binoculars-fov" min="2" max="60" step="1">deg</span></label>
           <div class="mc-profile-actions"><button type="button" class="mc-secondary" id="mc-diagnostics"><i data-icon="info"></i>Diagnostics</button></div>
         </div>
       </section>
@@ -158,6 +159,7 @@
     <div class="mc-mini-off" id="mc-mini-off" role="note"><span>Mini control panel is turned off in Settings</span></div>
     <div class="mc-mini-region" id="mc-mini-region">
     <button type="button" id="mc-mini-trigger" class="mc-mini-trigger" aria-label="Show mini control panel" aria-controls="mc-mini-panel" aria-expanded="false"><span class="mc-mini-handle"><i data-icon="chevron-up"></i>Mini control panel</span></button>
+    <span class="mc-binoculars-badge" id="mc-binoculars-badge" role="status" hidden>Binoculars</span>
     <section class="mc-dock" id="mc-mini-panel" aria-label="Mini camera control panel" aria-hidden="true">
       <div class="mc-dock-categories" id="mc-dock-categories" aria-label="Camera categories"></div>
       <div class="mc-dock-body">

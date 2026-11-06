@@ -327,7 +327,8 @@
     ['toggleMouseLook', 'Toggle mouse look', 'Move within the custom camera without releasing control'],
     ['toggleMini', 'Toggle mini control panel', 'Show or hide the quick-access dock'],
   ];
-  const MANUAL = [['lookLeft', 'Look left'], ['lookRight', 'Look right'], ['lookUp', 'Look up'], ['lookDown', 'Look down'], ['moveForward', 'Move forward'], ['moveBack', 'Move back'], ['moveLeft', 'Move left'], ['moveRight', 'Move right'], ['moveUp', 'Move up'], ['moveDown', 'Move down'], ['zoomIn', 'Zoom in'], ['zoomOut', 'Zoom out'], ['moveFast', 'Faster movement (hold)']];
+  const MANUAL = [['lookLeft', 'Look left'], ['lookRight', 'Look right'], ['lookUp', 'Look up'], ['lookDown', 'Look down'], ['moveForward', 'Move forward'], ['moveBack', 'Move back'], ['moveLeft', 'Move left'], ['moveRight', 'Move right'], ['moveUp', 'Move up'], ['moveDown', 'Move down'], ['zoomIn', 'Zoom in'], ['zoomOut', 'Zoom out'], ['moveFast', 'Faster movement (hold)'],
+    ['binoculars', 'Binoculars (hold)', 'Hold to zoom to the binoculars field of view in Settings; release to return']];
   const ACTION_NAMES = {};
   COMMANDS.concat(MANUAL).forEach(entry => { ACTION_NAMES[entry[0]] = entry[1]; });
   const actionName = (action, viewId) => (action === 'selectView' ? 'Select view ID ' + viewId : action === 'peekView' ? 'Peek at view ID ' + viewId : (ACTION_NAMES[action] || action));
@@ -595,6 +596,7 @@
     InputTest: onInputTest,
     ControllerInputCaptured: onControllerInputCaptured,
     ControllerCaptureStatus: onControllerCaptureStatus,
+    BinocularsChanged(p) { S.binoculars = p && p.active ? { fovDeg: p.fovDeg } : null; renderBinoculars(); },
     PanicReleased(p) {
       S.userReleased = true;
       if (p.state === 'Observing' || p.state === 'Releasing') announceReleased();
@@ -2507,6 +2509,15 @@
     updateActiveState();
     updateSavedState();
     renderBanners();
+    renderBinoculars();
+  }
+  // Display only: never calls into the module, so it is safe while a view detaches.
+  function renderBinoculars() {
+    const badge = $('mc-binoculars-badge');
+    if (!badge) return;
+    const on = Boolean(S.binoculars) && S.ownership.state === 'Active';
+    badge.hidden = !on;
+    if (on) badge.textContent = 'Binoculars ' + Math.round(Number(S.binoculars.fovDeg) || 10) + '\u00b0';
   }
 
   /* ------------- Save / revert ------------- */
@@ -2615,7 +2626,7 @@
     const status = $('mc-binding-status').value, kind = $('mc-binding-kind').value;
     const filtering = !!query || status !== 'all' || kind !== 'all';
     if (!S.bindingExpanded) S.bindingExpanded = [];
-    const sections = bindingSections().concat([['Manual look & move', MANUAL.map(entry => ({ action: entry[0], viewId: 0, name: entry[1], detail: entry[0] === 'moveFast' ? 'Hold for 4x movement speed' : entry[0].indexOf('zoom') === 0 ? 'Field of view' : entry[0].indexOf('look') === 0 ? 'Temporary look' : 'Fine 0.1x / Normal 1x / Coarse 10x' }))]]);
+    const sections = bindingSections().concat([['Manual look & move', MANUAL.map(entry => ({ action: entry[0], viewId: 0, name: entry[1], detail: entry[2] || (entry[0] === 'moveFast' ? 'Hold for 4x movement speed' : entry[0].indexOf('zoom') === 0 ? 'Field of view' : entry[0].indexOf('look') === 0 ? 'Temporary look' : 'Fine 0.1x / Normal 1x / Coarse 10x') }))]]);
 
     let shown = 0, total = 0;
     keepFocus(list, () => {
@@ -3661,7 +3672,7 @@
       const move=(id,key)=>{const node=$(id);if(node){const row=node.closest('.mc-inline-field,.mc-switch-row,.mc-profile-actions')||node;$('mc-settings-section-'+key).appendChild(row);}};
       ['shortcuts','contrast','theme','reduced-motion','remember','mini-enabled','mini-hover','name-display'].forEach(id=>move('mc-setting-'+id,'appearance'));
       const opacity=source.querySelector('.mc-opacity-settings');if(opacity)$('mc-settings-section-appearance').appendChild(opacity);
-      ['precision','mouse-enabled','mouse-sensitivity','mouse-smoothing','mouse-invert','look-speed','move-speed'].forEach(id=>move('mc-setting-'+id,'movement'));
+      ['precision','mouse-enabled','mouse-sensitivity','mouse-smoothing','mouse-invert','look-speed','move-speed','binoculars-fov'].forEach(id=>move('mc-setting-'+id,'movement'));
       move('mc-mouse-defaults','movement');
       const movement=$('mc-settings-section-movement');movement.appendChild(make('p','Movement follows your current key assignments in Bindings. Hold your faster-movement key to increase speed. Inputs pause while typing.','mc-note mc-settings-keyboard'));
       move('mc-setting-backups','updates');move('mc-save-feedback-setting','updates');move('mc-diagnostics','updates');move('mc-qual-state','updates');move('mc-setting-unqualified','updates');
@@ -3705,6 +3716,7 @@
     $('mc-setting-unqualified').checked = Boolean(host.allowUnqualifiedAdapter);
     if (document.activeElement !== $('mc-setting-look-speed')) $('mc-setting-look-speed').value = String(host.lookSpeedDegPerSec);
     if (document.activeElement !== $('mc-setting-move-speed')) $('mc-setting-move-speed').value = String(host.moveSpeedMetersPerSec);
+    if (document.activeElement !== $('mc-setting-binoculars-fov')) $('mc-setting-binoculars-fov').value = String(host.binocularsFovDeg == null ? 10 : host.binocularsFovDeg);
     $('mc-setting-unqualified').closest('label').hidden=true;
     $('mc-qual-state').textContent = qualificationText();
     $('mc-qual-state').parentNode.querySelector('span').textContent='Camera directions';
@@ -4142,7 +4154,7 @@
     $('mc-setting-mouse-enabled').addEventListener('change', e => { S.working.settings.host.mouseLookEnabled = e.target.checked; settingChanged(); });
     $('mc-setting-mouse-invert').addEventListener('change', e => { S.working.settings.host.mouseInvertY = e.target.checked; settingChanged(); });
     $('mc-mouse-defaults').addEventListener('click', () => { Object.assign(S.working.settings.host, {mouseSensitivity: 1, mouseSmoothingMs: 55, mouseLookEnabled: true, mouseInvertY: false}); settingChanged(); });
-    [['mc-setting-airport-radius', 'airportRadiusNm', 5, 100], ['mc-setting-mouse-sensitivity', 'mouseSensitivity', 0.1, 4], ['mc-setting-mouse-smoothing', 'mouseSmoothingMs', 0, 250], ['mc-setting-look-speed', 'lookSpeedDegPerSec', 5, 360], ['mc-setting-move-speed', 'moveSpeedMetersPerSec', 0.05, 10]].forEach(entry => $(entry[0]).addEventListener('change', e => {
+    [['mc-setting-airport-radius', 'airportRadiusNm', 5, 100], ['mc-setting-mouse-sensitivity', 'mouseSensitivity', 0.1, 4], ['mc-setting-mouse-smoothing', 'mouseSmoothingMs', 0, 250], ['mc-setting-look-speed', 'lookSpeedDegPerSec', 5, 360], ['mc-setting-move-speed', 'moveSpeedMetersPerSec', 0.05, 10], ['mc-setting-binoculars-fov', 'binocularsFovDeg', 2, 60]].forEach(entry => $(entry[0]).addEventListener('change', e => {
       const v = Number(e.target.value);
       if (e.target.value !== '' && isFinite(v)) S.working.settings.host[entry[1]] = Number(M.clamp(v, entry[2], entry[3]).toFixed(2));
       e.target.value = String(S.working.settings.host[entry[1]]);
