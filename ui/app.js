@@ -227,7 +227,8 @@
       'mc-tab-position':'Move, rotate and zoom the selected camera.',
       'mc-tab-motion':'Configure transitions and camera motion effects.',
       'mc-effects-preset':'Set every flight effect at once. Off disables effects; Custom shows after you adjust a slider.',
-      'mc-tab-behavior':'Configure view bindings, defaults and camera behavior.'
+      'mc-tab-behavior':'Configure view bindings, defaults and camera behavior.',
+      'mc-dock-traffic-tab':'Nearby aircraft: follow one with a chase, fly-by, tower, runway or track view.'
     };
     // A disabled control's existing reason is more useful than a generic action description.
     if(control.disabled && control.title)return control.title;
@@ -236,6 +237,7 @@
     if(control.closest('#mc-setting-theme'))return 'Use the '+control.textContent.trim().toLowerCase()+' appearance.';
     if(control.dataset.precision)return 'Use '+control.dataset.precision+' movement and rotation steps; this also scales keyboard movement.';
     if(control.classList.contains('mc-category-head'))return (control.getAttribute('aria-expanded')==='true'?'Collapse ':'Expand ')+(control.getAttribute('aria-label')||'category')+'. Right-click for category actions.';
+    if(control.closest('#mc-dock-traffic'))return control.title||control.getAttribute('aria-label')||control.textContent.trim();
     if(control.closest('#mc-dock-categories'))return 'Show '+(control.getAttribute('aria-label')||control.textContent.trim())+' cameras. Right-click for category actions.';
     if(control.classList.contains('mc-camera-select')||control.closest('#mc-dock-favorites'))return (control.title||control.getAttribute('aria-label')||control.textContent.trim())+'. Right-click for camera actions.';
     if(control.title)return control.title;
@@ -2491,9 +2493,10 @@
       const favorites = empty($('mc-dock-favorites'));
       const categories = empty($('mc-dock-categories'));
       dock.setAttribute('data-picking', String(IS_MINI && S.miniPicking));
-      if (IS_MINI && P()) {
-        const groups = P().categories;
-        const selectedGroup = groups.find(g => g.id === S.miniCategory) || group || groups[0];
+      if (IS_MINI && (P() || S.snapshot)) {
+        // Without a profile the Traffic tab is the only one, so spotting still works.
+        const groups = P() ? P().categories : [], trafficOpen = miniTrafficOpen();
+        const selectedGroup = trafficOpen ? null : groups.find(g => g.id === S.miniCategory) || group || groups[0];
         const aircraftGroup=make('div',undefined,'mc-category-grid mc-dock-aircraft');
         aircraftGroup.appendChild(make('span','Aircraft','mc-category-group-label'));categories.appendChild(aircraftGroup);
         let airportGroup=null;
@@ -2506,9 +2509,13 @@
           entry.setAttribute('data-focus-key', 'category:' + g.id);
           (g.airportIcao ? airportGroup : aircraftGroup).appendChild(entry);
         });
-        const starred=selectedGroup?selectedGroup.cameraIds.map(camIn).filter(view=>view&&view.favorite):[];
-        starred.forEach(view => favorites.appendChild(dockViewButton(view, 'category-view:')));
-        if(!starred.length){favorites.appendChild(make('span','No starred cameras in this category. Star cameras in the main panel.','mc-note'));['mc-prev','mc-next'].forEach(id=>$(id).disabled=true);}
+        categories.appendChild(miniTrafficTab(trafficOpen));
+        if (trafficOpen) { const pane = make('div', undefined, 'mc-dock-traffic'); pane.id = 'mc-dock-traffic'; favorites.appendChild(pane); renderMiniTraffic(); }
+        else {
+          const starred=selectedGroup?selectedGroup.cameraIds.map(camIn).filter(view=>view&&view.favorite):[];
+          starred.forEach(view => favorites.appendChild(dockViewButton(view, 'category-view:')));
+          if(!starred.length){favorites.appendChild(make('span','No starred cameras in this category. Star cameras in the main panel.','mc-note'));['mc-prev','mc-next'].forEach(id=>$(id).disabled=true);}
+        }
       } else if (IS_MINI && S.miniPicking && P()) {
         P().categories.forEach(g => {
           favorites.appendChild(make('span', g.name, 'mc-dock-group'));
@@ -2539,7 +2546,10 @@
     const width=dock.clientWidth,icons=root.dataset.nameDisplay==='icons',cell=icons?34:width<1100?88:94,narrow=width<1100;
     dock.classList.remove('mc-dock-stacked');dock.classList.toggle('mc-mini-condensed',narrow);
     const available=Math.max(cell,Math.floor((width-20)*(width<880?.5:.40)));
-    const columns=Math.max(1,Math.floor(available/cell));
+    let columns=Math.max(1,Math.floor(available/cell));
+    // The Traffic tab must not make the dock taller on its own: borrow one column from the camera area when it fits.
+    const rowsFor=n=>Math.ceil(n/columns);
+    if(entries.length>1&&$('mc-dock-traffic-tab')&&rowsFor(entries.length)>rowsFor(entries.length-1)&&(columns+1)*cell+4<=(width-20)*(width<880?.66:.5))columns++;
     const usedColumns=Math.min(columns,Math.max(1,entries.length));
     const rows=Math.max(1,Math.ceil(entries.length/usedColumns));
     let legend=pane.querySelector('.mc-dock-category-legend');
@@ -2887,6 +2897,7 @@
   function renderSpotting() {
     renderSpotTools('mc-mouse-look-', $('mc-mouse-look-global'));
     if (S.page === 'traffic' && !IS_MINI) renderTraffic();
+    if (IS_MINI) renderMiniTraffic();
   }
   // Dock: Auto-spot and Next target next to Cinematic, and a one-line "Spotting: <label>" while it runs.
   function renderSpotTools(prefix, group) {
@@ -2917,6 +2928,111 @@
     const text = miniSpotText();
     status.hidden = !text;
     setText(status, text);
+  }
+  /* Mini Traffic tab: a category-grid entry whose pane lists nearby aircraft, nearest first. Picking an aircraft
+     follows it in the chosen view; picking another view while spotting shows the same aircraft in that view. */
+  const MINI_TRAFFIC = 'traffic:';
+  const MINI_TRAFFIC_LIMIT = 30;
+  const miniTrafficOpen = () => IS_MINI && (S.miniCategory === MINI_TRAFFIC || !P() || !P().categories.length);
+  function miniSpotView() {
+    const sp = spotting();
+    return sp.state !== 'off' && SPOT_VIEW_NAMES[sp.view] ? sp.view : (S.miniSpotView || 'chase');
+  }
+  function miniTrafficTab(open) {
+    const box = make('div', undefined, 'mc-category-grid mc-dock-traffic-group');
+    box.appendChild(make('span', 'Traffic', 'mc-category-group-label'));
+    const tab = button('Traffic', () => { S.miniCategory = MINI_TRAFFIC; S.miniPicking = false; renderDock(); });
+    decorateName(tab, 'Traffic', true, 'radio');
+    tab.id = 'mc-dock-traffic-tab';
+    tab.removeAttribute('title');
+    tab.setAttribute('aria-pressed', String(open));
+    tab.setAttribute('data-focus-key', 'category:' + MINI_TRAFFIC);
+    const count = make('span', undefined, 'mc-key mc-dock-traffic-count');
+    count.id = 'mc-dock-traffic-count';
+    tab.appendChild(count);
+    box.appendChild(tab);
+    updateMiniTrafficCount(count);
+    return box;
+  }
+  function updateMiniTrafficCount(count) {
+    const n = trafficAircraft().length;
+    count.hidden = !n;
+    setText(count, String(n));
+  }
+  function chooseMiniSpotView(view) {
+    S.miniSpotView = view;
+    const sp = spotting();
+    if (sp.state !== 'off' && sp.targetId != null && sp.view !== view) spotTarget(sp.targetId, view);
+    else renderMiniTraffic();
+  }
+  function miniTrafficButton(id) {
+    const entry = button(null, () => spotTarget(entry.objectId, miniSpotView()), 'mc-dock-traffic-aircraft');
+    entry.dataset.objectId = id;
+    entry.setAttribute('data-focus-key', 'mini-spot:' + id);
+    add(entry, icon('plane'), make('strong'), make('small', undefined, 'mc-dock-traffic-figures'));
+    return entry;
+  }
+  // Display only and in place, so a click or hover survives the once-a-second TrafficChanged refresh.
+  function renderMiniTraffic() {
+    const count = $('mc-dock-traffic-count');
+    if (count) updateMiniTrafficCount(count);
+    const pane = $('mc-dock-traffic');
+    if (!pane) return;
+    const sp = spotting(), all = trafficAircraft(), shown = all.slice(0, MINI_TRAFFIC_LIMIT), chosen = miniSpotView();
+    let views = pane.querySelector('.mc-dock-traffic-views'), list = pane.querySelector('.mc-dock-traffic-list'), note = pane.querySelector('.mc-note');
+    if (!views) {
+      views = make('div', undefined, 'mc-dock-traffic-views');
+      views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Spotting view');
+      SPOT_VIEWS.forEach(([view, label, iconName]) => {
+        const choose = button(label, () => chooseMiniSpotView(view), 'mc-dock-traffic-view', iconName);
+        choose.dataset.view = view;
+        choose.setAttribute('data-focus-key', 'mini-spot-view:' + view);
+        views.appendChild(choose);
+      });
+      const stop = button('Stop', stopSpotting, 'mc-dock-traffic-stop', 'circle-stop');
+      stop.setAttribute('data-focus-key', 'mini-spot-stop');
+      views.appendChild(stop);
+      list = make('div', undefined, 'mc-dock-traffic-list');
+      list.setAttribute('role', 'group'); list.setAttribute('aria-label', 'Nearby aircraft, nearest first');
+      note = make('span', undefined, 'mc-note');
+      add(pane, views, list, note);
+    }
+    const reasons = {};
+    SPOT_VIEWS.forEach(([view]) => { reasons[view] = spotViewReason(view); });
+    $$('button[data-view]', views).forEach(choose => {
+      const view = choose.dataset.view, reason = reasons[view];
+      choose.disabled = Boolean(reason);
+      choose.setAttribute('aria-pressed', String(view === chosen));
+      choose.title = reason || (sp.state !== 'off' ? 'Show ' + (sp.targetLabel || 'the aircraft') + ' in the ' + SPOT_VIEW_NAMES[view] + ' view' : 'Follow the aircraft you pick in the ' + SPOT_VIEW_NAMES[view] + ' view');
+    });
+    const stop = views.querySelector('.mc-dock-traffic-stop');
+    stop.hidden = sp.state === 'off' && !sp.autoSpot;
+    stop.title = 'Stop spotting and return to the view you had before';
+    const blocked = reasons[chosen], wanted = {};
+    shown.forEach((a, index) => {
+      const id = String(a.objectId);
+      wanted[id] = true;
+      const entry = $$('.mc-dock-traffic-aircraft', list).filter(b => b.dataset.objectId === id)[0] || miniTrafficButton(id);
+      const label = trafficLabel(a), figures = trafficFigures(a), status = TRAFFIC_STATUS[a.status] || a.status || '';
+      const tracked = sp.state !== 'off' && sp.targetId === a.objectId, summary = figures[0] + (status ? ', ' + status : '');
+      entry.objectId = a.objectId;
+      entry.dataset.status = a.status || '';
+      setText(entry.querySelector('strong'), label);
+      setText(entry.querySelector('small'), summary);
+      entry.setAttribute('aria-label', label + ', ' + summary);
+      entry.setAttribute('aria-pressed', String(tracked));
+      entry.disabled = Boolean(blocked);
+      const detail = trafficDetail(a);
+      entry.title = blocked || (SPOT_VIEW_NAMES[chosen] + ' view of ' + label + (detail ? ' (' + detail + ')' : '') + ': ' + figures.join(', ') + (status ? ', ' + status.toLowerCase() : ''));
+      if (list.children[index] !== entry) list.insertBefore(entry, list.children[index] || null);
+    });
+    $$('.mc-dock-traffic-aircraft', list).filter(entry => !wanted[entry.dataset.objectId]).forEach(entry => entry.remove());
+    const text = !S.snapshot ? statusText()
+      : !all.length ? 'No other aircraft within ' + spottingRadius() + ' NM. AI, VATSIM and IVAO traffic appears here once the simulator places it.'
+      : blocked && sp.state === 'off' ? blocked
+      : all.length > shown.length ? 'Nearest ' + shown.length + ' of ' + all.length + '. The Traffic page in the editor lists them all.' : '';
+    note.hidden = !text;
+    setText(note, text);
   }
   function trafficRow(id) {
     const row = make('div', undefined, 'mc-traffic-row');
