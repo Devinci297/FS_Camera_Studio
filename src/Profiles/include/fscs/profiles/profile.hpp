@@ -79,6 +79,7 @@ struct CameraEntry {
     core::Gimbal gimbal = core::Gimbal::Locked;            // mounted cameras only
     double mountVibration = core::kDefaultMountVibration;  // mounted cameras only, 0..1
     std::string seedDefinitionName;
+    bool glance = false;  // offered by the Glance bindings (instrument close-up); cockpit views only
 };
 
 struct CategoryEntry {
@@ -104,6 +105,10 @@ struct ProfileSnapshot {
     const CameraEntry* cameraByViewId(int viewId) const;
     const CategoryEntry* categoryOf(const std::string& cameraId) const;
 };
+
+// Default for a camera without a `glance` flag: cockpit cameras whose icon, or for an automatic icon whose name,
+// marks them as an instrument view (the editor's "view-instrument" icon).
+bool defaultGlance(const json& camera);
 
 // Requires a document that passed validateProfile.
 ProfileSnapshot toSnapshot(const json& doc);

@@ -335,7 +335,8 @@ json ModuleApp::snapshot() const {
     json active{{"profileId", coord_.profile() ? json(coord_.profile()->profileId) : json(nullptr)},
                 {"cameraId", coord_.activeCameraId().empty() ? json(nullptr) : json(coord_.activeCameraId())},
                 {"peeking", false},
-                {"transitioning", coord_.engine().transitioning()}};
+                {"transitioning", coord_.engine().transitioning()},
+                {"glance", coord_.glanceJson()}};
     return {{"moduleBootId", bootId_},
             {"sessionEpoch", coord_.epoch()},
             {"appVersion", appVersion_},
@@ -501,7 +502,8 @@ void ModuleApp::handle(const Command& c, double now) {
             return reply(c, AckStatus::Completed, {}, {{"dispatched", false}, {"message", "Close the editor and use the assigned input in the simulator to test this held or wheel control."}});
         }
         coord_.onAction({*action, viewId, true, 0}, now);
-        if (!profiles::actionIsContinuous(*action) && *action != profiles::Action::PeekView) coord_.onAction({*action, viewId, false, 0}, now);
+        // Peek and hold-to-glance stay on their view when tested; a release would return at once.
+        if (!profiles::actionIsContinuous(*action) && *action != profiles::Action::PeekView && *action != profiles::Action::GlanceHold) coord_.onAction({*action, viewId, false, 0}, now);
         return reply(c, AckStatus::Completed, {}, {{"dispatched", true}, {"note", "Command sent. Watch the simulator view to confirm it moved."}});
     }
     if (a == "ListControllers") {

@@ -36,6 +36,19 @@ struct Aircraft {
 // "SimObjects\Airplanes\<model>\presets\...\aircraft.cfg" -> model "<model>", variant "presets/..."
 Aircraft aircraftFromPath(const std::string& path);
 
+// Smart views (glance). Glance views are the open profile's cockpit cameras with `glance` set, in category order;
+// `exclude` (the view being glanced from) is never offered.
+std::vector<const profiles::CameraEntry*> glanceViews(const profiles::ProfileSnapshot& profile, const std::string& exclude);
+// Angle (radians) between where `shown` looks and the glance camera's instrument: the point kGlanceFocusMeters ahead
+// of that camera, seen from the shown eyepoint. A camera at the eyepoint compares by its own direction.
+constexpr double kGlanceFocusMeters = 0.75;
+double glanceAngle(const core::CameraPose& shown, const profiles::CameraEntry& camera);
+// The glance view nearest to the shown look direction. Within kGlanceTieRadians, the camera that itself points
+// closest to the look direction wins, then category order. nullptr when there is none.
+constexpr double kGlanceTieRadians = 0.5 * core::kDegToRad;
+const profiles::CameraEntry* nearestGlanceView(const profiles::ProfileSnapshot& profile, const core::CameraPose& shown,
+                                               const std::string& exclude);
+
 class Coordinator {
 public:
     using EmitFn = std::function<void(const std::string& name, json payload)>;
@@ -46,6 +59,7 @@ public:
     static constexpr double kReadTimeout = 1.0;
     static constexpr double kPreAcquireReadTimeout = 0.3;
     static constexpr double kMaxReconnectBackoff = 10.0;
+    static constexpr double kGlanceTransitionSeconds = 0.35;  // both directions, smooth easing
 
     Coordinator(ICameraBackend& backend, EmitFn emit, QualificationFn qualify);
 
@@ -102,6 +116,8 @@ public:
     double binocularsLookScale() const { return binocularsLookScale_; }
     // Time to ease fully in or out; reversing mid-way continues from the current zoom.
     static constexpr double kBinocularsEaseSeconds = 0.3;
+    // Current glance (null when not glancing): {cameraId, returnCameraId, held}. Sent with ActiveCameraChanged.
+    json glanceJson() const;
 
 private:
     enum class ReadPurpose { None, PreAcquire, Capture, Resume, Seed };
@@ -225,6 +241,31 @@ private:
         bool releaseOnEnd;
     };
     std::optional<Peek> peek_;
+
+    // Smart views: a glance shows an instrument close-up and returns to the exact view and temporary look it left.
+    // Any other recall, Release Camera and Panic end it without a return.
+    struct Glance {
+        std::string returnCameraId;
+        core::TemporaryLook returnLook;
+        std::string cameraId;      // the glance view on screen
+        std::uint64_t holdId = 0;  // non-zero while a held Glance binding owns it: its release returns
+    };
+    std::optional<Glance> glance_;
+    struct GlanceReturn {
+        std::string cameraId;
+        core::TemporaryLook look;
+    };
+    std::optional<GlanceReturn> glanceReturn_;  // returning: re-applies the exact look once the transition lands
+    bool glanceCurrent() const;
+    void dropStaleGlance();
+    std::string glanceBlock() const;
+    std::string glanceHold(std::uint64_t holdId, double now);
+    void glanceHoldReleased(std::uint64_t holdId, double now);
+    std::string glanceNext(double now);
+    std::string glanceReturn(double now);
+    void startGlance(const profiles::CameraEntry& target);
+    void glanceTransition(const profiles::CameraEntry& cam, const core::CameraPose& target);
+    void updateGlance(double now);
 
     // Reads (CameraGet has no correlation id: one outstanding read, quarantined on timeout)
     ReadPurpose read_ = ReadPurpose::None;

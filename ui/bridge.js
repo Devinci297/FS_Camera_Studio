@@ -218,6 +218,15 @@
   const NEUTRAL_LOOK = () => ({ active: false, positionMetersFRD: [0, 0, 0], pbhDeg: [0, 0, 0], fovDeltaRad: 0 });
   const round = (value, digits) => { const r = Number(value.toFixed(digits)); return Object.is(r, -0) ? 0 : r; };
 
+  // Smart views: mirrors defaultGlance() in the module. A chosen icon decides; otherwise the name, as the editor's
+  // automatic icon does. Only cockpit views can be glance views.
+  function defaultGlance(c) {
+    if ((c.mode || 'aircraftCockpit') !== 'aircraftCockpit') return false;
+    if (c.icon) return c.icon === 'view-instrument';
+    const name = String(c.name || '').toLowerCase();
+    if (/runway|threshold|approach|gate|jetway|apron|parking|ramp|taxi|tower|airport/.test(name)) return false;
+    return /pfd|mfd|instrument|g1000|radio|avionics|autopilot/.test(name);
+  }
   // Seed poses are copied verbatim from the approved mockup (authoring axes X right, Y up, Z forward).
   function seedCamera(categoryId, name, viewId, pose, extras) {
     const p = Object.assign({ x: -0.245, y: 0.369, z: 0.183, pitch: 0, yaw: 0, roll: 0, fov: 62 }, pose || {});
@@ -233,6 +242,7 @@
       transition: x.transition || { kind: 'smoothstep3', durationSeconds: 0.65, delaySeconds: 0 },
       interaction: mode === 'aircraftCockpit', trackingPolicy: 'nativeIfQualified', effects: { enabled: false },
       temporaryLookPolicy: x.temporaryLookPolicy || 'retain', followHorizon: 1, seedDefinitionName: null,
+      glance: defaultGlance({ mode, name }),
     };
   }
   function calibration() {
@@ -292,6 +302,9 @@
     list.push({ action: 'lookRight', input: ctrlAlt('VK_RIGHT', 'Right arrow') });
     list.push({ action: 'lookUp', input: ctrlAlt('VK_UP', 'Up arrow') });
     list.push({ action: 'lookDown', input: ctrlAlt('VK_DOWN', 'Down arrow') });
+    list.push({ action: 'glanceHold', input: ctrlAlt('G', 'G') });
+    list.push({ action: 'glanceNext', input: ctrlAlt('I', 'I') });
+    list.push({ action: 'glanceReturn', input: ctrlAlt('U', 'U') });
     [['moveForward','W'],['moveBack','S'],['moveLeft','A'],['moveRight','D'],['moveUp','Q'],['moveDown','E'],['moveFast','VK_SHIFT']].forEach(entry => list.push({action:entry[0],input:{kind:'key',definition:entry[1],label:entry[1]==='VK_SHIFT'?'Shift':entry[1]}}));
     [['zoomIn','sim:ZOOM_IN','Mouse wheel up / MSFS zoom in'],['zoomOut','sim:ZOOM_OUT','Mouse wheel down / MSFS zoom out']].forEach(entry => list.push({action:entry[0],input:{kind:'simZoom',definition:entry[1],label:entry[2]}}));
     list.push({action:'saveViews',input:{kind:'key',definition:'VK_LCONTROL+S',label:'Ctrl + S'}});
@@ -327,6 +340,7 @@
       if (c.followHorizon !== undefined && !(typeof c.followHorizon === 'number' && c.followHorizon >= 0 && c.followHorizon <= 1)) return '"' + c.name + '" needs a follow horizon from 0 to 1.';
       if (c.gimbal !== undefined && ['locked', 'horizon', 'yaw'].indexOf(c.gimbal) < 0) return '"' + c.name + '" needs a gimbal of locked, horizon or yaw.';
       if (c.mountVibration !== undefined && !(typeof c.mountVibration === 'number' && c.mountVibration >= 0 && c.mountVibration <= 1)) return '"' + c.name + '" needs an airframe vibration from 0 to 1.';
+      if (c.glance !== undefined && typeof c.glance !== 'boolean') return '"' + c.name + '" needs Glance view on or off.';
     }
     if (seen.size !== p.cameras.length) return 'A category lists a camera that does not exist.';
     if (!p.cameras.some(c => c.id === p.defaultCameraId)) return 'Choose a default camera.';
@@ -369,6 +383,8 @@
     (p && p.cameras || []).forEach(c => {
       if (c && c.mode === 'mounted') { if (c.gimbal === undefined) c.gimbal = 'locked'; if (c.mountVibration === undefined) c.mountVibration = 0.3; }
     });
+    // Optional glance flag (no schema bump): derived from the icon or name when absent.
+    if (p && Array.isArray(p.cameras)) p.cameras.forEach(c => { if (c && c.glance === undefined) c.glance = defaultGlance(c); });
     return p;
   }
   function applyOps(target, ops) {
@@ -543,6 +559,7 @@
       if (!activatable(camera)) return ack(env, 'Rejected', MODE_CAPS[camera.mode] ? MODE_CAPS[camera.mode].reason : 'modeNotSupported');
       ack(env, 'Accepted');
       clearMotion();
+      m.glance = null;
       if (!opts.peeking) { m.peek = null; if (m.selection.cameraId !== cameraId) select(cameraId); }
       if (m.ownership.state !== 'Active') {
         setOwnership('Acquiring');
@@ -554,6 +571,7 @@
       clearMotion();
       setBinoculars(false);  // releasing the camera (or Panic) cancels the zoom immediately
       m.peek = null;
+      m.glance = null;
       if (m.ownership.state === 'Observing') return;
       setOwnership('Releasing');
       later(() => {
@@ -595,6 +613,78 @@
       const offset = M.rotateVector(camera.orientationCameraToAnchorXYZW, look.positionMetersFRD);
       return { positionMetersFRD: camera.positionMetersFRD.map((v, i) => round(v + offset[i], 5)), orientationCameraToAnchorXYZW: q.map(v => round(v, 7)), fovRad: round(camera.projection.value + look.fovDeltaRad, 5) };
     }
+    /* Smart views (glance): the module's hold / next / return, with the same nearest-instrument rule. */
+    const GLANCE_FOCUS_METERS = 0.75, GLANCE_MS = 350;
+    const forward = q => M.rotateVector(q, [1, 0, 0]);
+    const angleOf = (a, b) => Math.acos(Math.max(-1, Math.min(1, (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot.apply(null, a) * Math.hypot.apply(null, b) || 1))));
+    function glanceViews(exclude) {
+      const order = [];
+      m.working.profile.categories.forEach(g => g.cameraIds.forEach(id => order.push(id)));
+      return order.map(workingCamera).filter(c => c && c.mode === 'aircraftCockpit' && (typeof c.glance === 'boolean' ? c.glance : defaultGlance(c)) && c.id !== exclude);
+    }
+    function glanceBlock() {
+      const camera = m.active.cameraId && workingCamera(m.active.cameraId);
+      if (m.ownership.state !== 'Active' || !camera || !m.live) return 'Show a cockpit view first: a glance returns to the view you are in.';
+      if (camera.mode !== 'aircraftCockpit') return 'Glance views work from cockpit views.';
+      return null;
+    }
+    function nearestGlance(exclude) {
+      const shown = composedPose(), look = forward(shown.orientationCameraToAnchorXYZW);
+      let best = null, bestAngle = 0;
+      glanceViews(exclude).forEach(c => {
+        const aim = forward(c.orientationCameraToAnchorXYZW);
+        let toward = c.positionMetersFRD.map((v, i) => v + aim[i] * GLANCE_FOCUS_METERS - shown.positionMetersFRD[i]);
+        if (Math.hypot.apply(null, toward) < 1e-3) toward = aim;
+        const angle = angleOf(look, toward);
+        if (!best || angle < bestAngle - 0.5 * Math.PI / 180) { best = c; bestAngle = angle; }
+      });
+      return best;
+    }
+    function glanceShow(camera, look) {
+      const committed = committedProfile() && committedProfile().cameras.find(c => c.id === camera.id);
+      clearMotion();
+      m.live = clone(camera);
+      m.look = look ? clone(look) : NEUTRAL_LOOK();
+      if (m.selection.cameraId !== camera.id) select(camera.id);
+      const glance = m.glance ? { cameraId: m.glance.cameraId, returnCameraId: m.glance.returnCameraId, held: m.glance.held } : null;
+      m.active = { profileId: m.working.profile.profileId, cameraId: camera.id, peeking: false, transitioning: true, fromDraft: !same(committed, camera), glance };
+      sendActive();
+      event('TemporaryLookChanged', m.look);
+      later(() => { if (m.active.cameraId === camera.id) { m.active = Object.assign({}, m.active, { transitioning: false }); sendActive(); } }, GLANCE_MS);
+    }
+    function glanceTo(camera, held) {
+      if (!m.glance) m.glance = { returnCameraId: m.active.cameraId, returnLook: clone(m.look), cameraId: null, held: false };
+      m.glance.cameraId = camera.id;
+      m.glance.held = m.glance.held || held;
+      glanceShow(camera);
+    }
+    function glance(action) {
+      if (m.glance && m.active.cameraId !== m.glance.cameraId) m.glance = null;
+      if (action === 'glanceReturn') {
+        if (!m.glance) return 'Not glancing: there is no view to return to.';
+        const back = workingCamera(m.glance.returnCameraId), look = m.glance.returnLook;
+        m.glance = null;
+        if (!back) { sendActive(); return 'The view you glanced from is no longer available.'; }
+        glanceShow(back, look);
+        return 'Returned to ' + back.name + '.';
+      }
+      const blocked = glanceBlock();
+      if (blocked) return blocked;
+      const exclude = m.glance ? m.glance.returnCameraId : m.active.cameraId;
+      let target = null;
+      if (action === 'glanceHold') target = nearestGlance(exclude);
+      else {
+        const views = glanceViews(exclude), order = [];
+        m.working.profile.categories.forEach(g => g.cameraIds.forEach(id => order.push(id)));
+        const start = order.indexOf(m.active.cameraId);
+        for (let k = 1; start >= 0 && k <= order.length && !target; k++) target = views.find(v => v.id === order[(start + k) % order.length]) || null;
+        target = target || views[0] || null;
+      }
+      if (!target) return 'No glance views in this profile. Turn on Glance view for an instrument camera in its Behavior settings.';
+      // The Test button presses without a release: the glance stays until Return from glance.
+      glanceTo(target, false);
+      return 'Glancing at ' + target.name + '.';
+    }
     const draftChanged = (ops, origin) => event('DraftChanged', { draftRevision: m.working.draftRevision, dirty: dirty(), ops, origin: origin || null });
     function testBinding(env, binding) {
       const action = binding && binding.action;
@@ -629,6 +719,7 @@
           event('SurfaceRequest', { target: action === 'toggleEditor' ? 'main' : 'mini', op: 'toggle' });
           break;
         case 'recenterLook': m.look = NEUTRAL_LOOK(); event('TemporaryLookChanged', m.look); break;
+        case 'glanceHold': case 'glanceNext': case 'glanceReturn': message = glance(action); recalled = Boolean(m.active.glance) || action === 'glanceReturn'; break;
         default: message = m.ownership.state === 'Active' ? 'Command sent - the camera moved briefly.' : 'Command sent. Take camera control to see it move.';
       }
       event('BindingTriggered', { action, viewId: (binding && binding.viewId) || null, result: recalled ? 'recalled' : 'dispatched' });
@@ -681,6 +772,7 @@
         case 'UpdateDraft': {
           if (env.draftRevision !== m.working.draftRevision) return ack(env, 'Rejected', 'staleDraft');
           const ops = payload.ops || [];
+          ops.forEach(op => { if (op.op === 'setCamera' && op.camera && op.camera.glance === undefined) op.camera.glance = defaultGlance(op.camera); });
           let next;
           try { next = applyOps(m.working, ops); } catch (error) { return ack(env, 'Rejected', error.reason || 'invalidOps'); }
           m.working.profile = next.profile; m.working.settings = next.settings; m.working.bindings = next.bindings;

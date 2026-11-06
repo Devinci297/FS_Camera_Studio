@@ -128,6 +128,14 @@
     else { control.dataset.cameraName=name;control.removeAttribute('title'); }
     control.setAttribute('aria-label', name);
   }
+  // Mirrors defaultGlance() in the module: a chosen icon decides, otherwise the automatic icon from the name.
+  function glanceDefault(view) {
+    if ((view.mode || 'aircraftCockpit') !== 'aircraftCockpit') return false;
+    return (view.icon ? view.icon : viewIcon(view.name, false)) === 'view-instrument';
+  }
+  const glanceOf = view => (typeof view.glance === 'boolean' ? view.glance : glanceDefault(view));
+  /** The glance on screen, or null: {cameraId, returnCameraId, held}. */
+  const glanceState = () => (S.active && S.active.glance && S.active.glance.cameraId === S.active.cameraId && S.ownership.state === 'Active' ? S.active.glance : null);
   function entityIcon(entity, isCategory) {
     const legacy = entity.airportIcao && !entity.iconCustomized && (!entity.icon || entity.icon === 'map-pin' || entity.icon === 'camera');
     return !legacy && window.FSCIcons.names.indexOf(entity.icon) >= 0 ? entity.icon : viewIcon(entity.name, isCategory);
@@ -186,6 +194,7 @@
       'mc-duration':'Time taken to transition to this camera, in seconds.',
       'mc-delay':'Pause before the transition begins, in seconds.',
       'mc-retain-look':'Remember the temporary look direction when revisiting this camera.',
+      'mc-glance':'Offer this cockpit view to the Glance bindings: hold Glance to look at the nearest instrument, release to return.',
       'mc-follow-horizon-range':FOLLOW_HORIZON_HELP,
       'mc-follow-horizon-number':FOLLOW_HORIZON_HELP,
       'mc-search':'Filter the camera library by name.',
@@ -328,10 +337,16 @@
     ['toggleMouseLook', 'Toggle mouse look', 'Move within the custom camera without releasing control'],
     ['toggleMini', 'Toggle mini control panel', 'Show or hide the quick-access dock'],
   ];
+  // Smart views: instrument close-ups marked "Glance view" in a cockpit camera's Behavior settings.
+  const GLANCE = [
+    ['glanceHold', 'Glance at instrument (hold)', 'Hold to look at the glance view nearest to where you are looking; release to return to the exact view and look'],
+    ['glanceNext', 'Next glance view', 'Step through glance views in category order; Return from glance or recalling any view ends it'],
+    ['glanceReturn', 'Return from glance', 'Go back to the view and look direction you glanced from'],
+  ];
   const MANUAL = [['lookLeft', 'Look left'], ['lookRight', 'Look right'], ['lookUp', 'Look up'], ['lookDown', 'Look down'], ['moveForward', 'Move forward'], ['moveBack', 'Move back'], ['moveLeft', 'Move left'], ['moveRight', 'Move right'], ['moveUp', 'Move up'], ['moveDown', 'Move down'], ['zoomIn', 'Zoom in'], ['zoomOut', 'Zoom out'], ['moveFast', 'Faster movement (hold)'],
     ['binoculars', 'Binoculars (hold)', 'Hold to zoom to the binoculars field of view in Settings; release to return']];
   const ACTION_NAMES = {};
-  COMMANDS.concat(MANUAL).forEach(entry => { ACTION_NAMES[entry[0]] = entry[1]; });
+  COMMANDS.concat(MANUAL, GLANCE).forEach(entry => { ACTION_NAMES[entry[0]] = entry[1]; });
   const actionName = (action, viewId) => (action === 'selectView' ? 'Select view ID ' + viewId : action === 'peekView' ? 'Peek at view ID ' + viewId : (ACTION_NAMES[action] || action));
 
   /* ------------- State (mirror of the module) ------------- */
@@ -1339,6 +1354,7 @@
     if(document.activeElement!==$('mc-view-id'))$('mc-view-id').value = String(view.viewId || 0);
     $('mc-default-view').checked = P().defaultCameraId === view.id;
     $('mc-quick-access').checked = Boolean(view.favorite);
+    $('mc-glance').checked = view.mode === 'aircraftCockpit' && glanceOf(view);
     $('mc-retain-look').checked = view.temporaryLookPolicy === 'retain';
     $$('[data-value]', $('mc-mouse-release')).forEach(b => { b.disabled = ro; b.setAttribute('aria-pressed', String(b.dataset.value === (view.mouseLookOnRelease || 'retain'))); });
     const level = levelHorizonAvailable(), worldHorizon = view.mode === 'airport' || view.mode === 'flyby', mountedHorizon = view.mode === 'mounted';
@@ -1361,6 +1377,8 @@
     renderMountSettings(view, ro);
     $('mc-default-view').disabled=ro||Boolean(view.airportIcao);
     $('mc-default-view').title=view.airportIcao?'Shared airport cameras cannot be the default view for an aircraft profile.':'';
+    $('mc-glance').disabled = ro || view.mode !== 'aircraftCockpit';
+    $('mc-glance-note').textContent = view.mode === 'aircraftCockpit' ? 'Hold Glance to look at the nearest instrument view, release to return.' : 'Only cockpit views can be glance views.';
   }
   function renderViewButton() {
     const control = $('mc-view-in-sim');
@@ -1722,6 +1740,7 @@
       interaction: true, trackingPolicy: 'nativeIfQualified', effects: { enabled: false },
       temporaryLookPolicy: 'resetOnRecall', followHorizon: 1, seedDefinitionName: null,
     };
+    delete base.glance; // the module derives it from the new camera's icon or name
     return Object.assign(base, { id: M.uuid(), categoryId, name, viewId: 0, favorite: true });
   }
   function addCamera() {
@@ -2338,7 +2357,9 @@
       const shown = dockCamera();
       const group = shown ? categoryOf(shown.id) : null;
       $('mc-dock-current').textContent = shown ? shown.name : '-';
-      $('mc-dock-category').textContent = group ? group.name : (S.snapshot ? 'No camera' : 'Camera Studio');
+      const glance = glanceState();
+      $('mc-dock-category').textContent = glance && shown && shown.id === glance.cameraId ? 'Glancing' + (glance.held ? ' - release to return' : '') : group ? group.name : (S.snapshot ? 'No camera' : 'Camera Studio');
+      dock.setAttribute('data-glancing', String(Boolean(glance)));
       $('mc-flight-name').textContent = shown ? shown.name : '-';
       const blocked = controlBlockReason();
       ['mc-prev', 'mc-next'].forEach(id => { $(id).disabled = Boolean(blocked); $(id).title = blocked || ''; });
@@ -2663,6 +2684,7 @@
       ['Camera views', unique(used.concat(bound('selectView'))).map(n => ({ action: 'selectView', viewId: n, name: 'Select view ID ' + n, detail: camFor(n) ? camFor(n).name : 'No camera uses this view ID' }))],
       ['Peek - hold to look, release to return', unique(used.concat(bound('peekView'))).map(n => ({ action: 'peekView', viewId: n, peek: true, name: 'Peek at ' + (camFor(n) ? camFor(n).name : 'view ID ' + n), detail: 'View ID ' + n + ' - hold to look - release to return' }))],
       ['Camera commands', COMMANDS.map(c => ({ action: c[0], viewId: 0, name: c[1], detail: c[2] }))],
+      ['Glance - instrument close-ups', GLANCE.map(c => ({ action: c[0], viewId: 0, name: c[1], detail: c[2] }))],
     ];
   }
   function updateBindingToggle() {
@@ -4181,6 +4203,7 @@
       renderDetails();
     });
     $('mc-quick-access').addEventListener('change', () => { const v = current(); if (v) setFavorite(v); });
+    $('mc-glance').addEventListener('change', e => { const v = current(); if (!v || readOnly()) return; v.glance = e.target.checked; saveCamera(v); });
     $$('[data-value]', $('mc-mouse-release')).forEach(b => b.addEventListener('click', () => { const view = current(); if (!view || readOnly()) return; view.mouseLookOnRelease = b.dataset.value; saveCamera(view); renderDetails(); }));
     [['mc-retain-look', v => (v ? 'retain' : 'resetOnRecall'), 'temporaryLookPolicy'], ['mc-interaction', v => v, 'interaction']].forEach(entry => $(entry[0]).addEventListener('change', e => {
       const view = current();
