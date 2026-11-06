@@ -12,7 +12,7 @@ namespace fscs::profiles {
 
 namespace {
 
-constexpr std::array<std::pair<Action, const char*>, 32> kActions{{
+constexpr std::array<std::pair<Action, const char*>, 33> kActions{{
     {Action::SaveViews, "saveViews"},
     {Action::ToggleHeadTracking, "toggleHeadTracking"}, {Action::ToggleAirportAuto, "toggleAirportAuto"},
     {Action::SelectView, "selectView"},       {Action::PeekView, "peekView"},
@@ -29,6 +29,7 @@ constexpr std::array<std::pair<Action, const char*>, 32> kActions{{
     {Action::PanicRelease, "panicRelease"},
     {Action::Binoculars, "binoculars"},
     {Action::GlanceHold, "glanceHold"}, {Action::GlanceNext, "glanceNext"}, {Action::GlanceReturn, "glanceReturn"},
+    {Action::ToggleCinematic, "toggleCinematic"},
 }};
 
 const char* povName(PovDirection d) {
@@ -262,16 +263,22 @@ json defaultBindingsDocument() {
         {"lookUp", {"VK_UP", "Up arrow"}}, {"lookDown", {"VK_DOWN", "Down arrow"}},
         {"panicRelease", {"X", "X"}},
         {"binoculars", {"Z", "Z"}},
-        {"glanceHold", {"G", "G"}}, {"glanceNext", {"I", "I"}}, {"glanceReturn", {"U", "U"}}};
+        {"glanceHold", {"G", "G"}}, {"glanceNext", {"I", "I"}}, {"glanceReturn", {"U", "U"}},
+        {"toggleCinematic", {"K", "K"}}};
     for (const auto& [action, k] : rest) list.push_back({{"action", action}, {"input", key(k.first, k.second)}});
     return upgradeMovementBindings({{"schemaVersion", kBindingsSchemaVersion}, {"bindings", list}});
 }
 
 json defaultSettingsDocument() {
-    return {{"schemaVersion", kSettingsSchemaVersion},
+    json doc = {{"schemaVersion", kSettingsSchemaVersion},
             {"ui", {{"shortcuts", true}, {"contrast", false}, {"backups", true}, {"remember", true}, {"precision", "normal"},
                     {"theme", "dark"}, {"reducedMotion", false}, {"miniEnabled", true}, {"miniHover", true}, {"miniPinned", false}, {"miniOpacity", 0.65}, {"mainOpacity", 1.0}, {"nameDisplay", "both"}}},
             {"host", {{"allowUnqualifiedAdapter", false}, {"lookSpeedDegPerSec", 60.0}, {"moveSpeedMetersPerSec", 0.5}, {"airportRadiusNm", 25.0}, {"mouseSensitivity", 1.0}, {"mouseSmoothingMs", 55.0}, {"mouseLookEnabled", true}, {"mouseInvertY", false}, {"globalHeadTrackingEnabled", false}, {"globalAircraftTracking", "both"}, {"airportTrackingHorizonGuard", true}, {"airportAutoZoomEnabled", false}, {"airportAutoZoomFrameMeters", 40.0}, {"airportAutoZoomMinFovDeg", 10.0}, {"airportAutoZoomMaxFovDeg", 90.0}, {"airportAutoZoomResponseSeconds", 1.0}, {"airportCategoryHeights", {{"runways",3.0},{"gates",3.0},{"apron",3.0},{"taxi",3.0},{"tower",35.0}}}, {"binocularsFovDeg", 10.0}}}};
+    const HostSettings cinematic;
+    doc["host"].update({{"cinematicMinSeconds", cinematic.cinematicMinSeconds}, {"cinematicMaxSeconds", cinematic.cinematicMaxSeconds},
+                        {"cinematicCockpitWeight", cinematic.cinematicCockpitWeight}, {"cinematicCuts", cinematic.cinematicCuts},
+                        {"cinematicDrift", cinematic.cinematicDrift}});
+    return doc;
 }
 
 json normalizeSettings(const json& doc) {
@@ -297,6 +304,9 @@ json normalizeSettings(const json& doc) {
                    {"airportAutoZoomMinFovDeg", h.airportAutoZoomMinFovDeg}, {"airportAutoZoomMaxFovDeg", h.airportAutoZoomMaxFovDeg},
                    {"airportAutoZoomResponseSeconds", h.airportAutoZoomResponseSeconds}, {"airportCategoryHeights",h.airportCategoryHeights},
                    {"binocularsFovDeg", h.binocularsFovDeg}};
+    out["host"].update({{"cinematicMinSeconds", h.cinematicMinSeconds}, {"cinematicMaxSeconds", h.cinematicMaxSeconds},
+                        {"cinematicCockpitWeight", h.cinematicCockpitWeight}, {"cinematicCuts", h.cinematicCuts},
+                        {"cinematicDrift", h.cinematicDrift}});
     return out;
 }
 
@@ -325,6 +335,11 @@ HostSettings parseHostSettings(const json& doc) {
     const auto precision = js::str(js::object(doc, "ui"), "precision", "normal");
     s.movementPrecisionScale = precision == "fine" ? 0.1 : precision == "coarse" ? 10.0 : 1.0;
     s.binocularsFovDeg = std::clamp(js::num(host, "binocularsFovDeg", 10.0), kBinocularsMinFovDeg, kBinocularsMaxFovDeg);
+    s.cinematicMinSeconds = std::clamp(js::num(host, "cinematicMinSeconds", 8.0), kCinematicMinDwellSeconds, kCinematicMaxDwellSeconds);
+    s.cinematicMaxSeconds = std::clamp(js::num(host, "cinematicMaxSeconds", 20.0), s.cinematicMinSeconds, kCinematicMaxDwellSeconds);
+    s.cinematicCockpitWeight = std::clamp(js::num(host, "cinematicCockpitWeight", .15), 0.0, 1.0);
+    s.cinematicCuts = js::boolean(host, "cinematicCuts", true);
+    s.cinematicDrift = js::boolean(host, "cinematicDrift", true);
     return s;
 }
 

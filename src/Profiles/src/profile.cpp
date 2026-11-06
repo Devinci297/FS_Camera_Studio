@@ -397,6 +397,9 @@ ValidationResult validateProfile(json& doc) {
             // Optional, no schema bump: older profiles derive it from the icon or name.
             if (!cam.contains("glance")) cam["glance"] = defaultGlance(cam);
             else if (!cam["glance"].is_boolean()) c.error(p + ".glance", "must be true or false");
+            // Optional, no schema bump: Cinematic mode includes outside views and the default pilot view.
+            if (!cam.contains("cinematic")) cam["cinematic"] = defaultCinematic(cam, js::str(doc, "defaultCameraId"));
+            else if (!cam["cinematic"].is_boolean()) c.error(p + ".cinematic", "must be true or false");
         }
     }
 
@@ -546,6 +549,7 @@ ProfileSnapshot toSnapshot(const json& doc) {
         e.mountVibration = core::clamp(js::num(cam, "mountVibration", core::kDefaultMountVibration), 0., 1.);
         e.seedDefinitionName = js::str(cam, "seedDefinitionName");
         e.glance = e.mode == CameraMode::AircraftCockpit && js::boolean(cam, "glance", defaultGlance(cam));
+        e.cinematic = e.mode != CameraMode::Free && js::boolean(cam, "cinematic", defaultCinematic(cam, s.defaultCameraId));
         s.cameras.push_back(std::move(e));
     }
     return s;
@@ -589,6 +593,14 @@ std::string newUuid() {
         s.push_back(hex[b[i] & 15]);
     }
     return s;
+}
+
+bool defaultCinematic(const json& cam, const std::string& defaultCameraId) {
+    if (!cam.is_object()) return false;
+    const auto mode = js::str(cam, "mode", "aircraftCockpit");
+    if (mode == "free") return false;
+    if (mode != "aircraftCockpit") return true;
+    return !defaultCameraId.empty() && js::str(cam, "id") == defaultCameraId;
 }
 
 bool defaultGlance(const json& cam) {

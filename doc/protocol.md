@@ -105,6 +105,10 @@ There is no desktop application, tray app or external process.
   editor's automatic instrument icon (pfd, mfd, instrument, g1000, radio, avionics, autopilot; airport words such as
   tower or runway take precedence); false otherwise. A non-boolean is rejected. Other modes may store it but are never
   offered. See [smart views](dual-bindings.md#smart-views-glance).
+* `cinematic`: optional bool, no schema bump. Whether Cinematic mode (the automatic view playlist) may show the view.
+  When absent validation stores the default: true for `aircraftExterior`, `orbit`, `flyby`, `airport` and `mounted`;
+  for `aircraftCockpit` only on the profile's `defaultCameraId` (the pilot view); false for `free` (free cameras are
+  never offered). A non-boolean is rejected. See [Cinematic mode](dual-bindings.md#cinematic-mode).
 * `followHorizon`: number 0–1, default 1 (finite; outside the range is rejected). How much of the aircraft's bank the
   view inherits: 1 banks fully with the aircraft (previous behaviour), 0 keeps the horizon level, 0.5 shows half the
   bank. Applies to `aircraftCockpit` (rolls about the aircraft's longitudinal axis, eye position unchanged),
@@ -137,7 +141,7 @@ There is no desktop application, tray app or external process.
 Actions: `selectView` (+`viewId`), `peekView` (+`viewId`), `nextCamera`, `previousCamera`, `nextCategory`,
 `returnToPilot`, `releaseCamera`, `recenterLook`, `toggleEditor`, `toggleMini`, `lookLeft`, `lookRight`, `lookUp`,
 `lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveFast`, `zoomIn`, `zoomOut`,
-`panicRelease`, `binoculars`, `glanceHold`, `glanceNext`, `glanceReturn`.
+`panicRelease`, `binoculars`, `glanceHold`, `glanceNext`, `glanceReturn`, `toggleCinematic`.
 `panicRelease` ("Panic: release camera and restore simulator", default Ctrl + Alt + X) is a stronger `releaseCamera`;
 see [Panic release](dual-bindings.md#panic-release).
 `binoculars` ("Binoculars (hold)", default Ctrl + Alt + Z) zooms the active camera to `host.binocularsFovDeg` while held;
@@ -145,6 +149,8 @@ see [Binoculars](dual-bindings.md#binoculars).
 `glanceHold` (held, default Ctrl + Alt + G), `glanceNext` (Ctrl + Alt + I) and `glanceReturn` (Ctrl + Alt + U) are the
 smart-view bindings; see [smart views](dual-bindings.md#smart-views-glance). `TestBinding` presses `glanceHold`
 without a release, so the glance stays until `glanceReturn`.
+`toggleCinematic` ("Toggle Cinematic mode", default Ctrl + Alt + K) turns the session-wide Cinematic mode on or off,
+like `SetCinematic`; see [Cinematic mode](dual-bindings.md#cinematic-mode).
 An input definition and, for POVs, direction maps to at most one action. Bindings can carry
 `slot: "primary" | "secondary"`; each action has two independent UI slots. Legacy extra bindings are retained.
 Joystick `pov` is `up`, `right`, `down` or `left`; definitions use zero-based button and POV indices.
@@ -179,6 +185,10 @@ camera takeover suppress these pulses.
 `ui.precision` also scales held-key translation: Fine 0.1x, Normal 1x, Coarse 10x of
 `host.moveSpeedMetersPerSec`; `moveFast` multiplies that by four while held. Mouse-look sensitivity is independent.
 `host.binocularsFovDeg` (default 10, clamped 2–60; missing in older files = 10) is the Binoculars field of view.
+Cinematic mode: `host.cinematicMinSeconds` and `host.cinematicMaxSeconds` (defaults 8 and 20, clamped 3–300, max at
+least min) bound each view's random dwell; `host.cinematicCockpitWeight` (default 0.15, 0–1) is the share of picks
+that are cockpit views; `host.cinematicCuts` (default true) cuts to world-referential (airport, fly-by) views and moves
+smoothly otherwise; `host.cinematicDrift` (default true) turns the Commercial drift on. Missing in older files = defaults.
 `ui.miniPinned` is a global preference: changing it through `UpdateDraft` saves it immediately on its own and never
 marks settings as unsaved.
 
@@ -268,6 +278,7 @@ Rules:
 | `TestBinding` | `binding` | Dispatches the action once; reply distinguishes dispatch from visible recall |
 | `RelaySurface` | `target` (`main`\|`mini`), `op` (`expand`\|`compact`\|`show`) | Broadcast `SurfaceRequest`; e.g. mini "Edit" → main expands on Cameras |
 | `GetDiagnostics` | — | `result.text` preview for in-panel export |
+| `SetCinematic` | `enabled` (bool) | Turns the session-wide Cinematic mode on or off (not saved). On: takes control if needed and shows the first view; Completed, or Rejected with a plain reason. `result.cinematic` is the new state (as `CinematicChanged`) |
 | `TextFocus` | `focused` (bool) | A panel text field has focus: bindings other than Release Camera and Panic release are suppressed |
 | `QualificationStart` | — | Begins the in-panel axis check; live control is allowed on an unqualified build while it runs. `result`: `simVersion`, `contract`, `axes` |
 | `QualificationProbe` | `axis` (`forward\|right\|up\|pitch\|heading\|bank`) | Offsets the active view by 30 cm / 15°; `result.expect` describes what should be seen |
@@ -314,7 +325,8 @@ being edited.
 | `InputTest` | `definition`, `phase` (`down`\|`up`) |
 | `BindingTriggered` | `action`, `viewId`, `result` |
 | `BinocularsChanged` | `active` (a Binoculars hold is down on an active camera), `fovDeg` (the setting). Sent on press, release and cancellation; display only |
-| `PanicReleased` | `state` (ownership after the panic), `reason`, `airportAutoStopped` (bool). Sent for every panic press, including a no-op while Observing |
+| `PanicReleased` | `state` (ownership after the panic), `reason`, `airportAutoStopped` (bool), `cinematicStopped` (bool). Sent for every panic press, including a no-op while Observing |
+| `CinematicChanged` | `enabled`, `state` (`off`, `starting`, `running`, `paused` after manual input, `suspended` by glance, binoculars or a simulator pause), `phase` (`parked`, `taxi`, `takeoffClimb`, `cruise`, `approach`, `landingRoll`), `cameraId` (the view it chose, or null), `dwellSeconds`, `reason` (why it last stopped, or null). Coalesced latest state; also `Snapshot.cinematic` |
 | `SurfaceRequest` | `target`, `op` |
 | `FaultRaised` | `code`, `message` |
 

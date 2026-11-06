@@ -227,6 +227,13 @@
     if (/runway|threshold|approach|gate|jetway|apron|parking|ramp|taxi|tower|airport/.test(name)) return false;
     return /pfd|mfd|instrument|g1000|radio|avionics|autopilot/.test(name);
   }
+  // Cinematic mode: mirrors defaultCinematic() in the module. Outside views take part; of the cockpit views only the
+  // profile's default view. Free cameras never do.
+  function defaultCinematic(c, defaultCameraId) {
+    const mode = c.mode || 'aircraftCockpit';
+    if (mode === 'free') return false;
+    return mode !== 'aircraftCockpit' || (Boolean(defaultCameraId) && c.id === defaultCameraId);
+  }
   // Seed poses are copied verbatim from the approved mockup (authoring axes X right, Y up, Z forward).
   function seedCamera(categoryId, name, viewId, pose, extras) {
     const p = Object.assign({ x: -0.245, y: 0.369, z: 0.183, pitch: 0, yaw: 0, roll: 0, fov: 62 }, pose || {});
@@ -261,6 +268,7 @@
       profile.categories.push(category);
     });
     if (!profile.defaultCameraId && profile.cameras.length) profile.defaultCameraId = profile.cameras[0].id;
+    profile.cameras.forEach(c => { c.cinematic = defaultCinematic(c, profile.defaultCameraId); });
     return profile;
   }
   const SEED_GROUPS = {
@@ -305,6 +313,7 @@
     list.push({ action: 'glanceHold', input: ctrlAlt('G', 'G') });
     list.push({ action: 'glanceNext', input: ctrlAlt('I', 'I') });
     list.push({ action: 'glanceReturn', input: ctrlAlt('U', 'U') });
+    list.push({ action: 'toggleCinematic', input: ctrlAlt('K', 'K') });
     [['moveForward','W'],['moveBack','S'],['moveLeft','A'],['moveRight','D'],['moveUp','Q'],['moveDown','E'],['moveFast','VK_SHIFT']].forEach(entry => list.push({action:entry[0],input:{kind:'key',definition:entry[1],label:entry[1]==='VK_SHIFT'?'Shift':entry[1]}}));
     [['zoomIn','sim:ZOOM_IN','Mouse wheel up / MSFS zoom in'],['zoomOut','sim:ZOOM_OUT','Mouse wheel down / MSFS zoom out']].forEach(entry => list.push({action:entry[0],input:{kind:'simZoom',definition:entry[1],label:entry[2]}}));
     list.push({action:'saveViews',input:{kind:'key',definition:'VK_LCONTROL+S',label:'Ctrl + S'}});
@@ -385,6 +394,7 @@
     });
     // Optional glance flag (no schema bump): derived from the icon or name when absent.
     if (p && Array.isArray(p.cameras)) p.cameras.forEach(c => { if (c && c.glance === undefined) c.glance = defaultGlance(c); });
+    if (p && Array.isArray(p.cameras)) p.cameras.forEach(c => { if (c && c.cinematic === undefined) c.cinematic = defaultCinematic(c, p.defaultCameraId); });
     return p;
   }
   function applyOps(target, ops) {
@@ -434,6 +444,7 @@
     addRepo(cinematic, 1);
     addRepo(airport, 1);
     repo.settings = { schemaVersion: 2, ui: { shortcuts: true, contrast: false, backups: true, remember: true, precision: 'normal', theme: 'dark', reducedMotion: false, miniEnabled: true, miniHover: true, miniPinned: false, miniOpacity: 0.65, nameDisplay: 'both' }, host: { allowUnqualifiedAdapter: false, lookSpeedDegPerSec: 60, moveSpeedMetersPerSec: 0.5, binocularsFovDeg: 10 } };
+    Object.assign(repo.settings.host, { cinematicMinSeconds: 8, cinematicMaxSeconds: 20, cinematicCockpitWeight: 0.15, cinematicCuts: true, cinematicDrift: true });
     repo.bindings = seedBindings();
 
     const m = {
@@ -499,6 +510,7 @@
         working: { profile: clone(m.working.profile), settings: clone(m.working.settings), bindings: clone(m.working.bindings), draftRevision: m.working.draftRevision, dirty: dirty(), committedRevision: workingEntry().revision, hasCommittedVersion: hasCommittedVersion() },
         pendingCommit: m.pendingCommit ? { requestId: m.pendingCommit.requestId, revisions: m.pendingCommit.revisions } : null,
         look: clone(m.look),
+        cinematic: cinematicState(),
       };
     }
 
@@ -560,6 +572,7 @@
       ack(env, 'Accepted');
       clearMotion();
       m.glance = null;
+      if (!opts.cinematic) stopCinematic('A camera was selected manually.');
       if (!opts.peeking) { m.peek = null; if (m.selection.cameraId !== cameraId) select(cameraId); }
       if (m.ownership.state !== 'Active') {
         setOwnership('Acquiring');
@@ -570,6 +583,7 @@
       if (env) ack(env, 'Accepted');
       clearMotion();
       setBinoculars(false);  // releasing the camera (or Panic) cancels the zoom immediately
+      stopCinematic(reason === 'Panic release: the simulator has control' ? 'Panic release.' : 'Camera control was released.');
       m.peek = null;
       m.glance = null;
       if (m.ownership.state === 'Observing') return;
@@ -587,6 +601,49 @@
       if (Boolean(m.binoculars) === Boolean(active)) return;
       m.binoculars = Boolean(active);
       event('BinocularsChanged', { active: m.binoculars, fovDeg: (m.working.settings.host && m.working.settings.host.binocularsFovDeg) || 10 });
+    }
+    // Cinematic mode, as the module runs it: a random view that takes part (never the same twice in a row), each for a
+    // random dwell. The demo has no flight, so the phase stays "parked". Its timer survives clearMotion().
+    function cinematicState() {
+      const c = m.cinematic || {};
+      return { enabled: Boolean(c.enabled), state: c.enabled ? (m.ownership.state === 'Active' ? 'running' : 'starting') : 'off', phase: 'parked',
+        cameraId: c.enabled ? c.cameraId || null : null, dwellSeconds: c.enabled ? c.dwell || 0 : 0, reason: c.reason || null };
+    }
+    function stopCinematic(reason) {
+      if (!m.cinematic || !m.cinematic.enabled) return;
+      clearTimeout(m.cinematic.timer);
+      m.cinematic = { enabled: false, reason };
+      event('CinematicChanged', cinematicState());
+    }
+    function cinematicNext(env) {
+      const host = m.working.settings.host || {}, c = m.cinematic;
+      const views = m.working.profile.cameras.filter(v => activatable(v) && (typeof v.cinematic === 'boolean' ? v.cinematic : defaultCinematic(v, m.working.profile.defaultCameraId)) && v.id !== m.active.cameraId);
+      if (!views.length) return false;
+      const cockpit = views.filter(v => v.mode === 'aircraftCockpit'), others = views.filter(v => v.mode !== 'aircraftCockpit');
+      const share = host.cinematicCockpitWeight == null ? 0.15 : host.cinematicCockpitWeight;
+      const pool = cockpit.length && (!others.length || Math.random() < share) ? cockpit : others;
+      const view = pool[Math.floor(Math.random() * pool.length)];
+      const min = Math.max(3, host.cinematicMinSeconds || 8), max = Math.max(min, host.cinematicMaxSeconds || 20);
+      c.cameraId = view.id;
+      c.dwell = min + Math.random() * (max - min);
+      activate(env || { uiInstanceId: 'module', requestId: 'cinematic-' + (++m.seq) }, view.id, { cinematic: true });
+      clearTimeout(c.timer);
+      c.timer = later(() => { if (m.cinematic === c && c.enabled) { cinematicNext(null); event('CinematicChanged', cinematicState()); } }, c.dwell * 1000, true);
+      return true;
+    }
+    function setCinematic(env, enabled) {
+      const on = Boolean(m.cinematic && m.cinematic.enabled);
+      if (enabled === on) return ack(env, 'Completed', null, { cinematic: cinematicState() });
+      if (!enabled) { stopCinematic('Cinematic mode was turned off.'); return ack(env, 'Completed', null, { cinematic: cinematicState() }); }
+      const caps = capabilities();
+      if (!caps.canActivate) return ack(env, 'Rejected', caps.blockReason, { cinematic: cinematicState() });
+      m.cinematic = { enabled: true, reason: null };
+      if (!cinematicNext({ uiInstanceId: env.uiInstanceId, requestId: env.requestId + ':cinematic' })) {
+        m.cinematic = { enabled: false, reason: null };
+        return ack(env, 'Rejected', 'No views are included in Cinematic mode. Turn on Include in Cinematic mode for exterior, airport or cockpit views.', { cinematic: cinematicState() });
+      }
+      event('CinematicChanged', cinematicState());
+      return ack(env, 'Completed', null, { cinematic: cinematicState() });
     }
     function cycle(env, delta) {
       const current = m.active.cameraId || m.selection.cameraId || m.working.profile.defaultCameraId;
@@ -703,8 +760,9 @@
         case 'releaseCamera': release(null); message = 'Camera released.'; break;
         case 'panicRelease':
           // Same hand-back as releaseCamera, and idempotent: a press while Observing still reports.
+          m.cinematicStoppedByPanic = Boolean(m.cinematic && m.cinematic.enabled);
           release(null, 'Panic release: the simulator has control');
-          event('PanicReleased', { state: m.ownership.state, reason: m.ownership.reason, airportAutoStopped: false });
+          event('PanicReleased', { state: m.ownership.state, reason: m.ownership.reason, airportAutoStopped: false, cinematicStopped: Boolean(m.cinematicStoppedByPanic) });
           message = 'Camera released and simulator settings restored.';
           break;
         case 'nextCamera': case 'previousCamera': case 'returnToPilot': case 'nextCategory':
@@ -719,6 +777,7 @@
           event('SurfaceRequest', { target: action === 'toggleEditor' ? 'main' : 'mini', op: 'toggle' });
           break;
         case 'recenterLook': m.look = NEUTRAL_LOOK(); event('TemporaryLookChanged', m.look); break;
+        case 'toggleCinematic': setCinematic(internal(env, 'dispatch'), !(m.cinematic && m.cinematic.enabled)); recalled = Boolean(m.cinematic && m.cinematic.enabled); message = recalled ? 'Cinematic mode is on.' : 'Cinematic mode is off.'; break;
         case 'glanceHold': case 'glanceNext': case 'glanceReturn': message = glance(action); recalled = Boolean(m.active.glance) || action === 'glanceReturn'; break;
         default: message = m.ownership.state === 'Active' ? 'Command sent - the camera moved briefly.' : 'Command sent. Take camera control to see it move.';
       }
@@ -758,6 +817,7 @@
         case 'CycleCamera': return cycle(env, payload.delta >= 0 ? 1 : -1);
         case 'NextCategory': return nextCategory(env);
         case 'ReturnToPilot': return activate(env, m.working.profile.defaultCameraId);
+        case 'SetCinematic': return setCinematic(env, Boolean(payload.enabled));
         case 'StartWalkaround': event('WalkaroundChanged',Object.assign({running:true},payload)); return ack(env,'Accepted');
         case 'StopWalkaround': event('WalkaroundChanged',{running:false,categoryId:null,intervalSeconds:5,loop:true}); return ack(env,'Completed');
         case 'RecenterLook': m.look = NEUTRAL_LOOK(); event('TemporaryLookChanged', m.look); return ack(env, 'Completed');
@@ -773,6 +833,7 @@
           if (env.draftRevision !== m.working.draftRevision) return ack(env, 'Rejected', 'staleDraft');
           const ops = payload.ops || [];
           ops.forEach(op => { if (op.op === 'setCamera' && op.camera && op.camera.glance === undefined) op.camera.glance = defaultGlance(op.camera); });
+          ops.forEach(op => { if (op.op === 'setCamera' && op.camera && op.camera.cinematic === undefined) op.camera.cinematic = defaultCinematic(op.camera, m.working.profile.defaultCameraId); });
           let next;
           try { next = applyOps(m.working, ops); } catch (error) { return ack(env, 'Rejected', error.reason || 'invalidOps'); }
           m.working.profile = next.profile; m.working.settings = next.settings; m.working.bindings = next.bindings;

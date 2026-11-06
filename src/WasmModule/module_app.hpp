@@ -4,6 +4,7 @@
 // (doc/protocol.md). Pure logic over interfaces; the WASM entry points in wasm/ feed it events and frames.
 
 #include "backend.hpp"
+#include "cinematic.hpp"
 #include "coordinator.hpp"
 #include "input_router.hpp"
 #include "fscs/profiles/airport.hpp"
@@ -41,6 +42,12 @@ public:
     std::int64_t draftRevision() const { return working_.draftRevision; }
     bool dirty() const { return working_.dirtyProfile || working_.dirtySettings || working_.dirtyBindings; }
     const std::string& bootId() const { return bootId_; }
+    // Cinematic mode: whether the playlist runs, its director (tests), and the director's random source (tests inject
+    // a seeded one for determinism).
+    bool cinematicEnabled() const { return cinematicOn_; }
+    const cinematic::Director& cinematicDirector() const { return cinematic_; }
+    cinematic::Phase cinematicPhase() const { return cinematicPhase_.phase(); }
+    void setCinematicRandom(cinematic::Director::Random random) { cinematic_.setRandom(std::move(random)); }
 
 private:
     struct Working {
@@ -126,6 +133,21 @@ private:
     std::string loadedAirport_, pinnedAirport_;
     double lastAirportRefresh_=-100;
     bool airportDirty() const;
+    // Cinematic mode (cinematic.cpp): a session-wide automatic view playlist, like airport Auto switch.
+    bool setCinematic(bool enabled, double now, std::string* why = nullptr);
+    void stopCinematic(const std::string& reason, double now);
+    void updateCinematic(double now, bool manual);
+    bool cinematicSwitch(double now, bool acquire);
+    void cinematicEvent(const BackendEvent& ev, double now);
+    bool handleCinematic(const protocol::Command& c, double now);
+    void cinematicPanic(json& payload, double now);
+    json cinematicState() const;
+    void emitCinematic(bool force = false);
+    cinematic::Director cinematic_;
+    cinematic::PhaseTracker cinematicPhase_;
+    bool cinematicOn_ = false, cinematicSuspended_ = false;
+    std::uint64_t cinematicRecalls_ = 0;
+    std::string cinematicReason_, cinematicEmitted_;
     IModuleServices& services_;
     profiles::IStorageDriver& storage_;
     profiles::Repository repo_;

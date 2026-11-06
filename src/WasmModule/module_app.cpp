@@ -135,6 +135,7 @@ void ModuleApp::update(double now) {
     if (manual.moveForward || manual.moveRight || manual.moveUp || manual.lookRight || manual.lookUp)
         lastAutoSwitch_ = now; // Manual movement pauses the shared mode; it does not turn it off.
     updateAirportAuto(now);
+    updateCinematic(now, manual.moveForward || manual.moveRight || manual.moveUp || manual.lookRight || manual.lookUp || manual.zoomIn || autoMouseDown_);
 
     if (!testDefinition_.empty() && now > testUntil_) {
         services_.mapTestInput("");
@@ -161,6 +162,7 @@ void ModuleApp::update(double now) {
 
 void ModuleApp::onEvent(const BackendEvent& ev, double now) {
     now_ = now;
+    cinematicEvent(ev, now);
     if(airportEvent(ev,now))return;
     if (const auto* m = std::get_if<backend_event::CommBusMessage>(&ev)) {
         onPanelText(m->data, now);
@@ -358,6 +360,7 @@ json ModuleApp::snapshot() const {
                          {"hasCommittedVersion", hasCommitted}}},
             {"pendingCommit", pendingCommit_ ? json(pendingCommit_->requestId) : json(nullptr)},
             {"airports", airportState()},
+            {"cinematic", cinematicState()},
             {"controllers", [this] {
                  json list = json::array();
                  for (const auto& [id, name] : controllers_) list.push_back({{"deviceId", id}, {"name", name}});
@@ -440,6 +443,7 @@ void ModuleApp::handle(const Command& c, double now) {
     }
 
     if(handleAirport(c,now))return;
+    if (handleCinematic(c, now)) return;
 
     // Navigation and camera control -------------------------------------------------------------------------
     if (a == "SelectCamera") {
@@ -816,10 +820,12 @@ void ModuleApp::importProfileCode(const protocol::Command& c, const std::string&
 void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
     if (name == "SaveViewsRequested") { saveViewsRequested_=true; return; }
     if (name == "AirportAutoToggleRequested") { setAirportAuto(!airportAuto_,now_); return; }
+    if (name == "CinematicToggleRequested") { setCinematic(!cinematicOn_, now_); return; }
     if (name == "PanicReleased") {
         // A panic must not hand the camera straight back: switching off Auto switch only clears module state.
         payload["airportAutoStopped"] = airportAuto_;
         if (airportAuto_) setAirportAuto(false, now_);
+        cinematicPanic(payload, now_);
         diag("panic release: " + js::dump(payload));
     }
     if (name == "HeadTrackingToggleRequested") {

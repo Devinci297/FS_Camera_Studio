@@ -50,6 +50,9 @@ state held in the module, so the editor and the mini panel always agree.
 * **Smart views:** mark instrument close-ups as **Glance view** (instrument views are by default). Hold
   **Ctrl + Alt + G** to glance at the one nearest to where you are looking and release to return to the exact view and
   look; **Ctrl + Alt + I** steps through them and **Ctrl + Alt + U** returns. See [smart views](doc/dual-bindings.md#smart-views-glance).
+* **Cinematic mode:** **Cinematic** next to Auto switch, or **Ctrl + Alt + K**, plays an automatic playlist of views
+  chosen for the flight phase, with smooth moves, cuts and an optional slow Commercial drift. Manual movement pauses
+  it; Release, Panic or selecting a view stops it. See [Cinematic mode](doc/dual-bindings.md#cinematic-mode).
 * **Library layout:** category headers contain indented, single-line camera rows, with inline shortcuts and a
   distinct active-view indicator. The main editor shows every camera with its icon and name; the wide bottom mini
   panel shows starred cameras. Its Icons/Labels/Both preference applies only to categories.

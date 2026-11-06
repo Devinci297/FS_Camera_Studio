@@ -510,6 +510,7 @@ std::string Coordinator::activate(const std::string& cameraId, double now, bool 
     if (const auto block = blockReason(); !block.empty()) return block;
     if (cam->mode == profiles::CameraMode::Flyby && (targetAt_ < 0 || now-targetAt_ > 5 || !std::isfinite(targetHeading_)))
         return "Waiting for the aircraft position before starting a fly-by.";
+    ++recalls_;
     glance_.reset(); glanceReturn_.reset();  // recalling any view ends a glance without returning
     if (!walkaroundAdvancing_) stopWalkaround();
     seedName_.clear();
@@ -590,6 +591,7 @@ void Coordinator::startTransition(const CameraEntry& cam, bool cut) {
     backend_.setFlag(CameraFlag::Interaction, cam.interaction);
     backend_.setFlag(CameraFlag::AboveGround, cam.mode==profiles::CameraMode::Airport);
     core::TransitionSpec spec = cam.transition;
+    if (cinematicTransition_) spec = *cinematicTransition_;
     if (cut || cam.mode == profiles::CameraMode::Flyby) spec.easing = core::Easing::Cut;
     effects_.reset();
     if (!engine_.hasPose()) engine_.place(target);
@@ -1215,7 +1217,8 @@ void Coordinator::submit(bool refreshTrackingPosition) {
     const CameraEntry* cam = activeEntry();
     if (!cam || !eligibleToSubmit()) return;
     if (refreshTrackingPosition) updateAirportTrackingPosition();
-    const auto s = engine_.sample();
+    auto s = engine_.sample();
+    s.pose = cinematicPose(*cam, s.pose);  // Commercial drift: presentation only, never written into the engine
     const auto& aircraftTracking = aircraftTrackingFor(*cam);
     auto submittedPose = effects_.apply(s.pose);
     // Aircraft-relative exterior views aim at the aircraft origin. Interior cameras
@@ -1382,6 +1385,10 @@ void Coordinator::onAction(const ActionEvent& ev, double now) {
             if (!ev.pressed) return;
             emit_("SurfaceRequest", {{"target", "mini"}, {"op", "toggle"}});
             break;
+        case Action::ToggleCinematic:
+            if (!ev.pressed) return;
+            emit_("CinematicToggleRequested", json::object());
+            break;
         default: return;  // continuous actions arrive through setManualInput
     }
     emit_("BindingTriggered", {{"action", profiles::toString(ev.action)}, {"viewId", ev.viewId},
@@ -1499,6 +1506,7 @@ void Coordinator::tick(double now) {
         updateAirportTrackingPosition();
         updateAirportAutoZoom(dt);
         updateBinoculars(dt);
+        cinematicDrift_.tick(dt, cinematicDriftHold_ || manualActive, motionPaused_);
         updateHorizon(dt, now);
         updateGimbal(dt, now);
         submit(false);
@@ -1698,6 +1706,33 @@ void Coordinator::updateGlance(double now) {
     engine_.place(effectiveAirportPose(*cam));
     engine_.setLook(look);
     emitLook(now, true);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Cinematic mode
+
+bool Coordinator::selectCinematicCamera(const std::string& cameraId, double now, bool acquire, bool cut, const core::DriftSpec& drift) {
+    if (acquire ? !canActivate() : !eligibleToSubmit()) return false;
+    const CameraEntry* cam = profile_ ? profile_->camera(cameraId) : nullptr;
+    if (!cam) return false;
+    // A smooth move between views in the same frame keeps the shown drift offset and fades it; a cut drops it.
+    const CameraEntry* old = state_ == Ownership::Active ? activeEntry() : nullptr;
+    const bool carry = !cut && old && !cinematicCameraId_.empty() && old->id == cinematicCameraId_ && referentialFor(*old) == referentialFor(*cam) &&
+                       old->originLat == cam->originLat && old->originLon == cam->originLon && old->originAltitude == cam->originAltitude;
+    cinematicTransition_ = cut ? core::TransitionSpec{core::Easing::Cut, 0.0, 0.0}
+                               : core::TransitionSpec{core::Easing::Smoothstep5, kCinematicTransitionSeconds, 0.0};
+    const auto error = activate(cameraId, now, false);
+    cinematicTransition_.reset();
+    if (!error.empty()) return false;
+    cinematicDrift_.start(drift, carry);
+    cinematicCameraId_ = cameraId;
+    return true;
+}
+
+core::CameraPose Coordinator::cinematicPose(const CameraEntry& cam, const core::CameraPose& pose) const {
+    // Only the view Cinematic mode chose; a glance on top of it shows the instrument's own pose.
+    if (cinematicCameraId_.empty() || cam.id != cinematicCameraId_ || glanceCurrent()) return pose;
+    return cinematicDrift_.apply(pose);
 }
 
 }  // namespace fscs::host

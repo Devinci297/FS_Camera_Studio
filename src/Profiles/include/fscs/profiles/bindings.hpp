@@ -18,7 +18,8 @@ enum class Action {
     ToggleEditor, ToggleMini, ToggleMouseLook, LookLeft, LookRight, LookUp, LookDown, MoveForward, MoveBack, MoveLeft, MoveRight,
     MoveUp, MoveDown, ZoomIn, ZoomOut, MoveFast, ToggleHeadTracking, ToggleAirportAuto, SaveViews, PanicRelease,
     Binoculars,
-    GlanceHold, GlanceNext, GlanceReturn
+    GlanceHold, GlanceNext, GlanceReturn,
+    ToggleCinematic
 };
 const char* toString(Action a);
 std::optional<Action> parseAction(const std::string& s);
@@ -85,9 +86,16 @@ struct HostSettings {
     double movementPrecisionScale = 1.0;
     // Hold-to-zoom FOV (presentation only, never saved into a pose). May go below the editor's 30-degree floor.
     double binocularsFovDeg = 10;
+    // Cinematic mode (automatic view playlist): dwell range, share of cockpit views, cuts to world-referential views
+    // and the Commercial drift.
+    double cinematicMinSeconds = 8, cinematicMaxSeconds = 20;
+    double cinematicCockpitWeight = .15;
+    bool cinematicCuts = true, cinematicDrift = true;
 };
 constexpr double kBinocularsMinFovDeg = 2;
 constexpr double kBinocularsMaxFovDeg = 60;
+constexpr double kCinematicMinDwellSeconds = 3;
+constexpr double kCinematicMaxDwellSeconds = 300;
 
 constexpr int kSettingsSchemaVersion = 2;
 HostSettings parseHostSettings(const json& settingsDoc);

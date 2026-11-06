@@ -195,6 +195,7 @@
       'mc-delay':'Pause before the transition begins, in seconds.',
       'mc-retain-look':'Remember the temporary look direction when revisiting this camera.',
       'mc-glance':'Offer this cockpit view to the Glance bindings: hold Glance to look at the nearest instrument, release to return.',
+      'mc-cinematic':'Let Cinematic mode show this view in its automatic playlist.',
       'mc-follow-horizon-range':FOLLOW_HORIZON_HELP,
       'mc-follow-horizon-number':FOLLOW_HORIZON_HELP,
       'mc-search':'Filter the camera library by name.',
@@ -336,6 +337,7 @@
     ['toggleAirportAuto', 'Toggle auto airport camera switching', 'Switch to the nearest loaded airport camera from any view'],
     ['toggleMouseLook', 'Toggle mouse look', 'Move within the custom camera without releasing control'],
     ['toggleMini', 'Toggle mini control panel', 'Show or hide the quick-access dock'],
+    ['toggleCinematic', 'Toggle Cinematic mode', 'Cycle automatically through views that suit the flight phase; releasing the camera or selecting a view stops it'],
   ];
   // Smart views: instrument close-ups marked "Glance view" in a cockpit camera's Behavior settings.
   const GLANCE = [
@@ -535,6 +537,7 @@
       setPrecision(S.working.settings.ui.precision || 'normal');
       if (S.working.settings.ui.miniPinned && !IS_MINI) setMiniPinned(true, false);
     }
+    S.cinematic = p.cinematic || S.cinematic;
     applySettings();
     render();
     renderVisiblePage();
@@ -613,6 +616,7 @@
     ControllerInputCaptured: onControllerInputCaptured,
     ControllerCaptureStatus: onControllerCaptureStatus,
     BinocularsChanged(p) { S.binoculars = p && p.active ? { fovDeg: p.fovDeg } : null; renderBinoculars(); },
+    CinematicChanged(p) { S.cinematic = p || null; renderCameraTools(); },
     PanicReleased(p) {
       S.userReleased = true;
       if (p.state === 'Observing' || p.state === 'Releasing') announceReleased();
@@ -1379,6 +1383,7 @@
     $('mc-default-view').title=view.airportIcao?'Shared airport cameras cannot be the default view for an aircraft profile.':'';
     $('mc-glance').disabled = ro || view.mode !== 'aircraftCockpit';
     $('mc-glance-note').textContent = view.mode === 'aircraftCockpit' ? 'Hold Glance to look at the nearest instrument view, release to return.' : 'Only cockpit views can be glance views.';
+    renderCinematicBehavior(view, ro);
   }
   function renderViewButton() {
     const control = $('mc-view-in-sim');
@@ -1741,6 +1746,7 @@
       temporaryLookPolicy: 'resetOnRecall', followHorizon: 1, seedDefinitionName: null,
     };
     delete base.glance; // the module derives it from the new camera's icon or name
+    delete base.cinematic; // and Cinematic mode inclusion from its view type
     return Object.assign(base, { id: M.uuid(), categoryId, name, viewId: 0, favorite: true });
   }
   function addCamera() {
@@ -2249,6 +2255,7 @@
       setIcon(automatic,'auto-switch');automatic.hidden=false;automatic.setAttribute('aria-pressed',String(!!S.airports.autoSwitch));
       automatic.disabled=!S.snapshot||(!S.airports.autoSwitch&&(!cameras().some(c=>c.mode==='airport')||!S.airports.positionKnown));
       automatic.title=automatic.disabled?'Load or generate cameras for a nearby airport first.':'Global: select the nearest airport camera automatically. Camera changes and manual movement pause switching for 3 seconds; releasing camera control pauses it until a camera is active again.';
+      renderCinematicToggle(prefix,globalTools,automatic);
       const tour=ensure('walkaround','Walkaround',walkaroundDialog);setIcon(tour,'view-wheel');tour.hidden=!walkaroundAvailable(view);tour.setAttribute('aria-pressed',String(S.walkaround.running));tour.title='Start, stop or configure an automatic tour of exterior cameras';
       let effective=$(prefix+'effective');
       if(!effective){effective=make('span',undefined,'mc-effective-tracking');effective.id=prefix+'effective';anchor.parentNode.insertBefore(effective,anchor);}
@@ -2594,6 +2601,90 @@
     const on = Boolean(S.binoculars) && S.ownership.state === 'Active';
     badge.hidden = !on;
     if (on) badge.textContent = 'Binoculars ' + Math.round(Number(S.binoculars.fovDeg) || 10) + '\u00b0';
+  }
+
+  /* ------------- Cinematic mode (automatic view playlist, run by the module) ------------- */
+  const CINEMATIC_PHASES = { parked: 'Parked', taxi: 'Taxi', takeoffClimb: 'Takeoff & climb', cruise: 'Cruise', approach: 'Approach', landingRoll: 'Landing roll' };
+  // Mirrors defaultCinematic() in the module: outside views, and of the cockpit views only the default view.
+  function cinematicDefault(view) {
+    const mode = view.mode || 'aircraftCockpit';
+    if (mode === 'free') return false;
+    return mode !== 'aircraftCockpit' || Boolean(P() && P().defaultCameraId === view.id);
+  }
+  const cinematicOf = view => (typeof view.cinematic === 'boolean' ? view.cinematic : cinematicDefault(view));
+  function cinematicLabel() {
+    const c = S.cinematic;
+    if (!c || !c.enabled) return 'Cinematic';
+    if (c.state === 'paused') return 'Cinematic: paused';
+    if (c.state === 'suspended') return 'Cinematic: on hold';
+    if (c.state === 'starting') return 'Cinematic: starting';
+    return 'Cinematic: ' + (CINEMATIC_PHASES[c.phase] || 'on');
+  }
+  function renderCinematicToggle(prefix, group, after) {
+    let toggle = $(prefix + 'cinematic');
+    if (!toggle) {
+      toggle = button('Cinematic', () => command('SetCinematic', { enabled: !(S.cinematic && S.cinematic.enabled) }).then(ack => {
+        if (ack && ack.result && ack.result.cinematic) { S.cinematic = ack.result.cinematic; renderCameraTools(); }
+      }), 'mc-secondary mc-airport-auto mc-cinematic-toggle');
+      toggle.id = prefix + 'cinematic';
+    }
+    if (toggle.parentNode !== group || toggle.previousSibling !== after) group.insertBefore(toggle, after.nextSibling);
+    const on = Boolean(S.cinematic && S.cinematic.enabled);
+    toggle.textContent = cinematicLabel();
+    setIcon(toggle, 'view-orbit');
+    toggle.hidden = false;
+    toggle.setAttribute('aria-pressed', String(on));
+    toggle.disabled = !S.snapshot || (!on && !S.caps.canActivate);
+    toggle.title = toggle.disabled ? (S.caps.blockReason || 'Load a flight to use Cinematic mode.')
+      : 'Global: show views that suit the flight phase automatically, each for a random time set in Settings. Moving or looking pauses it for 10 seconds; Release, Panic or selecting a view stops it.';
+  }
+  function renderCinematicBehavior(view, ro) {
+    $('mc-cinematic').checked = cinematicOf(view);
+    $('mc-cinematic').disabled = ro || view.mode === 'free';
+    $('mc-cinematic-note').textContent = view.mode === 'free' ? 'Free cameras are flown by you and are never part of Cinematic mode.'
+      : view.mode === 'aircraftCockpit' ? 'Cockpit views appear occasionally, by the cockpit share in Settings.' : 'Cinematic mode can show this view in its automatic playlist.';
+  }
+  function renderCinematicSettings() {
+    if (!S.working || !$('mc-settings-navigation')) return;
+    let pane = $('mc-settings-section-cinematic');
+    if (!pane) {
+      pane = make('section', undefined, 'mc-settings-pane'); pane.id = 'mc-settings-section-cinematic'; pane.setAttribute('aria-labelledby', 'mc-settings-link-cinematic'); pane.hidden = true;
+      add(pane, make('h4', 'Cinematic mode', 'mc-settings-heading'), make('p', 'An automatic playlist of views chosen for the flight phase. Turn it on with the Cinematic button or its binding.', 'mc-note'));
+      const link = button('Cinematic mode', () => showSettingsSection('cinematic'), 'mc-secondary'); link.id = 'mc-settings-link-cinematic'; link.setAttribute('aria-controls', pane.id);
+      const nav = $('mc-settings-navigation'), airportLink = $('mc-settings-link-airport'), airportPane = $('mc-settings-section-airport');
+      const content = nav.parentNode.querySelector('.mc-settings-content');
+      if (airportLink) nav.insertBefore(link, airportLink.nextSibling); else nav.appendChild(link);
+      if (airportPane) content.insertBefore(pane, airportPane.nextSibling); else content.appendChild(pane);
+      const number = (id, label, help, min, max, step, unit, read, write) => {
+        const row = make('label', undefined, 'mc-inline-field'), copy = make('span', label), input = make('input'), box = make('span', undefined, 'mc-unit');
+        Object.assign(input, { type: 'number', id, min, max, step }); copy.appendChild(make('small', help));
+        input.addEventListener('change', () => { const n = Number(input.value); if (input.value.trim() !== '' && isFinite(n)) write(M.clamp(n, min, max)); input.value = String(read()); settingChanged(); });
+        add(box, input, document.createTextNode(unit)); add(row, copy, box); pane.appendChild(row); return input;
+      };
+      const host = () => S.working.settings.host;
+      const value = (key, fallback) => (host()[key] == null ? fallback : host()[key]);
+      number('mc-setting-cinematic-min', 'Shortest time on a view', 'Each view is shown for a random time between these two', 3, 300, 1, 's',
+        () => value('cinematicMinSeconds', 8), v => { host().cinematicMinSeconds = v; if (value('cinematicMaxSeconds', 20) < v) host().cinematicMaxSeconds = v; });
+      number('mc-setting-cinematic-max', 'Longest time on a view', '3-300 seconds', 3, 300, 1, 's',
+        () => value('cinematicMaxSeconds', 20), v => { host().cinematicMaxSeconds = v; if (value('cinematicMinSeconds', 8) > v) host().cinematicMinSeconds = v; });
+      number('mc-setting-cinematic-cockpit', 'Cockpit views', 'Share of views from the cockpit (0 = only when nothing else is included)', 0, 100, 5, '%',
+        () => Math.round(value('cinematicCockpitWeight', 0.15) * 100), v => { host().cinematicCockpitWeight = Math.round(v) / 100; });
+      const toggle = (id, label, help, key) => {
+        const row = make('label', undefined, 'mc-switch-row'), copy = make('span', undefined, 'mc-switch-copy'), input = make('input');
+        Object.assign(input, { type: 'checkbox', id, className: 'mc-switch' }); input.setAttribute('aria-label', label);
+        add(copy, make('span', label), make('small', help)); add(row, copy, input); pane.appendChild(row);
+        input.addEventListener('change', () => { host()[key] = input.checked; settingChanged(); });
+      };
+      toggle('mc-setting-cinematic-cuts', 'Cut to airport and fly-by views', 'Cut to world-fixed views; other views glide smoothly. Off: glide wherever the views allow it.', 'cinematicCuts');
+      toggle('mc-setting-cinematic-drift', 'Commercial drift', 'A slow, gentle dolly and zoom on exterior and airport views. Never saved into a view.', 'cinematicDrift');
+      pane.appendChild(make('p', 'Moving or looking around pauses Cinematic mode for 10 seconds. Glance and Binoculars hold it on the current view. Release, Panic, selecting a view or the binding stops it. Choose which views take part with Include in Cinematic mode in each camera\'s Behavior settings.', 'mc-note'));
+    }
+    const host = S.working.settings.host, setValue = (id, v) => { if (document.activeElement !== $(id)) $(id).value = String(v); };
+    setValue('mc-setting-cinematic-min', host.cinematicMinSeconds == null ? 8 : host.cinematicMinSeconds);
+    setValue('mc-setting-cinematic-max', host.cinematicMaxSeconds == null ? 20 : host.cinematicMaxSeconds);
+    setValue('mc-setting-cinematic-cockpit', Math.round((host.cinematicCockpitWeight == null ? 0.15 : host.cinematicCockpitWeight) * 100));
+    $('mc-setting-cinematic-cuts').checked = host.cinematicCuts !== false;
+    $('mc-setting-cinematic-drift').checked = host.cinematicDrift !== false;
   }
 
   /* ------------- Save / revert ------------- */
@@ -3804,6 +3895,7 @@
     renderMainOpacitySettings();
     renderGlobalTrackingSettings();
     renderSettingsLayout();
+    renderCinematicSettings();
   }
   function settingChanged() { saveSettings(); applySettings(); renderSettings(); }
 
@@ -4204,6 +4296,7 @@
     });
     $('mc-quick-access').addEventListener('change', () => { const v = current(); if (v) setFavorite(v); });
     $('mc-glance').addEventListener('change', e => { const v = current(); if (!v || readOnly()) return; v.glance = e.target.checked; saveCamera(v); });
+    $('mc-cinematic').addEventListener('change', e => { const v = current(); if (!v || readOnly()) return; v.cinematic = e.target.checked; saveCamera(v); });
     $$('[data-value]', $('mc-mouse-release')).forEach(b => b.addEventListener('click', () => { const view = current(); if (!view || readOnly()) return; view.mouseLookOnRelease = b.dataset.value; saveCamera(view); renderDetails(); }));
     [['mc-retain-look', v => (v ? 'retain' : 'resetOnRecall'), 'temporaryLookPolicy'], ['mc-interaction', v => v, 'interaction']].forEach(entry => $(entry[0]).addEventListener('change', e => {
       const view = current();

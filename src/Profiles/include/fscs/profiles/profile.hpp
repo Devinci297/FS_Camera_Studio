@@ -80,6 +80,7 @@ struct CameraEntry {
     double mountVibration = core::kDefaultMountVibration;  // mounted cameras only, 0..1
     std::string seedDefinitionName;
     bool glance = false;  // offered by the Glance bindings (instrument close-up); cockpit views only
+    bool cinematic = true;  // offered by Cinematic mode (automatic view playlist)
 };
 
 struct CategoryEntry {
@@ -109,6 +110,9 @@ struct ProfileSnapshot {
 // Default for a camera without a `glance` flag: cockpit cameras whose icon, or for an automatic icon whose name,
 // marks them as an instrument view (the editor's "view-instrument" icon).
 bool defaultGlance(const json& camera);
+// Default for a camera without a `cinematic` flag: every exterior, orbit, fly-by, airport and mounted view; of the
+// cockpit views only the profile's default (pilot) view. Free cameras are flown by the user and never included.
+bool defaultCinematic(const json& camera, const std::string& defaultCameraId);
 
 // Requires a document that passed validateProfile.
 ProfileSnapshot toSnapshot(const json& doc);

@@ -6,6 +6,7 @@
 #include "backend.hpp"
 #include "head_tracking.hpp"
 #include "input_router.hpp"
+#include "fscs/core/drift.hpp"
 #include "fscs/core/engine.hpp"
 #include "fscs/core/horizon.hpp"
 #include "fscs/core/mount.hpp"
@@ -60,6 +61,7 @@ public:
     static constexpr double kPreAcquireReadTimeout = 0.3;
     static constexpr double kMaxReconnectBackoff = 10.0;
     static constexpr double kGlanceTransitionSeconds = 0.35;  // both directions, smooth easing
+    static constexpr double kCinematicTransitionSeconds = 2.5;  // smooth Cinematic mode moves, quintic easing
 
     Coordinator(ICameraBackend& backend, EmitFn emit, QualificationFn qualify);
 
@@ -118,6 +120,18 @@ public:
     static constexpr double kBinocularsEaseSeconds = 0.3;
     // Current glance (null when not glancing): {cameraId, returnCameraId, held}. Sent with ActiveCameraChanged.
     json glanceJson() const;
+
+    // Cinematic mode (driven by the host): recalls `cameraId` with a cinematic transition (a cut, or a smooth quintic
+    // move where the frames allow it) and starts its Commercial drift (an empty spec for views without one). A smooth
+    // move keeps the previous drift offset and fades it out. False if the view cannot be shown now.
+    bool selectCinematicCamera(const std::string& cameraId, double now, bool acquire, bool cut, const core::DriftSpec& drift);
+    // Ends the drift at once (Cinematic mode off, release, panic, a manual recall).
+    void stopCinematic() { cinematicDrift_.stop(); cinematicCameraId_.clear(); }
+    // Holds the drift where it is (manual-input pause, glance, binoculars); a carried offset still fades.
+    void holdCinematicDrift(bool hold) { cinematicDriftHold_ = hold; }
+    const core::CommercialDrift& cinematicDrift() const { return cinematicDrift_; }
+    // Accepted recalls of any kind; the host compares it to spot a recall Cinematic mode did not make.
+    std::uint64_t recalls() const { return recalls_; }
 
 private:
     enum class ReadPurpose { None, PreAcquire, Capture, Resume, Seed };
@@ -256,6 +270,14 @@ private:
         core::TemporaryLook look;
     };
     std::optional<GlanceReturn> glanceReturn_;  // returning: re-applies the exact look once the transition lands
+
+    // Cinematic mode: a transition override for the recall it makes, and the presentation-only Commercial drift.
+    core::CameraPose cinematicPose(const profiles::CameraEntry& cam, const core::CameraPose& pose) const;
+    std::optional<core::TransitionSpec> cinematicTransition_;
+    core::CommercialDrift cinematicDrift_;
+    std::string cinematicCameraId_;
+    bool cinematicDriftHold_ = false;
+    std::uint64_t recalls_ = 0;
     bool glanceCurrent() const;
     void dropStaleGlance();
     std::string glanceBlock() const;
