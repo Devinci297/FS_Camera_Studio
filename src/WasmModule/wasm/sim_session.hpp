@@ -31,6 +31,7 @@ public:
     bool requestNearbyAirports() override;
     bool requestAirport(const std::string&, std::uint32_t) override;
     void resolveAirportIdentities(const nlohmann::json&) override;
+    bool requestAirportSummary(const std::string&, std::uint32_t) override;
     bool onAirportRecv(const void*, unsigned long);
     void onRecv(const void* data, unsigned long size);
 
@@ -43,6 +44,7 @@ private:
 
     bool airportDefinitionReady_=false;
     bool airportIdentityDefinitionReady_=false;
+    bool airportSummaryDefinitionReady_=false;
     std::uint32_t airportIdentityRequest_=700000;
     std::map<std::uint32_t,nlohmann::json> airportIdentityRequests_;
     std::map<std::uint32_t,nlohmann::json> airportRequests_;

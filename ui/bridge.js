@@ -415,6 +415,32 @@
     return doc;
   }
 
+  // Temporary airport set, as the module generates it near an airport without saved cameras: runway ends,
+  // spotting views, a few gates and the tower. Local NED meters about the airport origin (authoring axes here:
+  // x east, y up, z north). Shown under Airport; never stored until the user saves it.
+  function demoAirportSet(code) {
+    const origin = { lat: 40, lon: -90, altitude: 100 }, set = { categories: [], cameras: [] };
+    const groups = [
+      ['Runways', 'view-runway', 'runways', [['09 threshold', 'runway:09:threshold', { x: -1000, y: 3, z: -52, yaw: 90, pitch: -2 }], ['27 threshold', 'runway:27:threshold', { x: 1000, y: 3, z: 52, yaw: -90, pitch: -2 }]]],
+      ['Spotting', 'view-runway', 'runways', [['09 fence line', 'spot:09:fence', { x: -1150, y: 3, z: -80, yaw: 86, pitch: -0.2 }], ['09 approach, 1 NM', 'spot:09:final', { x: -2852, y: 7.06, z: 0, yaw: 90, pitch: -0.2 }, 7.06]]],
+      ['Gates', 'view-gate', 'gates', [['Gate A1', 'parking:A1', { x: 100, y: 3, z: 212, yaw: 180, pitch: -10 }]]],
+      ['Tower', 'view-tower', 'tower', [['Tower overview', 'tower', { x: 0, y: 35, z: 300, yaw: 180, pitch: -6 }]]],
+    ];
+    groups.forEach(([name, iconName, heightCategory, cameras]) => {
+      const category = { id: M.uuid(), name, icon: iconName, cameraIds: [] };
+      cameras.forEach(([cameraName, key, pose, minimum]) => {
+        const camera = seedCamera(category.id, cameraName, null, Object.assign({ fov: 62, roll: 0 }, pose), { type: 'airport', favorite: true, transition: { kind: 'cut', durationSeconds: 0.6, delaySeconds: 0 } });
+        Object.assign(camera, { icon: iconName, generatedKey: key, worldOrigin: clone(origin), aircraftTracking: 'both', interaction: false, requiredCapabilities: [],
+          airportHeight: { category: heightCategory, baseAltitudeMeters: origin.altitude, minimumMeters: minimum || 0 } });
+        category.cameraIds.push(camera.id);
+        set.cameras.push(camera);
+      });
+      category.defaultCameraId = category.cameraIds[0];
+      set.categories.push(category);
+    });
+    set.code = code;
+    return set;
+  }
   function createDemoModule(sendFrame) {
     const g = SEED_GROUPS;
     const mine = makeProfile({ name: 'My cameras', defaultName: 'Pilot view', aircraftMatch: { strategy: 'aircraftPath', modelKey: C172.modelKey, variantKey: null, displayName: C172.title, confirmed: false }, categories: [g.cockpit, g.external, g.cabin, g.gear, g.walk, g.orbit, g.flyby] });
@@ -447,6 +473,33 @@
       working: null, selection: { profileId: null, cameraId: null },
     };
     const assembler = new Assembler();
+    // The demo aircraft starts away from the airport; FSCDemo.arriveAtAirport() (or ?demoAirport=1) parks it at KDEM.
+    const demoAirport = { icao: 'KDEM', name: 'Demo Field', transient: true, saved: null, generated: demoAirportSet('KDEM'),
+      nearby: typeof location !== 'undefined' && /[?&]demoAirport=1\b/.test(location.search || '') };
+    demoAirport.profile = clone(demoAirport.generated);
+    // Like the module: a temporary set loads only while Settings > Airport defaults allows it; a saved one always loads.
+    const airportLoaded = () => demoAirport.nearby && (!demoAirport.transient || !m.working || m.working.settings.host.airportAutoGenerate !== false);
+    const isDemoAirport = item => item.airportIcao === demoAirport.icao;
+    function displayProfile() {
+      const p = clone(m.working.profile);
+      if (!airportLoaded()) return p;
+      demoAirport.profile.categories.forEach(c => p.categories.push(Object.assign(clone(c), { airportIcao: demoAirport.icao })));
+      demoAirport.profile.cameras.forEach(c => p.cameras.push(Object.assign(clone(c), { airportIcao: demoAirport.icao })));
+      return p;
+    }
+    function splitDisplay(doc) {
+      if (!airportLoaded()) return doc;
+      demoAirport.profile = { categories: doc.categories.filter(isDemoAirport), cameras: doc.cameras.filter(isDemoAirport) };
+      return Object.assign({}, doc, { categories: doc.categories.filter(c => !isDemoAirport(c)), cameras: doc.cameras.filter(c => !isDemoAirport(c)) });
+    }
+    const airportDirty = () => Boolean(demoAirport.saved) && !same(demoAirport.profile, demoAirport.saved);
+    function airportsPayload() {
+      const loaded = airportLoaded() ? demoAirport.icao : '', host = m.working ? m.working.settings.host : {};
+      return { scope: 'global', autoSwitch: false, loaded, loadedName: loaded ? demoAirport.name : '', pinned: '', transient: Boolean(loaded) && demoAirport.transient,
+        autoGenerate: host.airportAutoGenerate !== false, radiusNm: host.airportRadiusNm || 25, positionKnown: true,
+        nearby: loaded ? [{ icao: demoAirport.icao, name: demoAirport.name, distanceNm: 0.4, transient: demoAirport.transient }] : [],
+        facilities: demoAirport.nearby ? [{ icao: demoAirport.icao, region: 'K1', lat: 40, lon: -90, altitude: 100 }] : [], worldStatus: 'Preview - world coordinates need in-sim qualification' };
+    }
 
     function openWorking(profileId, keepGlobals) {
       const entry = repo.profiles.get(profileId);
@@ -460,12 +513,14 @@
     const workingEntry = () => repo.profiles.get(m.working.profile.profileId);
     const committedProfile = () => (workingEntry() ? workingEntry().committed : null);
     function dirty() {
-      return { profile: !same(m.working.profile, committedProfile()), settings: !same(m.working.settings, repo.settings), bindings: !same(m.working.bindings, repo.bindings) };
+      const aircraftProfile = !same(m.working.profile, committedProfile());
+      return { profile: aircraftProfile || airportDirty(), aircraftProfile, airport: airportDirty(), settings: !same(m.working.settings, repo.settings), bindings: !same(m.working.bindings, repo.bindings) };
     }
     function hasCommittedVersion() {
       const committed = committedProfile();
       const result = {};
       m.working.profile.cameras.forEach(c => { result[c.id] = Boolean(committed && committed.cameras.some(k => k.id === c.id)); });
+      if (airportLoaded()) demoAirport.profile.cameras.forEach(c => { result[c.id] = Boolean(demoAirport.saved && demoAirport.saved.cameras.some(k => k.id === c.id)); });
       return result;
     }
     function matchFor(aircraft) {
@@ -496,9 +551,10 @@
         moduleBootId: m.bootId, sessionEpoch: m.epoch, session: m.session, aircraft: aircraftPayload(),
         ownership: clone(m.ownership), capabilities: capabilities(), activeCamera: clone(m.active), selection: clone(m.selection),
         profiles: summaries(),
-        working: { profile: clone(m.working.profile), settings: clone(m.working.settings), bindings: clone(m.working.bindings), draftRevision: m.working.draftRevision, dirty: dirty(), committedRevision: workingEntry().revision, hasCommittedVersion: hasCommittedVersion() },
+        working: { profile: displayProfile(), settings: clone(m.working.settings), bindings: clone(m.working.bindings), draftRevision: m.working.draftRevision, dirty: dirty(), committedRevision: workingEntry().revision, hasCommittedVersion: hasCommittedVersion() },
         pendingCommit: m.pendingCommit ? { requestId: m.pendingCommit.requestId, revisions: m.pendingCommit.revisions } : null,
         look: clone(m.look),
+        airports: airportsPayload(),
       };
     }
 
@@ -521,8 +577,8 @@
     const broadcastProfiles = () => event('ProfilesChanged', { profiles: summaries() });
     const setOwnership = (state, reason) => { m.ownership = { state, gameControlled: state !== 'Active', reason: reason || null }; event('OwnershipChanged', m.ownership); if (state !== 'Active') setBinoculars(false); };
     const sendActive = () => event('ActiveCameraChanged', m.active);
-    const workingCamera = id => m.working.profile.cameras.find(c => c.id === id);
-    const categoryOf = id => m.working.profile.categories.find(c => c.cameraIds.indexOf(id) >= 0);
+    const workingCamera = id => displayProfile().cameras.find(c => c.id === id);
+    const categoryOf = id => displayProfile().categories.find(c => c.cameraIds.indexOf(id) >= 0);
     const activatable = camera => Boolean(camera && MODE_CAPS[camera.mode] && MODE_CAPS[camera.mode].available);
     const internal = (env, tag) => ({ uiInstanceId: env.uiInstanceId, requestId: env.requestId + ':' + tag });
     function select(cameraId) {
@@ -774,11 +830,17 @@
           const ops = payload.ops || [];
           ops.forEach(op => { if (op.op === 'setCamera' && op.camera && op.camera.glance === undefined) op.camera.glance = defaultGlance(op.camera); });
           let next;
-          try { next = applyOps(m.working, ops); } catch (error) { return ack(env, 'Rejected', error.reason || 'invalidOps'); }
-          m.working.profile = next.profile; m.working.settings = next.settings; m.working.bindings = next.bindings;
+          const airportBefore = airportLoaded();
+          try { next = applyOps({ profile: displayProfile(), settings: m.working.settings, bindings: m.working.bindings }, ops); } catch (error) { return ack(env, 'Rejected', error.reason || 'invalidOps'); }
+          m.working.profile = splitDisplay(next.profile); m.working.settings = next.settings; m.working.bindings = next.bindings;
           m.working.draftRevision++;
           ack(env, 'Completed', null, { draftRevision: m.working.draftRevision });
           draftChanged(ops, env.uiInstanceId);
+          if (airportBefore !== airportLoaded()) {
+            // The temporary airport set was turned on or off in Settings.
+            if (!workingCamera(m.selection.cameraId)) m.selection = { profileId: m.working.profile.profileId, cameraId: m.working.profile.defaultCameraId };
+            broadcastSnapshot();
+          }
           if (ops.some(op => op.op === 'setSettings')) {
             // Pinning is a global presentation preference: persisted at once, never a pending change.
             repo.settings.ui.miniPinned = Boolean(m.working.settings.ui.miniPinned);
@@ -796,6 +858,7 @@
           const committed = committedProfile();
           if (m.active.cameraId && !committed.cameras.some(c => c.id === m.active.cameraId)) release(null, 'activeViewReverted');
           m.working.profile = clone(committed); m.working.settings = clone(repo.settings); m.working.bindings = clone(repo.bindings);
+          demoAirport.profile = clone(demoAirport.saved || demoAirport.generated);
           m.working.draftRevision++;
           if (!workingCamera(m.selection.cameraId)) m.selection = { profileId: committed.profileId, cameraId: committed.defaultCameraId };
           ack(env, 'Completed');
@@ -825,6 +888,7 @@
             }
             repo.settings = captured.settings;
             repo.bindings = captured.bindings;
+            if (!demoAirport.transient) demoAirport.saved = clone(demoAirport.profile); // a temporary set is only stored by its own Save
             event('CommitCompleted', { requestId, status: 'Committed', revisions, message: null });
             draftChanged([], null);
             broadcastProfiles();
@@ -1003,6 +1067,17 @@
           if (!caps.canActivate && (m.ownership.state === 'Active' || m.ownership.state === 'Acquiring')) release(null, 'qualificationEnded');
           return event('CapabilitiesChanged', caps);
         }
+        case 'SaveTemporaryAirport': {
+          if (!demoAirport.transient || payload.icao !== demoAirport.icao || !airportLoaded()) return ack(env, 'Rejected', 'These airport cameras are already saved.');
+          const revisions = { draft: m.working.draftRevision };
+          ack(env, 'Pending', null, { revisions });
+          return later(() => {
+            // Same IDs: the active view and any view bindings carry over.
+            demoAirport.transient = false; demoAirport.saved = clone(demoAirport.profile);
+            event('CommitCompleted', { requestId: env.requestId, kind: 'airport', status: 'Committed', revisions, message: null, report: { icao: demoAirport.icao, temporary: true } });
+            broadcastSnapshot();
+          }, 300, true);
+        }
         case 'GetDiagnostics':
           return ack(env, 'Completed', null, { text: ['FS Camera Studio demo module', 'moduleBootId: ' + m.bootId, 'sessionEpoch: ' + m.epoch, 'session: ' + m.session, 'ownership: ' + m.ownership.state, 'working profile: ' + m.working.profile.name + ' (draft ' + m.working.draftRevision + ')', 'instances: ' + m.instances.size].join('\n') });
         default: return ack(env, 'Rejected', 'unknownAction');
@@ -1046,6 +1121,16 @@
       newEpoch() { m.epoch++; event('SessionChanged', { moduleBootId: m.bootId, sessionEpoch: m.epoch, session: m.session, reason: 'flightRestarted' }); },
       reboot() { m.bootId = 'demo-' + randomHex(8); },
       setOwnership(state, reason) { setOwnership(state, reason); },
+      // Taxi to (or away from) the demo airport: within its radius the module shows its temporary airport set.
+      arriveAtAirport(nearby) {
+        const next = nearby !== false;
+        if (demoAirport.nearby === next) return airportsPayload();
+        if (!next && m.active.cameraId && isDemoAirport({ airportIcao: (workingCamera(m.active.cameraId) || {}).airportIcao })) release(null, 'airportUnloaded');
+        demoAirport.nearby = next; m.working.draftRevision++;
+        if (!workingCamera(m.selection.cameraId)) m.selection = { profileId: m.working.profile.profileId, cameraId: m.working.profile.defaultCameraId };
+        broadcastSnapshot();
+        return airportsPayload();
+      },
       binoculars(down) { setBinoculars(Boolean(down) && m.ownership.state === 'Active'); return Boolean(m.binoculars); },
       raiseFault(code, message) { clearMotion(); setOwnership('Faulted', code || 'adapterError'); event('FaultRaised', { code: code || 'adapterError', message: message || 'The simulator rejected a camera update.' }); },
       get state() { return clone({ session: m.session, ownership: m.ownership, active: m.active, selection: m.selection, draftRevision: m.working.draftRevision, dirty: dirty(), instances: Array.from(m.instances.keys()) }); },

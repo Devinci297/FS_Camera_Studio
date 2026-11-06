@@ -126,6 +126,19 @@ private:
     std::string loadedAirport_, pinnedAirport_;
     double lastAirportRefresh_=-100;
     bool airportDirty() const;
+    // Temporary airport sets (airports.cpp): generated in memory, never stored until saved.
+    bool airportAutoGenerate() const;
+    json transientAirportList(json savedNearby, double now);
+    void requestAutoAirport(const std::string& code, double now);
+    bool autoAirportFacility(const backend_event::AirportFacility& e, double now);
+    bool saveTemporaryAirport(const protocol::Command& c, double now);
+    struct AutoAirportJob { std::string icao; double deadline=0; };
+    std::set<std::string> transientAirports_;
+    std::map<std::string,json> airportFacilityCache_;  // per-session, by ICAO; null = no usable scenery data
+    std::map<std::uint32_t,AutoAirportJob> autoAirportJobs_;
+    std::map<std::string,double> autoAirportRetry_;
+    double lastAutoDiscovery_=-1000;
+    profiles::airport::Geo autoDiscoveryAt_{NAN,NAN,NAN};
     IModuleServices& services_;
     profiles::IStorageDriver& storage_;
     profiles::Repository repo_;

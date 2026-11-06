@@ -578,7 +578,7 @@ TEST_CASE("module: airport preview saves separate files, loads one nearby tree a
     CHECK(aFile);CHECK(bFile);
     m.panel("RequestSnapshot");auto snap=m.lastEvent("Snapshot")["payload"];
     CHECK_EQ(snap["airports"]["loaded"],json("KAAA"));CHECK_EQ(snap["airports"]["nearby"].size(),std::size_t{2});
-    CHECK_EQ(snap["working"]["profile"]["cameras"].size(),aircraft["cameras"].size()+8);
+    CHECK_EQ(snap["working"]["profile"]["cameras"].size(),aircraft["cameras"].size()+12);
     auto cam=snap["working"]["profile"]["cameras"].back();CHECK(snap["working"]["hasCommittedVersion"][js::str(cam,"id")].get<bool>());
     cam["name"]="My tower";
     auto edit=m.panel("UpdateDraft",{{"ops",{{{"op","setCamera"},{"camera",cam}}}}},"main-1",m.app.draftRevision());

@@ -62,7 +62,10 @@ state held in the module, so the editor and the mini panel always agree.
 * **Airport cameras:** open **Camera library + → Create airport cameras**, choose a nearby airport or enter ICAOs,
   preview generated views and save the selected ones. Runway, gate/apron, tower and offset taxiway-intersection
   views use available scenery facility data. Optional airport XML supplies actual taxi-sign positions.
-  Airport views are stored globally, independently of aircraft profiles. One nearby saved airport loads at a time. See
+  Airport views are stored globally, independently of aircraft profiles. One nearby saved airport loads at a time.
+  Near an airport without saved views, a **temporary** set (tower or virtual tower, runway ends, fence-line and
+  1 NM approach spotting views, a few gates) loads automatically; choose **Save** in the library to keep it, or turn
+  it off in Settings > Airport defaults. In the browser demo, open `ui/index.html?demoAirport=1`. See
   [airport defaults and overrides](doc/airport-camera-settings.md) for global tracking, category heights, auto zoom
   and distant-target horizon protection. Each airport camera can override these defaults independently.
 
@@ -71,8 +74,8 @@ state held in the module, so the editor and the mini panel always agree.
 The tester release and illustrated manual are available from
 [GitHub Releases](https://github.com/Devinci297/FS_Camera_Studio/releases).
 The app bar displays the version; click it for update detection and the installer download.
-Close MSFS before installing an update. Airport cameras that have been generated **and saved**
-load automatically within the configured radius (25 NM by default); Auto switch is a separate viewpoint control.
+Close MSFS before installing an update. Saved airport cameras load automatically within the configured radius
+(25 NM by default); other airports get a temporary set until you save it. Auto switch is a separate viewpoint control.
 
 ### Reproduce version 0.3.0
 

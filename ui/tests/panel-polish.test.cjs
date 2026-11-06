@@ -32,8 +32,8 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await page.mouse.down();await page.waitForTimeout(420);await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
   const stopped=Number(await page.locator('#mc-pose-y').inputValue());await page.waitForTimeout(300);assert.equal(Number(await page.locator('#mc-pose-y').inputValue()),stopped,'Focus loss stops');await page.mouse.up();
   await page.locator('#mc-add').click();await page.getByRole('button',{name:'Create airport cameras',exact:true}).click();
-  assert.equal(await page.locator('.mc-airport-check svg[data-icon="check"]').count(),4);
-  assert.equal(await page.locator('.mc-airport-choice-copy strong svg').count(),4);
+  assert.equal(await page.locator('.mc-airport-check svg[data-icon="check"]').count(),5); // runways, spotting, gates, taxi, tower
+  assert.equal(await page.locator('.mc-airport-choice-copy strong svg').count(),5);
   await page.locator('#mc-airport-tower').click();assert.equal(await page.locator('#mc-airport-tower').getAttribute('aria-checked'),'false');
   await page.locator('#mc-dialog-close').click();
   const count=await page.evaluate(()=>FSCApp.state.working.profile.cameras.length);
