@@ -203,12 +203,27 @@
         sentHeight = height;
         try { const r = api.fscsPanelSize({ surface: 'mini', height }); if (r && typeof r.catch === 'function') r.catch(() => {}); } catch (error) { /* older plugin */ }
       };
+      // Hover (Settings > mini panel hover, as in MSFS): the plugin hides the window until the mouse reaches the bottom of
+      // the screen below it, and hides it again once the mouse leaves. Pinned, or with a dialog open, it stays shown.
+      let sentHover = null;
+      const sendHover = () => {
+        const api = root.xplane, doc = root.document, sim = doc && doc.getElementById && doc.getElementById('mc-sim');
+        if (!api || typeof api.fscsPanelHover !== 'function' || !sim) return;
+        const shade = doc.getElementById('mc-dialog-shade');
+        const autoHide = sim.dataset.xpHover === 'true' && sim.dataset.miniPinned !== 'true' && !(shade && !shade.hidden);
+        if (autoHide === sentHover) return;
+        sentHover = autoHide;
+        try { const r = api.fscsPanelHover({ surface: 'mini', autoHide }); if (r && typeof r.catch === 'function') r.catch(() => {}); } catch (error) { /* older plugin */ }
+      };
       root.fscsUpdateMiniRect = () => (typeof root.requestAnimationFrame === 'function' ? root.requestAnimationFrame(fitMini) : setTimeout(fitMini, 16));
       const watch = () => {
         const doc = root.document, dock = doc && doc.getElementById && doc.getElementById('mc-mini-panel'), shade = doc && doc.getElementById && doc.getElementById('mc-dialog-shade');
+        const sim = doc && doc.getElementById && doc.getElementById('mc-sim');
         if (dock && typeof root.ResizeObserver === 'function') new root.ResizeObserver(root.fscsUpdateMiniRect).observe(dock);
-        if (shade && typeof root.MutationObserver === 'function') new root.MutationObserver(root.fscsUpdateMiniRect).observe(shade, { attributes: true, attributeFilter: ['hidden'] });
+        if (shade && typeof root.MutationObserver === 'function') new root.MutationObserver(() => { root.fscsUpdateMiniRect(); sendHover(); }).observe(shade, { attributes: true, attributeFilter: ['hidden'] });
+        if (sim && typeof root.MutationObserver === 'function') new root.MutationObserver(sendHover).observe(sim, { attributes: true, attributeFilter: ['data-xp-hover', 'data-mini-pinned'] });
         root.fscsUpdateMiniRect();
+        sendHover();
       };
       if (root.document && root.document.readyState === 'loading') root.document.addEventListener('DOMContentLoaded', watch);
       else if (root.document && root.document.getElementById) watch();

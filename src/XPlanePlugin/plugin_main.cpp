@@ -366,7 +366,7 @@ float flightLoop(float elapsedSinceLastCall, float, int, void*) {
     for (const auto& e : events) deliver(e);
     g->app->update(g->now);
     g->camera.frame();
-    g->panels.updateDrag();
+    g->panels.update(g->now);
     g->panels.flush();
     return -1.0f;  // every frame
 }

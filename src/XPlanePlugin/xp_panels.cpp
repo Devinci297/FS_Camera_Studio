@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdio>
 
 namespace fscs::xplane {
@@ -90,6 +91,7 @@ void PanelWindows::create(Surface s) {
     XPLMWindowAddBrowserFunction(w.id, "fscsPanel", &PanelWindows::onPanel, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanelSize", &PanelWindows::onPanelSize, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanelDrag", &PanelWindows::onPanelDrag, &w);
+    XPLMWindowAddBrowserFunction(w.id, "fscsPanelHover", &PanelWindows::onPanelHover, &w);
     XPLMWindowSetURL(w.id, (url_ + "?surface=" + kSurfaceName[s] + "&host=xplane").c_str());
 }
 
@@ -97,14 +99,29 @@ void PanelWindows::show(Surface s, bool visible) {
     if (visible) create(s);
     Win& w = wins_[s];
     if (!w.id) return;
-    XPLMSetWindowIsVisible(w.id, visible ? 1 : 0);
+    w.wanted = visible;
+    if (visible) {
+        w.revealed = true;  // opening it shows it, even in hover mode, until the mouse has been and gone
+        w.leftAt = -1;
+    }
+    apply(w);
     if (visible) XPLMBringWindowToFront(w.id);
-    else if (XPLMHasKeyboardFocus(w.id)) XPLMTakeKeyboardFocus(nullptr);
+}
+
+// Shown when open, unless a hover mini is waiting for the mouse.
+void PanelWindows::apply(Win& w) {
+    if (!w.id) return;
+    const bool on = w.wanted && (!w.autoHide || w.revealed || w.dragging);
+    if ((XPLMGetWindowIsVisible(w.id) != 0) == on) return;
+    XPLMSetWindowIsVisible(w.id, on ? 1 : 0);
+    if (!on && XPLMHasKeyboardFocus(w.id)) XPLMTakeKeyboardFocus(nullptr);
 }
 
 void PanelWindows::toggle(Surface s) { show(s, !visible(s)); }
 
-bool PanelWindows::visible(Surface s) const { return wins_[s].id && XPLMGetWindowIsVisible(wins_[s].id); }
+bool PanelWindows::visible(Surface s) const { return wins_[s].id && wins_[s].wanted; }
+
+bool PanelWindows::shown(Surface s) const { return wins_[s].id && XPLMGetWindowIsVisible(wins_[s].id); }
 
 void PanelWindows::keyboard(Surface s, bool focused) {
     const XPLMWindowID id = wins_[s].id;
@@ -127,7 +144,29 @@ void PanelWindows::fitHeight(Surface s, int height) {
     XPLMSetWindowGeometry(id, left, bottom + height, right, bottom);
 }
 
-void PanelWindows::updateDrag() {
+// Hover mode: the mouse at the bottom edge of the screen, below the window, brings it up; it goes away once the
+// mouse has been off it (and off the band below it) for a moment.
+void PanelWindows::updateHover(Win& w, double now) {
+    if (!w.id || !w.wanted || !w.autoHide || w.dragging) return;
+    int x = 0, y = 0, left = 0, top = 0, right = 0, bottom = 0, sl = 0, st = 0, sr = 0, sb = 0;
+    XPLMGetMouseLocationGlobal(&x, &y);
+    XPLMGetWindowGeometry(w.id, &left, &top, &right, &bottom);
+    XPLMGetScreenBoundsGlobal(&sl, &st, &sr, &sb);
+    const bool overColumn = x >= left - kHoverMargin && x <= right + kHoverMargin;
+    const bool atEdge = overColumn && y <= sb + kRevealBand;
+    const bool over = overColumn && y <= top + kHoverMargin && y >= std::min(bottom, sb) - kHoverMargin;
+    if (atEdge || (w.revealed && over) || (w.revealed && XPLMHasKeyboardFocus(w.id))) {
+        w.revealed = true;
+        w.leftAt = -1;
+    } else if (w.revealed) {
+        if (w.leftAt < 0) w.leftAt = now;
+        if (now - w.leftAt >= kHideDelaySeconds) w.revealed = false;
+    }
+    apply(w);
+}
+
+void PanelWindows::update(double now) {
+    for (Win& w : wins_) updateHover(w, now);
     for (Win& w : wins_) {
         if (!w.dragging) continue;
         if (!w.id || !XPLMGetWindowIsVisible(w.id)) {
@@ -160,6 +199,8 @@ void PanelWindows::destroy() {
         w.id = nullptr;
         w.loaded = false;
         w.dragging = false;
+        w.wanted = w.revealed = w.autoHide = false;
+        w.leftAt = -1;
     }
     outbox_.clear();
 }
@@ -198,6 +239,19 @@ const char* PanelWindows::onPanelSize(XPLMWindowID, const char* text, void* refc
     // Only the mini follows its content; the editor keeps the size the user gives it.
     if (w->surface != Mini) return XPLMReturnString("false");
     w->owner->fitHeight(Mini, static_cast<int>(arg["height"].get<double>()));
+    return XPLMReturnString("true");
+}
+
+const char* PanelWindows::onPanelHover(XPLMWindowID, const char* text, void* refcon) {
+    auto* w = static_cast<Win*>(refcon);
+    const json arg = json::parse(text ? text : "", nullptr, false);
+    if (!w || !w->id || !arg.is_object() || w->surface != Mini) return XPLMReturnString("false");
+    const bool autoHide = arg.value("autoHide", false);
+    if (autoHide != w->autoHide) {
+        w->autoHide = autoHide;
+        w->leftAt = -1;  // the hide delay starts again from now
+        w->owner->apply(*w);
+    }
     return XPLMReturnString("true");
 }
 

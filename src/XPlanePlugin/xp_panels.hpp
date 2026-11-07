@@ -7,6 +7,7 @@
 //   page -> plugin   xplane.fscsPanel({surface, open})  the UI's own open/close buttons
 //   page -> plugin   xplane.fscsPanelSize({surface, height})  the mini fits its window to the dock
 //   page -> plugin   xplane.fscsPanelDrag({surface, phase})   "start"/"end": the window follows the mouse between
+//   page -> plugin   xplane.fscsPanelHover({surface, autoHide})  the mini hides until the mouse reaches the bottom edge
 // The windows are self-decorated: the page draws its own frame, header and close button, as in MSFS.
 // Windows are created the first time they are shown.
 
@@ -26,13 +27,19 @@ public:
     void init(std::string uiIndexUrl, std::function<void(Surface, std::string)> inbound);
     void show(Surface s, bool visible);
     void toggle(Surface s);
+    // Open as far as the user is concerned: a hover-hidden mini still counts as open.
     bool visible(Surface s) const;
+    // Drawn on screen now.
+    bool shown(Surface s) const;
     // The page in `s` has a text field focused: give that window the keyboard, or hand it back to X-Plane.
     void keyboard(Surface s, bool focused);
     // Sets a window's content height in boxels, keeping its bottom edge (the mini dock grows upwards).
     void fitHeight(Surface s, int height);
-    // Moves a window that is being dragged by its page; call every frame.
-    void updateDrag();
+    // Every frame: moves a window that is being dragged by its page, and hides or reveals a hover mini.
+    void update(double now);
+    static constexpr int kRevealBand = 6;           // boxels above the screen's bottom edge that reveal the mini
+    static constexpr int kHoverMargin = 16;         // around the window, still counted as over it
+    static constexpr double kHideDelaySeconds = 0.8;
     void post(const std::string& frame);  // a module frame for every page, delivered by flush()
     void flush();
     void destroy();
@@ -46,7 +53,14 @@ private:
         Surface surface = Main;
         bool dragging = false;
         int mouseX = 0, mouseY = 0, left = 0, top = 0, right = 0, bottom = 0;  // at the start of the drag
+        bool wanted = false;    // open (menu, command or the page's own buttons)
+        bool autoHide = false;  // hover mode, set by the page
+        bool revealed = false;  // hover mode: the mouse brought it up
+        double leftAt = -1;     // hover mode: when the mouse left it
     };
+    void apply(Win& w);
+    void updateHover(Win& w, double now);
+    static const char* onPanelHover(XPLMWindowID window, const char* json, void* refcon);
     void create(Surface s);
     static const char* onFrame(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanel(XPLMWindowID window, const char* json, void* refcon);

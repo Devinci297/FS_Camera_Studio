@@ -553,6 +553,34 @@ int main(int argc, char** argv) {
         check(win->params.left == left + 40, "the window stays put after the drag ends");
     }
 
+    // Hover mode: the page asks for it, the mini hides until the mouse reaches the bottom edge below it.
+    if (mini && mini->functions.count("fscsPanelHover")) {
+        auto [hoverFn, hoverRefcon] = mini->functions.at("fscsPanelHover");
+        const int midX = (mini->params.left + mini->params.right) / 2;
+        g_mouseX = midX;
+        g_mouseY = 900;  // well above the dock
+        check(std::string(hoverFn(mini, R"({"surface":"mini","autoHide":true})", hoverRefcon)) == "true", "fscsPanelHover accepts hover mode");
+        frames(60);
+        check(!mini->visible && pubi("xpcs/mini_open") == 1, "a hover mini hides when the mouse is elsewhere, and still counts as open");
+        g_mouseY = 2;
+        frames(1);
+        check(mini->visible, "the mouse at the bottom edge below it brings it up");
+        g_mouseY = (mini->params.top + mini->params.bottom) / 2;
+        frames(90);
+        check(mini->visible, "it stays up while the mouse is over it");
+        g_mouseX = 100;  // left of the window
+        g_mouseY = 2;
+        frames(60);
+        check(!mini->visible, "the bottom edge away from it does not bring it up, and it hides after the mouse leaves");
+        hoverFn(mini, R"({"surface":"mini","autoHide":false})", hoverRefcon);
+        frames(1);
+        check(mini->visible, "pinned (autoHide false) it is shown again");
+        g_mouseX = 500;
+        g_mouseY = 500;
+    } else {
+        check(false, "the mini window registers fscsPanelHover");
+    }
+
     // Cameras (phase 2). The cockpit camera sits on the default eyepoint: the pilot's head goes there, with its FOV.
     auto state = [&]() {
         page.send("RequestSnapshot");

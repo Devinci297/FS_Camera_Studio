@@ -5013,8 +5013,10 @@
     $('mc-name-display-label').textContent='Mini panel category display';
     root.dataset.nameDisplay = ui.nameDisplay === 'icons' || ui.nameDisplay === 'labels' ? ui.nameDisplay : 'both';
     layoutMiniCategories();
-    // X-Plane opens the mini as its own window (Plugins menu or xpcs/toggle_mini): no hover strip to reveal, so the dock stays shown.
+    // X-Plane opens the mini as its own window (Plugins menu or xpcs/toggle_mini): the page shows the dock, and the plugin
+    // hides and reveals the whole window at the bottom edge (bridge.js reads data-xp-hover).
     if (IS_MINI) applyMiniMode(ui.miniEnabled === false ? 'off' : ui.miniHover !== false && bridge.mode !== 'xplane' ? 'hover' : 'always');
+    if (IS_MINI && bridge.mode === 'xplane') root.dataset.xpHover = String(ui.miniEnabled !== false && ui.miniHover !== false);
     if (Boolean(ui.miniPinned) !== miniPinned) setMiniPinned(Boolean(ui.miniPinned), false);
   }
   /** Mini surface (design sec. 4.4/sec. 4.5): handle + hover reveal, fixed dock, or a short note when turned off. */
