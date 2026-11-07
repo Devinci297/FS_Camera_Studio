@@ -6,7 +6,6 @@
 #include "XPLMUtilities.h"
 
 #include <cstdio>
-#include <cstring>
 
 namespace {
 
@@ -14,8 +13,7 @@ namespace {
 constexpr int kMinXplmVersion = 440;
 
 void copyOut(char* out, const char* text) {
-    std::strncpy(out, text, 255);
-    out[255] = '\0';
+    std::snprintf(out, 256, "%s", text);  // X-Plane passes 256-byte buffers
 }
 
 void log(const char* text) {
