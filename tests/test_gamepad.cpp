@@ -253,14 +253,16 @@ struct PadRig {
 TEST_CASE("gamepad: the module maps the axes once, turns them on only while a drone is shown, and the sticks fly it") {
     PadRig m;
     m.setUp({{"gamepadAxes", layoutJson()}});
+    // Nothing is mapped while the simulator loads, nor on an exterior view: the sticks stay the simulator's.
+    CHECK_EQ(m.services.axisMaps, 0);
+    m.show(m.exterior);
+    CHECK_EQ(m.services.axisMaps, 0);
+    CHECK(!m.services.axesEnabled);
+    m.show(m.drone);
     CHECK_EQ(m.services.axes.size(), std::size_t(5));
     CHECK(m.services.axesMask);  // masked from the aircraft by default
     const int maps = m.services.axisMaps;
-    CHECK(!m.services.axesEnabled);
-    // An exterior view: the sticks stay the simulator's.
-    m.show(m.exterior);
-    CHECK(!m.services.axesEnabled);
-    m.show(m.drone);
+    CHECK_EQ(maps, 1);
     CHECK(m.services.axesEnabled);
     const auto start = m.shown();
     // Left stick fully forward for two seconds, sampled about six times a second as SimConnect reports it.
@@ -293,8 +295,11 @@ TEST_CASE("gamepad: the module maps the axes once, turns them on only while a dr
     // Turning the mask off remaps without it; turning the sticks off keeps the drone's axes off.
     settings["host"]["gamepadBlocksAircraft"] = false;
     m.ack("UpdateDraft", {{"ops", {{{"op", "setSettings"}, {"settings", settings}}}}});
+    CHECK_EQ(m.services.axisMaps, maps);  // remapped only when a drone is shown again
+    m.show(m.drone);
     CHECK_EQ(m.services.axisMaps, maps + 1);
     CHECK(!m.services.axesMask);
+    CHECK(m.services.axesEnabled);
     settings["host"]["gamepadSticksEnabled"] = false;
     m.ack("UpdateDraft", {{"ops", {{{"op", "setSettings"}, {"settings", settings}}}}});
     m.show(m.drone);
@@ -349,4 +354,92 @@ TEST_CASE("gamepad: Listen reports the moved axis with its rest and full values,
     }
     CHECK_EQ(m.services.axisCaptureDevice, -1);
     CHECK_EQ(js::str(m.lastEvent("AxisCaptureStatus")["payload"], "state"), std::string("timeout"));
+}
+
+TEST_CASE("gamepad: the standard layout calibrates each axis from its first sample, like the simulator's drone") {
+    GamepadSticks g;
+    const auto& defs = g.configureStandard(4, 0.1);
+    CHECK(g.standard());
+    CHECK_EQ(defs.size(), std::size_t(6));
+    CHECK_EQ(defs[0], std::string("joystick:4:XAxis"));
+    enum { X, Y, Rx, Ry, Z, Rz };
+    // Sticks centred, both triggers on one Z axis (rest 0), Z rotation centred (unused).
+    for (int i = 0; i < 6; ++i) g.onAxis(static_cast<std::size_t>(i), 100);
+    CHECK(!g.active());
+    g.onAxis(Y, -32767);
+    g.onAxis(X, 32767);
+    g.onAxis(Rx, -32767);
+    g.onAxis(Ry, -32767);
+    auto m = g.input();
+    CHECK(near(m.moveForward, 1) && near(m.moveRight, 1) && near(m.lookRight, -1) && near(m.lookUp, 1));
+    g.onAxis(Z, -32767);
+    CHECK(near(g.input().moveUp, 1));   // right trigger climbs
+    g.onAxis(Z, 32767);
+    CHECK(near(g.input().moveUp, -1));  // left trigger descends
+    g.onAxis(Rz, 32767);
+    CHECK(near(g.input().moveUp, -1));  // a centred Z rotation is not a trigger
+    // Turning off forgets the calibration: next time the triggers are separate, resting at one end.
+    g.neutral();
+    g.onAxis(Z, -32768);
+    g.onAxis(Rz, -32768);
+    CHECK(near(g.input().moveUp, 0));
+    g.onAxis(Rz, 32767);
+    CHECK(near(g.input().moveUp, 1));   // right trigger (Z rotation) climbs
+    g.onAxis(Z, 32767);
+    CHECK(near(g.input().moveUp, 0));   // with the left trigger (Z) descending, they cancel
+    g.onAxis(Rz, -32768);
+    CHECK(near(g.input().moveUp, -1));
+    // A stick axis that first reports an end is not trusted.
+    g.neutral();
+    g.onAxis(X, 32767);
+    CHECK(near(g.input().moveRight, 0));
+    // Same device: samples and calibration are kept; a dead zone change applies; no device maps nothing.
+    g.neutral();
+    g.onAxis(Y, 0);
+    g.onAxis(Y, -32767);
+    g.configureStandard(4, 0.3);
+    CHECK(near(g.input().moveForward, 1));
+    CHECK(g.configureStandard(-1, 0.1).empty());
+    // Assigned motions replace the standard layout.
+    g.configure(gamepadLayout(), 0.1);
+    CHECK(!g.standard());
+}
+
+TEST_CASE("gamepad: with nothing assigned the module finds the gamepad and flies drones with the standard layout") {
+    PadRig m;
+    m.setUp(json::object());
+    CHECK(m.services.axes.empty());
+    const int requests = m.services.controllerRequests;
+    m.show(m.drone);
+    CHECK(m.services.controllerRequests > requests);  // looking for a gamepad while a drone is shown
+    // Joysticks and throttles are not gamepads.
+    m.app.onEvent(be::ControllersList{{{1, "T.16000M"}, {2, "TWCS Throttle"}}}, m.t);
+    m.frame();
+    CHECK(m.services.axes.empty());
+    m.app.onEvent(be::ControllersList{{{1, "T.16000M"}, {5, "Controller (Xbox One For Windows)"}}}, m.t);
+    m.frame();
+    CHECK_EQ(m.services.axes.size(), std::size_t(6));
+    CHECK_EQ(m.services.axes[1], std::string("joystick:5:YAxis"));
+    CHECK(m.services.axesMask);
+    const auto state = m.lastEvent("GamepadChanged");
+    CHECK_EQ(js::str(state["payload"], "mode"), std::string("standard"));
+    CHECK_EQ(js::str(state["payload"], "deviceName"), std::string("Controller (Xbox One For Windows)"));
+    m.frame();
+    CHECK(m.services.axesEnabled);
+    const auto start = m.shown();
+    for (int i = 0; i < 120; ++i) {
+        if (i % 10 == 0) m.app.onEvent(be::AxisInput{1, i == 0 ? 0 : -32767}, m.t);  // first sample at rest, then forward
+        m.frame();
+    }
+    CHECK(geo::local(start, m.shown()).length() > 0.5);
+    // The same list again changes nothing; assigning a motion replaces the standard layout.
+    const int maps = m.services.axisMaps;
+    m.app.onEvent(be::ControllersList{{{1, "T.16000M"}, {5, "Controller (Xbox One For Windows)"}}}, m.t);
+    CHECK_EQ(m.services.axisMaps, maps);
+    json settings = profiles::defaultSettingsDocument();
+    settings["host"]["gamepadAxes"] = json::array({{{"function", "forward"}, {"definition", "joystick:1:YAxis"}, {"rest", 0}, {"full", -32767}}});
+    m.ack("UpdateDraft", {{"ops", {{{"op", "setSettings"}, {"settings", settings}}}}});
+    m.frame();
+    CHECK_EQ(m.services.axes.size(), std::size_t(1));
+    CHECK_EQ(js::str(m.lastEvent("GamepadChanged")["payload"], "mode"), std::string("custom"));
 }

@@ -230,9 +230,17 @@ while it is shown, like the simulator's own drone camera; `host.gamepadBlocksAir
 (`forward`, `right`, `climb`, `descend`, `yaw`, `pitch`), `definition` (`joystick:<device>:<XAxis|YAxis|ZAxis|RxAxis|RyAxis|RzAxis|Slider>`),
 `label`, `rest` and `full` (raw SimConnect axis values, clamped ±32768, at least 4096 apart)}; the motion's value is
 `(raw − rest) / (full − rest)` clamped to ±1, so a centred stick is bipolar and a trigger resting at one end gives
-0..1; climb less descend is the vertical rate (one combined trigger axis may serve both). After the dead zone the
-response is mostly cubic and full deflection equals the held movement and look keys. The axes are mapped once per
-change and turned on only while a free camera is on screen, not spotting or glancing, and nothing is listening for
+0..1; climb less descend is the vertical rate (one combined trigger axis may serve both). With `host.gamepadAxes`
+empty (the default) the module uses the standard layout, like the simulator's drone camera, with no setup: on the first
+controller that names itself a gamepad (Xbox, XInput, gamepad, DualSense/DualShock, else a generic controller or pad;
+never a yoke, stick, throttle or pedals; looked up every 5 s while a drone is shown and none is known) X/Y axes move,
+X/Y rotation turns and looks (pushed up looks up), and the triggers climb and descend. Each axis is calibrated from its
+first sample after the sticks turn on: within 30000 of an end it is a trigger resting there (Z the left trigger, Z
+rotation the right), otherwise a centred stick (Z then carries both triggers: negative climbs). Any assigned motion
+replaces the whole standard layout. `GamepadChanged` / `Snapshot.gamepad` report {`mode` (`standard`, `custom`),
+`deviceId`, `deviceName`} (the standard layout's controller, null when none is found). After the dead zone the
+response is mostly cubic and full deflection equals the held movement and look keys. The axes are mapped lazily, the
+first time a drone view is shown after a change (never during startup or flight loading), and turned on only while a free camera is on screen, not spotting or glancing, and nothing is listening for
 inputs; turning them off forgets the samples. Invalid entries, a second entry for a motion and spans under 4096 are
 dropped. Missing in older files = defaults.
 Spotting needs no camera profile: chase, fly-by, Next target, auto-spot and the computed runway and tower views work

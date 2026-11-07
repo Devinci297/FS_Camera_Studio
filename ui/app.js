@@ -542,6 +542,7 @@
     S.profiles = p.profiles || [];
     S.airports = p.airports || S.airports;
     S.walkaround = p.walkaround || S.walkaround;
+    S.gamepadState = p.gamepad || S.gamepadState || null;
     S.working = p.working;
     S.pendingCommit = p.pendingCommit || null;
     S.look = p.look || null;
@@ -638,6 +639,7 @@
     ControllerCaptureStatus: onControllerCaptureStatus,
     ControllerAxisCaptured: onControllerAxisCaptured,
     AxisCaptureStatus: onAxisCaptureStatus,
+    GamepadChanged(p) { S.gamepadState = p || null; renderGamepadSettings(); },
     BinocularsChanged(p) { S.binoculars = p && p.active ? { fovDeg: p.fovDeg } : null; renderBinoculars(); },
     CinematicChanged(p) { S.cinematic = p || null; renderCameraTools(); },
     TrafficChanged(p) { S.traffic = p && Array.isArray(p.aircraft) ? p : { aircraft: [], at: null }; renderSpotting(); },
@@ -3764,6 +3766,7 @@
     ['descend', 'Descend', 'Press the trigger you want for descending. Skip this when Climb already does both.'],
     ['yaw', 'Turn right and left', 'Push the stick you want for turning to the right.'],
     ['pitch', 'Look up and down', 'Push the stick in the direction that should look up.']];
+  const GAMEPAD_STANDARD = { forward: 'Left stick up and down', right: 'Left stick left and right', climb: 'Right trigger', descend: 'Left trigger', yaw: 'Right stick left and right', pitch: 'Right stick up and down' };
   function gamepadAxes() { const host = S.working.settings.host; if (!Array.isArray(host.gamepadAxes)) host.gamepadAxes = []; return host.gamepadAxes; }
   function gamepadControllers() { return (S.controllers || []).filter(c => !/^(mouse|keyboard|touch pointer)$/i.test(String(c.name || '').trim())); }
   function stopAxisListen(text) {
@@ -3786,7 +3789,8 @@
     let pane = $('mc-settings-section-gamepad');
     if (!pane) {
       pane = make('section', undefined, 'mc-settings-pane'); pane.id = 'mc-settings-section-gamepad'; pane.setAttribute('aria-labelledby', 'mc-settings-link-gamepad'); pane.hidden = true;
-      add(pane, make('h4', 'Gamepad', 'mc-settings-heading'), make('p', 'Fly drone views with a gamepad, like the simulator\'s drone camera: one stick moves, the other turns, the triggers climb and descend. Assign each motion below by moving the control you want.', 'mc-note'));
+      add(pane, make('h4', 'Gamepad', 'mc-settings-heading'), make('p', 'Fly drone views with a gamepad, like the simulator\'s drone camera: the left stick moves, the right stick turns and looks, the right trigger climbs and the left trigger descends. This works without setup on a connected gamepad. To use other controls, assign a motion below by moving the control you want; once any motion is assigned, only assigned motions are used.', 'mc-note'));
+      const layout = make('p', '', 'mc-note mc-gamepad-layout'); layout.id = 'mc-gamepad-layout'; pane.appendChild(layout);
       const link = button('Gamepad', () => { showSettingsSection('gamepad'); if (!S.controllers) listGamepadControllers(); }, 'mc-secondary'); link.id = 'mc-settings-link-gamepad'; link.setAttribute('aria-controls', pane.id);
       const nav = $('mc-settings-navigation'), after = $('mc-settings-link-movement'), afterPane = $('mc-settings-section-movement');
       const content = nav.parentNode.querySelector('.mc-settings-content');
@@ -3805,14 +3809,14 @@
       Object.assign(input, { type: 'number', id: 'mc-setting-gamepad-deadzone', min: 0, max: 50, step: 1 }); copy.appendChild(make('small', 'Stick travel ignored around the centre (0-50)'));
       input.addEventListener('change', () => { const n = Number(input.value); if (input.value.trim() !== '' && isFinite(n)) host().gamepadDeadzone = Math.round(M.clamp(n, 0, 50)) / 100; settingChanged(); });
       add(box, input, document.createTextNode('%')); add(row, copy, box); pane.appendChild(row);
-      pane.appendChild(make('div', 'Controller', 'mc-section-label mc-spaced'));
+      pane.appendChild(make('div', 'Assign from controller', 'mc-section-label mc-spaced'));
       const devices = make('div', undefined, 'mc-setting-choices mc-gamepad-devices'); devices.id = 'mc-gamepad-devices'; devices.setAttribute('role', 'group'); devices.setAttribute('aria-label', 'Controller to assign from');
       pane.appendChild(devices);
       pane.appendChild(make('div', 'Drone motions', 'mc-section-label mc-spaced'));
       const list = make('div', undefined, 'mc-gamepad-list'); list.id = 'mc-gamepad-list'; pane.appendChild(list);
       const status = make('p', '', 'mc-note'); status.id = 'mc-gamepad-status'; status.setAttribute('aria-live', 'polite'); pane.appendChild(status);
       const actions = make('div', undefined, 'mc-profile-actions');
-      const clearAll = button('Clear all gamepad motions', () => { stopAxisListen('All gamepad motions cleared. Save changes to keep it.'); host().gamepadAxes = []; settingChanged(); }, 'mc-secondary'); clearAll.id = 'mc-gamepad-clear-all';
+      const clearAll = button('Use the standard layout', () => { stopAxisListen('Back to the standard gamepad layout. Save changes to keep it.'); host().gamepadAxes = []; settingChanged(); }, 'mc-secondary'); clearAll.id = 'mc-gamepad-clear-all';
       add(actions, clearAll); pane.appendChild(actions);
       pane.appendChild(make('p', 'Speed follows Move speed and Look speed in Movement; your faster-movement binding works too and can be a gamepad button. Listening for a motion pauses the sticks for a moment.', 'mc-note'));
     }
@@ -3839,13 +3843,15 @@
       const refresh = button('Refresh', listGamepadControllers, 'mc-quiet'); refresh.id = 'mc-gamepad-refresh'; refresh.setAttribute('data-focus-key', 'gamepad-refresh');
       devices.appendChild(refresh);
     });
-    const list = $('mc-gamepad-list'), axes = gamepadAxes();
+    const list = $('mc-gamepad-list'), axes = gamepadAxes(), standard = !axes.length, state = S.gamepadState;
+    $('mc-gamepad-layout').textContent = host.gamepadSticksEnabled === false ? 'Gamepad drone control is off.' : !standard ? 'Using your assigned motions. Clear all to go back to the standard layout.'
+      : state && state.mode === 'standard' && state.deviceName ? 'Standard layout on ' + state.deviceName + '.' : 'Standard layout: waiting for a gamepad. Connect one and show a drone view.';
     keepFocus(list, () => {
       empty(list);
       GAMEPAD_MOTIONS.forEach(([fn, name, prompt]) => {
         const assigned = axes.filter(a => a.function === fn)[0], listening = g.listening && g.listening.fn === fn;
         const row = make('div', undefined, 'mc-binding-row mc-gamepad-row'); row.setAttribute('data-motion', fn);
-        const label = make('div', name, 'mc-binding-name'); label.appendChild(make('small', listening ? prompt : assigned ? (assigned.label || assigned.definition) : 'Not assigned'));
+        const label = make('div', name, 'mc-binding-name'); label.appendChild(make('small', listening ? prompt : assigned ? (assigned.label || assigned.definition) : standard ? 'Standard: ' + GAMEPAD_STANDARD[fn] : 'Not assigned'));
         const group = make('div', undefined, 'mc-binding-actions');
         const listen = button(listening ? 'Stop listening' : 'Listen', () => {
           if (listening) { stopAxisListen('Listening stopped.'); renderGamepadSettings(); return; }

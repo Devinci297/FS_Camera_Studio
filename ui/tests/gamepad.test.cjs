@@ -26,7 +26,11 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.equal(await page.locator('#mc-gamepad-devices [data-device-id="2"]').getAttribute('aria-pressed'),'true');
   const rows=page.locator('.mc-gamepad-row');
   assert.equal(await rows.count(),6);
-  assert.match(await page.locator('[data-motion=forward]').innerText(),/Not assigned/);
+  // Nothing assigned: the standard layout, shown per motion.
+  assert.match(await page.locator('[data-motion=forward]').innerText(),/Standard: Left stick up and down/);
+  assert.match(await page.locator('[data-motion=climb]').innerText(),/Standard: Right trigger/);
+  assert.match(await page.locator('#mc-gamepad-layout').innerText(),/Standard layout/);
+  assert.equal(await page.locator('#mc-gamepad-clear-all').isDisabled(),true);
   // Listen: the row prompts, then the detected axis is assigned to that motion.
   await page.locator('[data-motion=forward] button',{hasText:'Listen'}).click();
   assert.match(await page.locator('[data-motion=forward]').innerText(),/Push the stick you want for this forward/);
@@ -36,6 +40,8 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.deepEqual(axes.map(a=>[a.function,a.definition,a.rest,a.full]),[['forward','joystick:2:YAxis',0,-32767]]);
   assert.match(await page.locator('[data-motion=forward]').innerText(),/Xbox Controller - Y axis/);
   assert.match(await page.locator('#mc-gamepad-status').innerText(),/Assigned Xbox Controller - Y axis to Move forward and back/);
+  assert.match(await page.locator('#mc-gamepad-layout').innerText(),/Using your assigned motions/);
+  assert.match(await page.locator('[data-motion=right]').innerText(),/Not assigned/);
   for(const fn of ['right','climb','descend','yaw','pitch']){
    await page.locator('[data-motion='+fn+'] button',{hasText:'Listen'}).click();
    await page.waitForFunction(f=>(FSCApp.state.working.settings.host.gamepadAxes||[]).some(a=>a.function===f),fn);
@@ -52,7 +58,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await page.locator('[data-motion=pitch] button',{hasText:'Stop listening'}).click();
   await page.waitForTimeout(1200);
   assert.equal(JSON.stringify((await host()).gamepadAxes),before);
-  // Clear one, the switches and the dead zone, then Clear all.
+  // Clear one, the switches and the dead zone, then back to the standard layout.
   await page.locator('[data-motion=descend] button',{hasText:'Clear'}).click();
   assert.equal((await host()).gamepadAxes.some(a=>a.function==='descend'),false);
   assert.match(await page.locator('[data-motion=descend]').innerText(),/Not assigned/);
@@ -67,6 +73,11 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await page.locator('#mc-gamepad-clear-all').click();
   assert.deepEqual((await host()).gamepadAxes,[]);
   assert.equal(await page.locator('#mc-gamepad-clear-all').isDisabled(),true);
+  assert.match(await page.locator('[data-motion=yaw]').innerText(),/Standard: Right stick left and right/);
+  // The module reports the gamepad it uses for the standard layout.
+  await page.evaluate(()=>{FSCApp.state.gamepadState={mode:'standard',deviceId:5,deviceName:'Controller (Xbox One For Windows)'};});
+  await page.locator('#mc-setting-gamepad-enabled').check();
+  assert.match(await page.locator('#mc-gamepad-layout').innerText(),/Standard layout on Controller \(Xbox One For Windows\)/);
   await page.screenshot({path:process.env.FSCS_SHOT||path.join(require('node:os').tmpdir(),'fscs-gamepad.png')});
   assert.deepEqual(errors,[]);
   console.log('gamepad settings ok');

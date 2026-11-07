@@ -23,6 +23,12 @@ class GamepadSticks {
 public:
     // Returns the unique definitions to map, in index order (AxisInput.index refers to a position in this list).
     const std::vector<std::string>& configure(const std::vector<profiles::GamepadAxis>& axes, double deadzone);
+    // The standard layout on one controller, as the simulator's drone camera: left stick (X, Y) moves, right stick
+    // (X and Y rotation) turns and looks, triggers climb (right) and descend (left). Each axis is calibrated from its
+    // first sample after the sticks turn on: near the centre it is a stick (or both triggers on one Z axis); near one
+    // end it is a trigger resting there (Z: left trigger, Z rotation: right trigger). -1 maps nothing.
+    const std::vector<std::string>& configureStandard(int deviceId, double deadzone);
+    bool standard() const { return standard_; }
     const std::vector<std::string>& definitions() const { return definitions_; }
     bool empty() const { return definitions_.empty(); }
     void onAxis(std::size_t index, std::int32_t raw);
@@ -36,6 +42,11 @@ public:
 
 private:
     struct Use { profiles::GamepadFunction function; double rest, full; };
+    // Standard layout: what the first sample of each axis showed (a centred stick or a trigger resting at one end).
+    struct Calibration { bool trigger = false; double rest = 0; };
+    std::vector<Use> standardUses(std::size_t index) const;
+    bool standard_ = false;
+    std::vector<std::optional<Calibration>> calibration_;
     std::vector<std::string> definitions_;
     std::vector<std::vector<Use>> uses_;
     std::vector<std::optional<std::int32_t>> raw_;

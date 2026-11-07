@@ -239,8 +239,12 @@ private:
     std::vector<std::pair<int, std::string>> controllers_;
     // Gamepad sticks for drones (gamepad.hpp): mapped when the settings change, enabled only while a drone is shown.
     GamepadSticks gamepad_;
-    std::string gamepadMapping_;  // definitions + mask last mapped, so unrelated edits do not remap
-    bool gamepadSticksEnabled_ = true, gamepadOn_ = false;
+    std::string gamepadMapping_, gamepadWanted_;  // definitions + mask mapped / wanted, so unrelated edits do not remap
+    bool gamepadSticksEnabled_ = true, gamepadBlocksAircraft_ = true, gamepadOn_ = false;
+    int gamepadStandardDevice_ = -1;   // the standard layout's controller (-1: none found yet)
+    double gamepadNextEnumerate_ = 0;
+    json gamepadStateSent_;
+    json gamepadState() const;
     int gamepadSamples_ = 0;      // diagnostics: the first samples after enabling
     void configureGamepad(const profiles::HostSettings& settings);
     void updateGamepad(core::ManualInput& manual);

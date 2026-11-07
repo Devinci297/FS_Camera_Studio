@@ -40,6 +40,8 @@ json withoutRevision(json doc) {
     return doc;
 }
 
+int pickGamepad(const std::vector<std::pair<int, std::string>>& controllers);  // gamepad sticks, below
+
 core::ManualInput add(core::ManualInput a, const core::ManualInput& b) {
     a.lookRight += b.lookRight;
     a.lookUp += b.lookUp;
@@ -198,6 +200,7 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
     if (std::holds_alternative<backend_event::Connected>(ev)) {
         // A new SimConnect connection has no axis mappings yet: map them again (bindings follow their own path).
         gamepadMapping_.clear();
+        gamepadOn_ = false;
         configureGamepad(profiles::parseHostSettings(working_.settings));
     }
     if (const auto* axis = std::get_if<backend_event::AxisInput>(&ev)) {
@@ -238,6 +241,7 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
             [&](const auto& controller) { return controller.first == controllerCaptureDevice_; })) stopControllerCapture("disconnected");
         if (axisCaptureDevice_ >= 0 && std::none_of(controllers_.begin(), controllers_.end(),
             [&](const auto& controller) { return controller.first == axisCaptureDevice_; })) stopAxisCapture("disconnected");
+        if (gamepad_.standard() && pickGamepad(controllers_) != gamepadStandardDevice_) configureGamepad(profiles::parseHostSettings(working_.settings));
         json list = json::array();
         for (const auto& [id, name] : controllers_) list.push_back({{"deviceId", id}, {"name", name}});
         emitNow("ControllersListed", {{"controllers", list}});
@@ -317,25 +321,75 @@ void ModuleApp::stopAxisCapture(const std::string& state) {
     emitNow("AxisCaptureStatus", {{"state", state}, {"deviceId", device}, {"captureId", captureId}}, requester);
 }
 
+namespace {
+// The controller the standard layout uses: the first that names itself a gamepad, else the first generic controller or
+// pad. Joysticks, yokes, throttles and pedals are never picked: the user assigns those with Listen.
+int pickGamepad(const std::vector<std::pair<int, std::string>>& controllers) {
+    const auto lower = [](std::string s) { for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return s; };
+    const auto has = [](const std::string& s, std::initializer_list<const char*> words) {
+        return std::any_of(words.begin(), words.end(), [&](const char* w) { return s.find(w) != std::string::npos; });
+    };
+    for (int pass = 0; pass < 2; ++pass)
+        for (const auto& [id, raw] : controllers) {
+            const std::string name = lower(raw);
+            if (id < 0 || has(name, {"keyboard", "mouse", "touch", "yoke", "throttle", "pedal", "rudder", "stick", "hotas", "joystick"})) continue;
+            if (pass == 0 ? has(name, {"xbox", "xinput", "gamepad", "game pad", "dualsense", "dualshock", "wireless controller"})
+                          : has(name, {"controller", "pad"}))
+                return id;
+        }
+    return -1;
+}
+}  // namespace
+
+json ModuleApp::gamepadState() const {
+    std::string name;
+    for (const auto& [id, n] : controllers_) if (id == gamepadStandardDevice_) name = n;
+    return {{"mode", gamepad_.standard() ? "standard" : "custom"}, {"deviceId", gamepad_.standard() && gamepadStandardDevice_ >= 0 ? json(gamepadStandardDevice_) : json(nullptr)},
+            {"deviceName", gamepad_.standard() && gamepadStandardDevice_ >= 0 ? json(name) : json(nullptr)}};
+}
+
 void ModuleApp::configureGamepad(const profiles::HostSettings& settings) {
     gamepadSticksEnabled_ = settings.gamepadSticksEnabled;
-    const auto& definitions = gamepad_.configure(settings.gamepadAxes, settings.gamepadDeadzone);
+    gamepadBlocksAircraft_ = settings.gamepadBlocksAircraft;
+    // No motion assigned: the standard layout on the gamepad found among the controllers, like the simulator's own
+    // drone camera, with nothing to set up. Any Listen assignment switches to the assigned motions only.
+    const bool standard = settings.gamepadAxes.empty();
+    if (standard) gamepadStandardDevice_ = pickGamepad(controllers_);
+    const auto& definitions = standard ? gamepad_.configureStandard(gamepadStandardDevice_, settings.gamepadDeadzone)
+                                       : gamepad_.configure(settings.gamepadAxes, settings.gamepadDeadzone);
+    const json state = gamepadState();
+    if (state != gamepadStateSent_) {
+        gamepadStateSent_ = state;
+        emitNow("GamepadChanged", state);
+    }
     std::string key = settings.gamepadBlocksAircraft ? "mask" : "pass";
     for (const auto& d : definitions) key += "|" + d;
-    if (key == gamepadMapping_) return;
-    gamepadMapping_ = key;
-    if (gamepadOn_) services_.setAxesEnabled(false);
-    gamepadOn_ = false;
-    gamepad_.neutral();
-    const bool mapped = services_.mapAxes(definitions, settings.gamepadBlocksAircraft);
-    diag("gamepad axes: " + std::to_string(definitions.size()) + (mapped ? " mapped" : " failed") +
-         (settings.gamepadBlocksAircraft ? " (masked from the aircraft while a drone is shown)" : ""));
+    gamepadWanted_ = key;
+    // The mapping itself waits for the first drone view (updateGamepad): no input subscriptions while the
+    // simulator starts or loads a flight. A changed mapping turns the current one off until then.
+    if (key != gamepadMapping_ && gamepadOn_) {
+        services_.setAxesEnabled(false);
+        gamepadOn_ = false;
+        gamepad_.neutral();
+    }
 }
 
 void ModuleApp::updateGamepad(core::ManualInput& manual) {
+    const bool droneShown = simRunning_ && !paused_ && coord_.freeCameraShown();
+    // The standard layout without a gamepad yet: look for one while a drone is shown (the list arrives as an event).
+    if (gamepadSticksEnabled_ && gamepad_.standard() && gamepad_.empty() && droneShown && now_ >= gamepadNextEnumerate_) {
+        gamepadNextEnumerate_ = now_ + 5;
+        services_.enumerateControllers();
+    }
     // Only while a drone is on screen and nothing listens for inputs: elsewhere the sticks stay the simulator's.
-    const bool on = gamepadSticksEnabled_ && !gamepad_.empty() && axisCaptureDevice_ < 0 && controllerCaptureDevice_ < 0 &&
-                    simRunning_ && !paused_ && coord_.freeCameraShown();
+    const bool on = gamepadSticksEnabled_ && !gamepad_.empty() && axisCaptureDevice_ < 0 && controllerCaptureDevice_ < 0 && droneShown;
+    if (on && gamepadMapping_ != gamepadWanted_) {
+        gamepadMapping_ = gamepadWanted_;
+        gamepad_.neutral();
+        const bool mapped = services_.mapAxes(gamepad_.definitions(), gamepadBlocksAircraft_);
+        diag("gamepad axes: " + std::to_string(gamepad_.definitions().size()) + (mapped ? " mapped" : " failed") +
+             (gamepadBlocksAircraft_ ? " (masked from the aircraft while a drone is shown)" : ""));
+    }
     if (on != gamepadOn_) {
         gamepadOn_ = on;
         gamepad_.neutral();  // nothing held over from before; the first new samples arrive within about 0.2 s
@@ -449,6 +503,7 @@ json ModuleApp::snapshot() const {
             {"cinematic", cinematicState()},
             {"traffic", trafficState()},
             {"spotting", spottingState()},
+            {"gamepad", gamepadState()},
             {"controllers", [this] {
                  json list = json::array();
                  for (const auto& [id, name] : controllers_) list.push_back({{"deviceId", id}, {"name", name}});
