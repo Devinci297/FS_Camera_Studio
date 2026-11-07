@@ -147,6 +147,11 @@ void XPLMSetWindowResizingLimits(XPLMWindowID, int, int, int, int) {}
 void XPLMSetWindowIsVisible(XPLMWindowID id, int visible) { static_cast<FakeWindow*>(id)->visible = visible != 0; }
 int XPLMGetWindowIsVisible(XPLMWindowID id) { return static_cast<FakeWindow*>(id)->visible; }
 void XPLMBringWindowToFront(XPLMWindowID) {}
+int g_mouseX = 500, g_mouseY = 500;
+void XPLMGetMouseLocationGlobal(int* x, int* y) {
+    *x = g_mouseX;
+    *y = g_mouseY;
+}
 void XPLMGetWindowGeometry(XPLMWindowID id, int* l, int* t, int* r, int* b) {
     const auto& p = static_cast<FakeWindow*>(id)->params;
     *l = p.left;
@@ -313,6 +318,8 @@ int main(int argc, char** argv) {
     check(win && win->visible, "xpcs/toggle_editor opens the editor window");
     if (!win) return 1;
     check(win->params.contentType == xplm_WindowContentTypeBrowser, "it is a browser window");
+    check(win->params.decorateAsFloatingWindow == xplm_WindowDecorationSelfDecoratedResizable,
+          "the page draws its own frame (self-decorated, resizable)");
     check(win->url.rfind("file:///", 0) == 0 && win->url.find("XPCameraStudio/ui/index.html?surface=main&host=xplane") != std::string::npos,
           "it loads the bundled ui/index.html with host=xplane: " + win->url);
     check(win->functions.count("fscs") && win->functions.count("fscsPanel"), "xplane.fscs and xplane.fscsPanel are registered");
@@ -371,6 +378,21 @@ int main(int argc, char** argv) {
         check(win->params.top - win->params.bottom == mainHeight, "the editor window keeps its size");
     } else {
         check(false, "the mini window registers fscsPanelSize");
+    }
+
+    // Dragging the header: the window follows the mouse until the page ends the drag.
+    {
+        auto [dragFn, dragRefcon] = win->functions.at("fscsPanelDrag");
+        const int left = win->params.left, top = win->params.top;
+        dragFn(win, R"({"surface":"main","phase":"start"})", dragRefcon);
+        g_mouseX += 40;
+        g_mouseY -= 25;
+        frames(1);
+        check(win->params.left == left + 40 && win->params.top == top - 25, "a header drag moves the editor with the mouse");
+        dragFn(win, R"({"surface":"main","phase":"end"})", dragRefcon);
+        g_mouseX += 100;
+        frames(1);
+        check(win->params.left == left + 40, "the window stays put after the drag ends");
     }
 
     page.send("TextFocus", {{"focused", true}});

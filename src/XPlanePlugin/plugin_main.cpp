@@ -150,6 +150,7 @@ float flightLoop(float elapsedSinceLastCall, float, int, void*) {
     g->camera.dispatch([&](BackendEvent e) { events.push_back(std::move(e)); });
     for (const auto& e : events) deliver(e);
     g->app->update(g->now);
+    g->panels.updateDrag();
     g->panels.flush();
     return -1.0f;  // every frame
 }

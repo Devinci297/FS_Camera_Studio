@@ -141,16 +141,63 @@
       if (!api || typeof api.fscsPanel !== 'function') return false;
       try { api.fscsPanel({ surface, open: Boolean(open) }); return true; } catch (error) { return false; }
     };
+    // X-Plane draws no frame around the windows: dragging the editor's header (or an empty part of the mini dock) moves
+    // the window. The plugin follows the mouse between start and end, so page coordinates never matter.
+    const INTERACTIVE = 'button,input,textarea,select,a,summary,label,[contenteditable],[role="button"],[role="slider"],[draggable="true"],.mc-sb,.mc-dialog';
+    const surfaceName = /[?&]surface=mini\b/.test((root.location && root.location.search) || '') ? 'mini' : 'main';
+    let dragging = false;
+    const drag = phase => {
+      const api = root.xplane;
+      if (!api || typeof api.fscsPanelDrag !== 'function') return;
+      try { const r = api.fscsPanelDrag({ surface: surfaceName, phase }); if (r && typeof r.catch === 'function') r.catch(() => {}); } catch (error) { /* older plugin */ }
+    };
+    const endDrag = () => { if (dragging) { dragging = false; drag('end'); } };
+    if (root.document && typeof root.document.addEventListener === 'function') {
+      root.document.addEventListener('mousedown', event => {
+        if (event.button !== 0 || !event.target || !event.target.closest) return;
+        const zone = event.target.closest(surfaceName === 'mini' ? '#mc-mini-panel' : '#mc-drag-header');
+        if (!zone || event.target.closest(INTERACTIVE)) return;
+        dragging = true;
+        drag('start');
+        event.preventDefault();
+      }, true);
+      root.document.addEventListener('mouseup', endDrag, true);
+      root.document.addEventListener('mousemove', event => { if (dragging && event.buttons === 0) endDrag(); }, true);
+      if (typeof root.addEventListener === 'function') root.addEventListener('blur', endDrag);
+    }
     // The mini window fits its content: the dock, plus room above it while a dialog or menu is open. app.js calls
     // fscsUpdateMiniRect whenever the dock or a mini dialog changes; the plugin keeps the window's bottom edge.
     if (/[?&]surface=mini\b/.test((root.location && root.location.search) || '')) {
       let sentHeight = 0;
+      // A dialog's CSS caps it at the window height, which squeezes its body to nothing in a short window: measure it
+      // as it would be with room to spare.
+      const naturalHeight = dialog => {
+        const cap = dialog.style.maxHeight;
+        dialog.style.maxHeight = 'none';
+        const body = dialog.querySelector('.mc-dialog-body');
+        const height = dialog.offsetHeight + (body ? Math.max(0, body.scrollHeight - body.clientHeight) : 0);
+        dialog.style.maxHeight = cap;
+        return height;
+      };
+      // After the window grows, put a dialog that app.js placed in the short window back just above the dock.
+      const placeDialog = () => {
+        const doc = root.document, shade = doc.getElementById('mc-dialog-shade'), dock = doc.getElementById('mc-mini-panel');
+        const dialog = shade && !shade.hidden && shade.querySelector('.mc-dialog');
+        if (!dialog || !dock || !dialog.style.top) return;
+        dialog.style.top = Math.max(8, dock.getBoundingClientRect().top - dialog.offsetHeight - 8) + 'px';
+      };
+      if (typeof root.addEventListener === 'function') root.addEventListener('resize', () => setTimeout(placeDialog, 0));
       const fitMini = () => {
         const api = root.xplane, doc = root.document, dock = doc && doc.getElementById && doc.getElementById('mc-mini-panel');
         if (!api || typeof api.fscsPanelSize !== 'function' || !dock) return;
         let height = dock.getBoundingClientRect().height + 8;
         const shade = doc.getElementById('mc-dialog-shade'), dialog = shade && !shade.hidden && shade.querySelector('.mc-dialog');
-        if (dialog) height += dialog.offsetHeight + 16;
+        if (dialog) {
+          // A context menu is fixed above the dock; other dialogs sit in the shade's padded column.
+          const css = root.getComputedStyle ? root.getComputedStyle(shade) : null;
+          const fixed = root.getComputedStyle && root.getComputedStyle(dialog).position === 'fixed';
+          height += naturalHeight(dialog) + (fixed || !css ? 16 : (parseFloat(css.paddingTop) || 0) + (parseFloat(css.paddingBottom) || 0));
+        }
         height = Math.ceil(height);
         if (height < 40 || Math.abs(height - sentHeight) < 3) return;
         sentHeight = height;

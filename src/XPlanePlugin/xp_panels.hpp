@@ -5,6 +5,9 @@
 //   page -> plugin   xplane.fscs(frameText)            browser function, queued for the next flight-loop pass
 //   plugin -> page   FSCXPlaneReceive(frameText)       injected script, every loaded window
 //   page -> plugin   xplane.fscsPanel({surface, open})  the UI's own open/close buttons
+//   page -> plugin   xplane.fscsPanelSize({surface, height})  the mini fits its window to the dock
+//   page -> plugin   xplane.fscsPanelDrag({surface, phase})   "start"/"end": the window follows the mouse between
+// The windows are self-decorated: the page draws its own frame, header and close button, as in MSFS.
 // Windows are created the first time they are shown.
 
 #include <XPLMDisplay.h>
@@ -28,6 +31,8 @@ public:
     void keyboard(Surface s, bool focused);
     // Sets a window's content height in boxels, keeping its bottom edge (the mini dock grows upwards).
     void fitHeight(Surface s, int height);
+    // Moves a window that is being dragged by its page; call every frame.
+    void updateDrag();
     void post(const std::string& frame);  // a module frame for every page, delivered by flush()
     void flush();
     void destroy();
@@ -39,11 +44,14 @@ private:
         bool heard = false;  // a frame arrived since the page loaded
         PanelWindows* owner = nullptr;
         Surface surface = Main;
+        bool dragging = false;
+        int mouseX = 0, mouseY = 0, left = 0, top = 0, right = 0, bottom = 0;  // at the start of the drag
     };
     void create(Surface s);
     static const char* onFrame(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanel(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanelSize(XPLMWindowID window, const char* json, void* refcon);
+    static const char* onPanelDrag(XPLMWindowID window, const char* json, void* refcon);
     static void onLoaded(XPLMWindowID window, const char* url, void* refcon);
     static void onLoadError(XPLMWindowID window, const char* url, const char* error, void* refcon);
 

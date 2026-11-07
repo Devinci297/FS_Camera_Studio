@@ -70,7 +70,9 @@ void PanelWindows::create(Surface s) {
     p.visible = 0;
     p.drawWindowFunc = nullptr;  // browser content draws itself
     p.refcon = &w;
-    p.decorateAsFloatingWindow = xplm_WindowDecorationRoundRectangle;
+    // The page draws its own frame (rounded editor panel, transparent dock), so X-Plane draws none; the editor keeps
+    // X-Plane's resize handles.
+    p.decorateAsFloatingWindow = s == Main ? xplm_WindowDecorationSelfDecoratedResizable : xplm_WindowDecorationSelfDecorated;
     p.layer = xplm_WindowLayerFloatingWindows;
     p.contentType = xplm_WindowContentTypeBrowser;
     p.browserLoadFinishedFunc = &PanelWindows::onLoaded;
@@ -87,6 +89,7 @@ void PanelWindows::create(Surface s) {
     XPLMWindowAddBrowserFunction(w.id, "fscs", &PanelWindows::onFrame, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanel", &PanelWindows::onPanel, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanelSize", &PanelWindows::onPanelSize, &w);
+    XPLMWindowAddBrowserFunction(w.id, "fscsPanelDrag", &PanelWindows::onPanelDrag, &w);
     XPLMWindowSetURL(w.id, (url_ + "?surface=" + kSurfaceName[s] + "&host=xplane").c_str());
 }
 
@@ -124,6 +127,20 @@ void PanelWindows::fitHeight(Surface s, int height) {
     XPLMSetWindowGeometry(id, left, bottom + height, right, bottom);
 }
 
+void PanelWindows::updateDrag() {
+    for (Win& w : wins_) {
+        if (!w.dragging) continue;
+        if (!w.id || !XPLMGetWindowIsVisible(w.id)) {
+            w.dragging = false;
+            continue;
+        }
+        int x = 0, y = 0;
+        XPLMGetMouseLocationGlobal(&x, &y);
+        const int dx = x - w.mouseX, dy = y - w.mouseY;
+        XPLMSetWindowGeometry(w.id, w.left + dx, w.top + dy, w.right + dx, w.bottom + dy);
+    }
+}
+
 void PanelWindows::post(const std::string& frame) { outbox_.push_back(frame); }
 
 void PanelWindows::flush() {
@@ -142,6 +159,7 @@ void PanelWindows::destroy() {
         if (w.id) XPLMDestroyWindow(w.id);
         w.id = nullptr;
         w.loaded = false;
+        w.dragging = false;
     }
     outbox_.clear();
 }
@@ -180,6 +198,20 @@ const char* PanelWindows::onPanelSize(XPLMWindowID, const char* text, void* refc
     // Only the mini follows its content; the editor keeps the size the user gives it.
     if (w->surface != Mini) return XPLMReturnString("false");
     w->owner->fitHeight(Mini, static_cast<int>(arg["height"].get<double>()));
+    return XPLMReturnString("true");
+}
+
+const char* PanelWindows::onPanelDrag(XPLMWindowID, const char* text, void* refcon) {
+    auto* w = static_cast<Win*>(refcon);
+    const json arg = json::parse(text ? text : "", nullptr, false);
+    if (!w || !w->id || !arg.is_object()) return XPLMReturnString("false");
+    if (arg.value("phase", std::string()) == "start") {
+        XPLMGetMouseLocationGlobal(&w->mouseX, &w->mouseY);
+        XPLMGetWindowGeometry(w->id, &w->left, &w->top, &w->right, &w->bottom);
+        w->dragging = true;
+    } else {
+        w->dragging = false;
+    }
     return XPLMReturnString("true");
 }
 
