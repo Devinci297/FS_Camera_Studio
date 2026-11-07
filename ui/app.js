@@ -2572,14 +2572,49 @@
       const above=Array.from(body.children).filter(el=>el!==favorites&&!el.hidden&&!el.classList.contains('mc-sb')&&el.offsetParent!==null).reduce((sum,el)=>sum+el.offsetHeight+2,0);
       height=Math.max(height,Math.min(122,above+2*32+2));
     }
-    const categoryWidth=usedColumns*cell+4;
-    pane.style.width=categoryWidth+'px';pane.style.height=height+'px';flat.style.gridTemplateColumns='repeat('+usedColumns+',minmax(0,1fr))';
-    pane.style.paddingTop=(narrow?0:14)+'px';
+    // Collapsed: icons only, in as many rows as the expanded grid uses, so the dock keeps its height.
+    const collapsed=miniCategoriesCollapsed()&&!icons;
+    dock.dataset.categoriesCollapsed=String(collapsed);
+    const shownColumns=collapsed?Math.max(1,Math.ceil(entries.length/rows)):usedColumns;
+    const categoryWidth=shownColumns*(collapsed?34:cell)+4;
+    pane.style.width=categoryWidth+'px';pane.style.height=height+'px';flat.style.gridTemplateColumns='repeat('+shownColumns+',minmax(0,1fr))';
+    pane.style.paddingTop=(narrow||collapsed?0:14)+'px';
+    if(collapsed)legend.hidden=true;
     dock.style.gridTemplateColumns=categoryWidth+'px minmax(0,1fr)';
     const tools=dock.querySelector('.mc-dock-tools');tools.style.minHeight='28px';
     const total=height+42;
     dock.style.height=total+'px';dock.style.maxHeight=total+'px';
+    placeMiniCategoryDivider(dock,pane,collapsed,icons);
     sizeMiniClearance();
+  }
+  /* The line between the categories and the cameras is a button: click it to show the categories as icons only
+     (more room for cameras and traffic) or with their names again. The choice is remembered on this PC. */
+  const MINI_CATEGORIES_KEY='fscs.miniCategoriesCollapsed';
+  function miniCategoriesCollapsed(){
+    if(S.miniCategoriesCollapsed===undefined){try{S.miniCategoriesCollapsed=window.localStorage.getItem(MINI_CATEGORIES_KEY)==='true';}catch(error){S.miniCategoriesCollapsed=false;}}
+    return Boolean(S.miniCategoriesCollapsed);
+  }
+  function setMiniCategoriesCollapsed(collapsed){
+    S.miniCategoriesCollapsed=Boolean(collapsed);
+    try{window.localStorage.setItem(MINI_CATEGORIES_KEY,String(S.miniCategoriesCollapsed));}catch(error){/* In-memory only. */}
+    layoutMiniCategories();updateScrollbars();
+  }
+  function placeMiniCategoryDivider(dock,pane,collapsed,icons){
+    let divider=$('mc-dock-divider');
+    if(!divider){
+      divider=make('button',undefined,'mc-dock-divider');divider.type='button';divider.id='mc-dock-divider';
+      divider.setAttribute('data-focus-key','mini-category-divider');
+      divider.addEventListener('click',()=>setMiniCategoriesCollapsed(!miniCategoriesCollapsed()));
+      dock.appendChild(divider);
+    }
+    // Icons-only name display already shows the compact grid, so there is nothing to collapse.
+    divider.hidden=icons;
+    if(icons)return;
+    setIcon(divider,collapsed?'chevron-right':'chevron-left');
+    const label=collapsed?'Show category names':'Show categories as icons only';
+    divider.setAttribute('aria-label',label);divider.setAttribute('aria-expanded',String(!collapsed));divider.setAttribute('aria-controls','mc-dock-categories');divider.title=label;
+    // Positioned over the pane's right border with offsets, which hold in Coherent as in a browser.
+    divider.style.left=(pane.offsetLeft+pane.offsetWidth-6)+'px';divider.style.top=pane.offsetTop+'px';divider.style.height=pane.offsetHeight+'px';
   }
 
   function dockViewButton(view, prefix) {

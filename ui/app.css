@@ -1295,3 +1295,12 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim[data-surface="mini"] .mc-tool-group-label{font-size:10px}
 #mc-sim[data-surface="mini"] .mc-dock-body>.mc-effective-tracking,#mc-sim[data-surface="mini"] .mc-dock-body>.mc-spotting-status{font-size:11px;line-height:14px}
 #mc-sim[data-surface="mini"] .mc-dock-tools button>svg+span{margin-left:3px}
+/* Mini category divider: clicking the line between categories and cameras shows the categories as icons only. */
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-divider{position:absolute;z-index:3;width:12px;min-width:12px;min-height:0;padding:0;margin:0;border:0;border-radius:4px;background:transparent;color:var(--mc-muted);display:flex;align-items:center;justify-content:center;cursor:pointer}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-divider>svg{width:12px;height:12px;opacity:.5}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-divider:hover{background:var(--mc-hover);color:var(--mc-accent)}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-divider:hover>svg{opacity:1}
+#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-entity-label,#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-dock-traffic-count{display:none}
+#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-category-grid button{justify-content:center;padding:2px}
+#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-entity-name{justify-content:center}
+#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-entity-name>svg.mc-icon{margin-right:0}

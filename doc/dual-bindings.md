@@ -101,6 +101,7 @@ Each aircraft gets a status:
   * **Ctrl + Alt + O** (`spotReturn`) stops spotting.
   * **Ctrl + Alt + J** (`toggleAutoSpot`) turns auto-spot on or off.
 * **Mini panel Traffic tab.** A fixed bar above the aircraft list holds the view choice (Tower, Runway, Chase, Fly-by, Track), status filters with counts (**All**, **Departures** = takeoff or departing, **Arrivals** = arriving or landing, **On ground**, **Cruise**), a search box and Stop. The bar does not scroll with the list. Search matches airline, flight number, callsign or aircraft type, ignoring spaces and dashes (`a32` finds A320 and A321, `hbjca` finds HB-JCA). **Enter** follows the first match in the chosen view; **Esc** clears the search. The editor's Traffic page has the same Cruise filter and type search.
+* **Mini panel categories.** Click the line between the categories and the cameras to show the categories as icons only, which gives cameras and traffic more room; click it again for the names. The dock keeps its height and the choice is remembered on this PC.
 * **Lost target.** When the target is no longer reported, the view holds for 5 s (`state: lost`). Spotting then returns to the view shown before it began, or gives the camera back to the simulator when there was none. With auto-spot on, the next target is picked instead.
 * **Auto-spot.** A session-wide mode, not saved.
   * It picks traffic within 15 NM of the airport in this order: landing, takeoff, arriving, departing. Among aircraft with the same status, the one nearest the airport goes first.
