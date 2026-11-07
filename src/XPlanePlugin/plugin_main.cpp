@@ -5,6 +5,7 @@
 #include "module_app.hpp"
 #include "xp_backends.hpp"
 #include "xp_camera.hpp"
+#include "xp_geometry.hpp"
 #include "xp_mouse.hpp"
 #include "xp_panels.hpp"
 #include "xp_storage.hpp"
@@ -44,7 +45,6 @@ namespace fs = std::filesystem;
 constexpr int kMinXplmVersion = 440;
 constexpr double kAircraftCheckSeconds = 1.0;
 constexpr double kGroundCheckSeconds = 0.25;
-constexpr double kStandardGravity = 9.80665;
 
 void log(const std::string& text) { XPLMDebugString(("XP Camera Studio: " + text + "\n").c_str()); }
 
@@ -92,7 +92,8 @@ struct Host {
     struct Telemetry {
         XPLMDataRef lat = nullptr, lon = nullptr, elevation = nullptr, truePsi = nullptr, theta = nullptr, phi = nullptr;
         XPLMDataRef onGround = nullptr, groundSpeed = nullptr, verticalSpeed = nullptr, agl = nullptr;
-        XPLMDataRef gNormal = nullptr, gAxial = nullptr, gSide = nullptr, rpm = nullptr;
+        XPLMDataRef gNormal = nullptr, rpm = nullptr, psi = nullptr;
+        XPLMDataRef accel[3] = {};  // local_ax/ay/az: the aircraft's acceleration in OpenGL axes, m/s^2
     } tel;
 };
 
@@ -305,8 +306,10 @@ void findTelemetry(Host::Telemetry& t) {
     t.verticalSpeed = XPLMFindDataRef("sim/flightmodel/position/vh_ind");
     t.agl = XPLMFindDataRef("sim/flightmodel/position/y_agl");
     t.gNormal = XPLMFindDataRef("sim/flightmodel/forces/g_nrml");
-    t.gAxial = XPLMFindDataRef("sim/flightmodel/forces/g_axil");
-    t.gSide = XPLMFindDataRef("sim/flightmodel/forces/g_side");
+    t.psi = XPLMFindDataRef("sim/flightmodel/position/psi");
+    t.accel[0] = XPLMFindDataRef("sim/flightmodel/position/local_ax");
+    t.accel[1] = XPLMFindDataRef("sim/flightmodel/position/local_ay");
+    t.accel[2] = XPLMFindDataRef("sim/flightmodel/position/local_az");
     t.rpm = XPLMFindDataRef("sim/cockpit2/engine/indicators/engine_speed_rpm");
 }
 
@@ -325,8 +328,11 @@ void publishTelemetry() {
     m.motion.groundSpeed = f(t.groundSpeed);
     m.motion.verticalSpeed = f(t.verticalSpeed);
     m.motion.gForce = f(t.gNormal, 1);
-    m.motion.forwardAcceleration = f(t.gAxial) * kStandardGravity;
-    m.motion.lateralAcceleration = f(t.gSide) * kStandardGravity;
+    // As MSFS's ACCELERATION BODY Z/X: the aircraft's own acceleration along its nose and right wing (no gravity).
+    const core::Vec3 accelNed = xplane::geo::glToNed({f(t.accel[0]), f(t.accel[1]), f(t.accel[2])});
+    const core::Vec3 accelBody = xplane::geo::attitude(f(t.theta), f(t.phi), f(t.psi)).conjugate().rotate(accelNed);
+    m.motion.forwardAcceleration = accelBody.x;
+    m.motion.lateralAcceleration = accelBody.y;
     float rpm = 0;
     if (t.rpm) XPLMGetDatavf(t.rpm, &rpm, 0, 1);
     m.motion.engineRpm = rpm;
