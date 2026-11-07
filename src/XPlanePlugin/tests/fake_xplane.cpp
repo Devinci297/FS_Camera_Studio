@@ -147,6 +147,20 @@ void XPLMSetWindowResizingLimits(XPLMWindowID, int, int, int, int) {}
 void XPLMSetWindowIsVisible(XPLMWindowID id, int visible) { static_cast<FakeWindow*>(id)->visible = visible != 0; }
 int XPLMGetWindowIsVisible(XPLMWindowID id) { return static_cast<FakeWindow*>(id)->visible; }
 void XPLMBringWindowToFront(XPLMWindowID) {}
+void XPLMGetWindowGeometry(XPLMWindowID id, int* l, int* t, int* r, int* b) {
+    const auto& p = static_cast<FakeWindow*>(id)->params;
+    *l = p.left;
+    *t = p.top;
+    *r = p.right;
+    *b = p.bottom;
+}
+void XPLMSetWindowGeometry(XPLMWindowID id, int l, int t, int r, int b) {
+    auto& p = static_cast<FakeWindow*>(id)->params;
+    p.left = l;
+    p.top = t;
+    p.right = r;
+    p.bottom = b;
+}
 void XPLMTakeKeyboardFocus(XPLMWindowID id) { g_keyboard = id; }
 int XPLMHasKeyboardFocus(XPLMWindowID id) { return g_keyboard == id; }
 void XPLMWindowAddBrowserFunction(XPLMWindowID id, const char* name, XPLMBrowserCallback_f f, void* refcon) {
@@ -337,6 +351,27 @@ int main(int argc, char** argv) {
         for (const auto& e : fs::recursive_directory_iterator(store))
             if (e.is_regular_file() && e.path().filename().string().rfind("fscs-store-", 0) == 0) storeFile = true;
     check(storeFile, "a profile store file is in Output/preferences/XPCameraStudio");
+
+    // The mini window: opened by its command, it fits its height to the page's dock and keeps its bottom edge.
+    for (Command* c : g_commands)
+        if (c->name == "xpcs/toggle_mini" && c->handler) c->handler(c, xplm_CommandBegin, c->refcon);
+    FakeWindow* mini = nullptr;
+    for (FakeWindow* w : g_windows)
+        if (w->url.find("surface=mini") != std::string::npos) mini = w;
+    check(mini && mini->visible, "xpcs/toggle_mini opens the mini window");
+    if (mini && mini->functions.count("fscsPanelSize")) {
+        const int bottom = mini->params.bottom;
+        auto [fn, refcon] = mini->functions.at("fscsPanelSize");
+        const std::string reply = fn(mini, R"({"surface":"mini","height":122})", refcon);
+        check(reply == "true" && mini->params.top - mini->params.bottom == 122 && mini->params.bottom == bottom,
+              "fscsPanelSize fits the mini window to 122 and keeps its bottom edge");
+        auto [mainFn, mainRefcon] = win->functions.at("fscsPanelSize");
+        const int mainHeight = win->params.top - win->params.bottom;
+        mainFn(win, R"({"surface":"main","height":100})", mainRefcon);
+        check(win->params.top - win->params.bottom == mainHeight, "the editor window keeps its size");
+    } else {
+        check(false, "the mini window registers fscsPanelSize");
+    }
 
     page.send("TextFocus", {{"focused", true}});
     check(g_keyboard == win, "TextFocus gives the editor X-Plane's keyboard");

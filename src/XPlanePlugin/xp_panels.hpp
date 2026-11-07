@@ -26,6 +26,8 @@ public:
     bool visible(Surface s) const;
     // The page in `s` has a text field focused: give that window the keyboard, or hand it back to X-Plane.
     void keyboard(Surface s, bool focused);
+    // Sets a window's content height in boxels, keeping its bottom edge (the mini dock grows upwards).
+    void fitHeight(Surface s, int height);
     void post(const std::string& frame);  // a module frame for every page, delivered by flush()
     void flush();
     void destroy();
@@ -41,6 +43,7 @@ private:
     void create(Surface s);
     static const char* onFrame(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanel(XPLMWindowID window, const char* json, void* refcon);
+    static const char* onPanelSize(XPLMWindowID window, const char* json, void* refcon);
     static void onLoaded(XPLMWindowID window, const char* url, void* refcon);
     static void onLoadError(XPLMWindowID window, const char* url, const char* error, void* refcon);
 

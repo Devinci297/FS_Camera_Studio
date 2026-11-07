@@ -141,6 +141,31 @@
       if (!api || typeof api.fscsPanel !== 'function') return false;
       try { api.fscsPanel({ surface, open: Boolean(open) }); return true; } catch (error) { return false; }
     };
+    // The mini window fits its content: the dock, plus room above it while a dialog or menu is open. app.js calls
+    // fscsUpdateMiniRect whenever the dock or a mini dialog changes; the plugin keeps the window's bottom edge.
+    if (/[?&]surface=mini\b/.test((root.location && root.location.search) || '')) {
+      let sentHeight = 0;
+      const fitMini = () => {
+        const api = root.xplane, doc = root.document, dock = doc && doc.getElementById && doc.getElementById('mc-mini-panel');
+        if (!api || typeof api.fscsPanelSize !== 'function' || !dock) return;
+        let height = dock.getBoundingClientRect().height + 8;
+        const shade = doc.getElementById('mc-dialog-shade'), dialog = shade && !shade.hidden && shade.querySelector('.mc-dialog');
+        if (dialog) height += dialog.offsetHeight + 16;
+        height = Math.ceil(height);
+        if (height < 40 || Math.abs(height - sentHeight) < 3) return;
+        sentHeight = height;
+        try { const r = api.fscsPanelSize({ surface: 'mini', height }); if (r && typeof r.catch === 'function') r.catch(() => {}); } catch (error) { /* older plugin */ }
+      };
+      root.fscsUpdateMiniRect = () => (typeof root.requestAnimationFrame === 'function' ? root.requestAnimationFrame(fitMini) : setTimeout(fitMini, 16));
+      const watch = () => {
+        const doc = root.document, dock = doc && doc.getElementById && doc.getElementById('mc-mini-panel'), shade = doc && doc.getElementById && doc.getElementById('mc-dialog-shade');
+        if (dock && typeof root.ResizeObserver === 'function') new root.ResizeObserver(root.fscsUpdateMiniRect).observe(dock);
+        if (shade && typeof root.MutationObserver === 'function') new root.MutationObserver(root.fscsUpdateMiniRect).observe(shade, { attributes: true, attributeFilter: ['hidden'] });
+        root.fscsUpdateMiniRect();
+      };
+      if (root.document && root.document.readyState === 'loading') root.document.addEventListener('DOMContentLoaded', watch);
+      else if (root.document && root.document.getElementById) watch();
+    }
   }
 
   /** In-browser stand-in with the same shape; frames are real JSON text so chunking is exercised too. */

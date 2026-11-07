@@ -65,7 +65,7 @@ void PanelWindows::create(Surface s) {
         p.left = left + (width - w2) / 2;
         p.right = p.left + w2;
         p.bottom = bottom + height * 4 / 100;
-        p.top = p.bottom + 200;
+        p.top = p.bottom + 140;  // the page then fits it to the dock (fscsPanelSize)
     }
     p.visible = 0;
     p.drawWindowFunc = nullptr;  // browser content draws itself
@@ -86,6 +86,7 @@ void PanelWindows::create(Surface s) {
     else XPLMSetWindowResizingLimits(w.id, 320, 120, width, height);
     XPLMWindowAddBrowserFunction(w.id, "fscs", &PanelWindows::onFrame, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanel", &PanelWindows::onPanel, &w);
+    XPLMWindowAddBrowserFunction(w.id, "fscsPanelSize", &PanelWindows::onPanelSize, &w);
     XPLMWindowSetURL(w.id, (url_ + "?surface=" + kSurfaceName[s] + "&host=xplane").c_str());
 }
 
@@ -107,6 +108,20 @@ void PanelWindows::keyboard(Surface s, bool focused) {
     if (!id) return;
     if (focused) XPLMTakeKeyboardFocus(id);
     else if (XPLMHasKeyboardFocus(id)) XPLMTakeKeyboardFocus(nullptr);
+}
+
+void PanelWindows::fitHeight(Surface s, int height) {
+    const XPLMWindowID id = wins_[s].id;
+    if (!id) return;
+    int sl = 0, st = 0, sr = 0, sb = 0;
+    XPLMGetScreenBoundsGlobal(&sl, &st, &sr, &sb);
+    const int maxHeight = (st - sb) * 9 / 10;
+    if (height < 40) height = 40;
+    if (height > maxHeight) height = maxHeight;
+    int left = 0, top = 0, right = 0, bottom = 0;
+    XPLMGetWindowGeometry(id, &left, &top, &right, &bottom);
+    if (top - bottom == height) return;
+    XPLMSetWindowGeometry(id, left, bottom + height, right, bottom);
 }
 
 void PanelWindows::post(const std::string& frame) { outbox_.push_back(frame); }
@@ -154,6 +169,16 @@ const char* PanelWindows::onPanel(XPLMWindowID, const char* text, void* refcon) 
     const bool open = arg.value("open", false);
     if (surface != "main" && surface != "mini") return XPLMReturnString("false");
     w->owner->show(surface == "main" ? Main : Mini, open);
+    return XPLMReturnString("true");
+}
+
+const char* PanelWindows::onPanelSize(XPLMWindowID, const char* text, void* refcon) {
+    auto* w = static_cast<Win*>(refcon);
+    const json arg = json::parse(text ? text : "", nullptr, false);
+    if (!w || !w->owner || !arg.is_object() || !arg.contains("height") || !arg["height"].is_number()) return XPLMReturnString("false");
+    // Only the mini follows its content; the editor keeps the size the user gives it.
+    if (w->surface != Mini) return XPLMReturnString("false");
+    w->owner->fitHeight(Mini, static_cast<int>(arg["height"].get<double>()));
     return XPLMReturnString("true");
 }
 
