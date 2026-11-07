@@ -201,6 +201,13 @@ void XPLMCommandOnce(XPLMCommandRef cmd) {
     } else if (name == "sim/view/3d_cockpit_cmnd_look") {
         dr("sim/graphics/view/view_type") = 1026;
         dr("sim/graphics/view/view_is_external") = 0;
+        // X-Plane puts the head (and acf_pe*, which follows it) back on the aircraft's eyepoint.
+        const double eye[3] = {-0.25, 0.9, -0.6};
+        const char* xyz = "xyz";
+        for (int i = 0; i < 3; ++i) {
+            dr(std::string("sim/graphics/view/pilots_head_") + xyz[i]) = eye[i];
+            dr(std::string("sim/aircraft/view/acf_pe") + static_cast<char>(std::toupper(xyz[i]))) = eye[i];
+        }
     }
 }
 void XPLMWorldToLocal(double lat, double lon, double alt, double* x, double* y, double* z) {
@@ -603,12 +610,16 @@ int main(int argc, char** argv) {
     const auto near = [](double a, double b) { return std::abs(a - b) < 1e-3; };
     {
         const std::string cockpitId = cam.value("id", "");
+        // The user had moved the head (X-Plane's own keys) when the aircraft loaded: acf_pe* moved with it.
+        dr("sim/graphics/view/pilots_head_x") = dr("sim/aircraft/view/acf_peX") = 0.1;
+        dr("sim/graphics/view/pilots_head_y") = dr("sim/aircraft/view/acf_peY") = 1.1;
         page.send("ActivateCamera", {{"cameraId", cockpitId}});
         frames(90);
         check(state() == "Active", "activating the cockpit camera takes the camera");
         check(near(dr("sim/graphics/view/pilots_head_x"), -0.25) && near(dr("sim/graphics/view/pilots_head_y"), 0.9) &&
                   near(dr("sim/graphics/view/pilots_head_z"), -0.6) && near(dr("sim/graphics/view/pilots_head_psi"), 0),
-              "the cockpit view puts the pilot's head on the eyepoint");
+              "the cockpit view puts the pilot's head on the eyepoint, even after the user moved the head: " +
+                  std::to_string(dr("sim/graphics/view/pilots_head_x")) + " " + std::to_string(dr("sim/graphics/view/pilots_head_y")));
         check(std::abs(dr("sim/graphics/view/field_of_view_deg") - 62.0) < 0.05, "and sets its field of view (62 deg)");
         check(!g_camera && dr("sim/graphics/view/view_type") == 1026, "in X-Plane's 3D cockpit, without camera control");
 

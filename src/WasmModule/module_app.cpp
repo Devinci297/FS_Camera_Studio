@@ -1459,21 +1459,24 @@ void ModuleApp::resolveAircraftProfile(double now) {
         }
     }
     if (profiles::isC172(aircraftModelKey_, aircraftTitle_) && !aircraftDirty() && !pendingCommit_) {
+        // X-Plane's C172 has its own cockpit (and eyepoint): its own starter, beside any MSFS one already there.
+        const bool xplane = coord_.simVersion().rfind("X-Plane", 0) == 0;
+        const std::string templateId = xplane ? profiles::kC172XPlaneTemplate : profiles::kC172Template;
         bool installed = false;
         for (const auto& [id, rec] : st.profiles) {
-            if (js::str(rec.current, "builtinTemplate") == "c172-complete-v1" &&
+            if (js::str(rec.current, "builtinTemplate") == templateId &&
                 js::str(js::object(rec.current, "aircraftMatch"), "modelKey") == aircraftModelKey_) installed = true;
         }
         if (!installed && defaultProfileAttempts_.insert(aircraftModelKey_).second) {
-            json doc = profiles::makeC172Profile(aircraftModelKey_, aircraftTitle_);
+            json doc = profiles::makeC172Profile(aircraftModelKey_, aircraftTitle_, xplane);
             const std::string id = js::str(doc, "profileId");
             CommitRequest req;
             req.upsertProfiles.push_back(doc);
             req.navigation = navigation();
             (*req.navigation)["lastProfileId"] = id;
             (*req.navigation)["lastByModel"][aircraftModelKey_] = id;
-            req.requestId = "builtin:c172-complete-v1:" + aircraftModelKey_;
-            diag("installing C172 default: 12 cockpit and 8 exterior views");
+            req.requestId = "builtin:" + templateId + ":" + aircraftModelKey_;
+            diag(xplane ? "installing X-Plane C172 starter: 14 cockpit and 8 exterior views" : "installing C172 default: 12 cockpit and 8 exterior views");
             commit(std::move(req), {"builtin-c172", "create", working_.draftRevision, nullptr, id}, now);
             resolveAircraft_ = true;
             return;

@@ -87,6 +87,7 @@ private:
     XPLMDataRef eye_[3] = {};   // acf_peX, _Y, _Z: they move with the pilot's head in X-Plane 12
     core::Vec3 eye_body_;       // the eyepoint (body), read once per aircraft before the module moves the head
     bool eyeValid_ = false;
+    bool wroteHead_ = false;    // the module has moved the head since it last gave it back
     XPLMDataRef fov_ = nullptr, viewType_ref_ = nullptr, external_ = nullptr;
     XPLMDataRef local_[3] = {}, attitude_[3] = {};  // local_x/y/z, theta/phi/psi
     XPLMCommandRef cockpitCmd_ = nullptr, chaseCmd_ = nullptr;

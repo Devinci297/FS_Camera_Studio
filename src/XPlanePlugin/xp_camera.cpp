@@ -63,10 +63,11 @@ void XPCamera::findRefs() {
 }
 
 // The pilot's eyepoint relative to the reference point (body axes). X-Plane 12 moves acf_pe* along with
-// pilots_head_*, so it is read only while the module is not moving the head, and kept: reading it every frame
-// would add each view's offset again and again.
+// pilots_head_*, so it is read once per aircraft, after X-Plane's own cockpit view has put the head back on the
+// eyepoint and before the module moves it, and kept: reading it every frame would add each view's offset again and
+// again.
 core::Vec3 XPCamera::eyepoint() {
-    if (!eyeValid_ && mode_ != Mode::Head) {
+    if (!eyeValid_ && !wroteHead_ && settleFrames_ == 0) {
         eye_body_ = {getf(eye_[0]), getf(eye_[1]), getf(eye_[2])};
         eyeValid_ = std::isfinite(eye_body_.x) && std::isfinite(eye_body_.y) && std::isfinite(eye_body_.z);
     }
@@ -77,7 +78,6 @@ bool XPCamera::tryConnect() {
     if (open_) return true;
     findRefs();
     open_ = head_[0] && local_[0] && attitude_[0];
-    eyepoint();
     if (open_) requestStatus();
     return open_;
 }
@@ -111,13 +111,16 @@ bool XPCamera::acquire(const std::string&) {
         stage(be::CameraStatus{SdkAvailability::AcquiredByOther, false});
         return true;
     }
-    eyepoint();  // before the first head write, after an aircraft change
     for (int i = 0; i < 6; ++i) saved_.head[i] = getf(head_[i]);
     saved_.fovDeg = getf(fov_, 60);
     saved_.external = external_ && XPLMGetDatai(external_) != 0;
     saved_.valid = true;
     viewType_ = viewType_ref_ ? XPLMGetDatai(viewType_ref_) : 0;
     settleFrames_ = 0;
+    wroteHead_ = false;
+    // A new aircraft, or the first camera: X-Plane's cockpit view puts the head (and acf_pe*) back on the eyepoint,
+    // which is read once that has settled. The user's own head position comes back on release.
+    if (!eyeValid_ && !saved_.external) command(cockpitCmd_);
     acquired_ = true;
     mode_ = Mode::None;
     pose_.reset();
@@ -139,6 +142,7 @@ bool XPCamera::release(const std::string&) {
             if (head_[i]) XPLMSetDataf(head_[i], saved_.head[i]);
         if (fov_) XPLMSetDataf(fov_, saved_.fovDeg);
     }
+    wroteHead_ = false;
     mode_ = Mode::None;
     acquired_ = false;
     pose_.reset();
@@ -149,6 +153,7 @@ bool XPCamera::release(const std::string&) {
 void XPCamera::lose(SdkAvailability why) {
     leaveControl();
     if (saved_.valid && fov_) XPLMSetDataf(fov_, saved_.fovDeg);  // the user's own view keeps their zoom
+    wroteHead_ = false;
     mode_ = Mode::None;
     acquired_ = false;
     pose_.reset();
@@ -197,8 +202,11 @@ bool XPCamera::submitPose(const SdkPose& pose) {
 
 void XPCamera::writeHead() {
     if (!pose_ || pose_->referential != Referential::Eyepoint) return;
+    const core::Vec3 eye = eyepoint();
+    if (!eyeValid_) return;  // X-Plane is still settling the head on the eyepoint
+    wroteHead_ = true;
     const core::CameraPose p = host::fromSdk(*pose_, kContract);
-    const core::Vec3 body = eyepoint() + geo::frdToBody(p.positionFRD);
+    const core::Vec3 body = eye + geo::frdToBody(p.positionFRD);
     const auto a = p.orientation.toPbh();
     const float values[6] = {static_cast<float>(body.x), static_cast<float>(body.y), static_cast<float>(body.z),
                              static_cast<float>(a.headingDeg), static_cast<float>(a.pitchDeg), static_cast<float>(a.bankDeg)};
