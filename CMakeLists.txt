@@ -24,5 +24,11 @@ add_subdirectory(src/Profiles)
 add_subdirectory(src/Protocol)
 add_subdirectory(src/WasmModule)
 
+# XP Camera Studio (X-Plane 12 plugin), off by default; see src/XPlanePlugin/CMakeLists.txt.
+option(FSCS_BUILD_XPLANE "Build the X-Plane 12 plugin" OFF)
+if(FSCS_BUILD_XPLANE)
+    add_subdirectory(src/XPlanePlugin)
+endif()
+
 enable_testing()
 add_subdirectory(tests)
