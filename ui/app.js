@@ -23,6 +23,14 @@
   const SURFACE = forcedSurface || (surfaceMatch ? surfaceMatch[1] : 'demo');
   const IS_MINI = SURFACE === 'mini';
   const bridge = window.FSCBridge.create({ surface: IS_MINI ? 'mini' : 'main' });
+  // X-Plane (XP Camera Studio): bindings are X-Plane commands set in X-Plane's own keyboard and joystick settings.
+  const XPLANE = bridge.mode === 'xplane';
+  const SIM_NAME = XPLANE ? 'X-Plane' : 'MSFS';
+  /** The xpcs/ command for a binding action: xpcs/view_3, xpcs/peek_3, xpcs/next_camera. Null past view ID 30. */
+  function xpCommand(action, viewId) {
+    if (action === 'selectView' || action === 'peekView') return viewId >= 1 && viewId <= 30 ? 'xpcs/' + (action === 'selectView' ? 'view_' : 'peek_') + viewId : null;
+    return 'xpcs/' + action.replace(/[A-Z]/g, c => '_' + c.toLowerCase());
+  }
   root.setAttribute('data-surface', SURFACE);
   if (SURFACE !== 'demo') {
     root.classList.remove('demo');
@@ -350,7 +358,7 @@
     ['recenterLook', 'Recenter look', 'Clear the temporary mouse look'],
     ['toggleEditor', 'Toggle editor', 'Open or hide the Camera Studio editor'],
     ['saveViews', 'Save adjusted view and all changes', 'Ctrl+S stores the current position, look and zoom, then saves pending changes'],
-    ['toggleHeadTracking', 'Toggle head tracking', 'Toggle MSFS head tracking for the active camera'],
+    ['toggleHeadTracking', 'Toggle head tracking', 'Toggle ' + SIM_NAME + ' head tracking for the active camera'],
     ['toggleAirportAuto', 'Toggle auto airport camera switching', 'Switch to the nearest loaded airport camera from any view'],
     ['toggleMouseLook', 'Toggle mouse look', 'Move within the custom camera without releasing control'],
     ['toggleMini', 'Toggle mini control panel', 'Show or hide the quick-access dock'],
@@ -2269,12 +2277,12 @@
   function trackingOptions() {
     if(!S.working)return;
     const body=openDialog('Global head tracking');
-    body.appendChild(make('p','One head-tracking setting for every camera and profile. TrackIR and compatible MSFS inputs are off by default. Your original simulator setting is restored when camera control is released.','mc-note'));
+    body.appendChild(make('p','One head-tracking setting for every camera and profile. TrackIR and compatible '+SIM_NAME+' inputs are off by default. Your original simulator setting is restored when camera control is released.','mc-note'));
     [['on','On for all cameras'],['off','Off for all cameras']].forEach(([value,label])=>{
       const b=button(label,()=>{trackingPreference(null,value);closeDialog();render();},'mc-secondary');b.setAttribute('aria-pressed',String((S.working.settings.host.globalHeadTrackingEnabled===true)===(value==='on')));body.appendChild(b);
     });
     const status=S.caps.headTracking||{};if(status.error)body.appendChild(make('p',status.error,'mc-warn'));
-    body.appendChild(make('p','This controls the MSFS tracking switch; it does not detect whether a physical tracker is connected. VR tracking and tools that move the camera independently are separate.','mc-note'));
+    body.appendChild(make('p',XPLANE?'In X-Plane, Camera Studio cannot switch head tracking yet: set it in X-Plane\'s own settings. VR tracking and tools that move the camera independently are separate.':'This controls the MSFS tracking switch; it does not detect whether a physical tracker is connected. VR tracking and tools that move the camera independently are separate.','mc-note'));
     dialogActions([['Close',()=>closeDialog()]]);
   }
   function aircraftTrackingOptions(view) {
@@ -3263,7 +3271,7 @@
     const query = searchKey(filter.query), keep = TRAFFIC_FILTERS[filter.status] || TRAFFIC_FILTERS.all;
     const shown = all.filter(a => keep(a) && (!filter.maxNm || Number(a.distanceNm) <= filter.maxNm) && (!query || trafficMatches(a, query)));
     $('mc-traffic-empty').hidden = !S.snapshot || all.length > 0;
-    setText($('mc-traffic-empty-text'), 'No other aircraft are within ' + radius + ' NM. AI traffic appears here as soon as the simulator places it. VATSIM and IVAO traffic appears when your network client injects it into the simulator. Microsoft Flight Simulator\'s own multiplayer aircraft are not visible to add-ons, so they cannot be listed or followed.');
+    setText($('mc-traffic-empty-text'), 'No other aircraft are within ' + radius + ' NM. ' + (XPLANE ? 'X-Plane\'s AI traffic appears here as soon as X-Plane places it. Multiplayer and traffic plugins (VATSIM and IVAO clients, LiveTraffic and the like) appear when they publish their aircraft to X-Plane\'s TCAS targets.' : 'AI traffic appears here as soon as the simulator places it. VATSIM and IVAO traffic appears when your network client injects it into the simulator. Microsoft Flight Simulator\'s own multiplayer aircraft are not visible to add-ons, so they cannot be listed or followed.'));
     setText($('mc-traffic-count'), all.length ? (shown.length === all.length ? all.length : shown.length + ' of ' + all.length) + ' aircraft within ' + radius + ' NM, nearest first' : '');
     const reasons = {};
     SPOT_VIEWS.forEach(([view]) => { reasons[view] = spotViewReason(view); });
@@ -4070,7 +4078,15 @@
   }
   function renderBindings() {
     const list = $('mc-bindings-list');
-    if (!$('mc-binding-kind').querySelector('[value="simZoom"]')) {
+    if (XPLANE) {
+      // Assignments live in X-Plane, so there is nothing to filter by input or assignment, nor to test here.
+      $('mc-binding-status').hidden = true; $('mc-binding-kind').hidden = true;
+      $('mc-binding-status').value = 'all'; $('mc-binding-kind').value = 'all';
+      const intro = $('mc-page-bindings').querySelector('.mc-page-header p');
+      if (intro) intro.textContent = 'Each action is an X-Plane command. Set its key or button in X-Plane: Settings > Keyboard or Joystick, then search for xpcs.';
+      $('mc-binding-search').placeholder = 'Search actions, cameras or commands';
+      if (!$('mc-binding-result').textContent || $('mc-binding-result').textContent === 'Select an assignment, then test it.') setBindingResult('Copy a command, then find it in X-Plane\'s Keyboard or Joystick settings to give it a key or button.');
+    } else if (!$('mc-binding-kind').querySelector('[value="simZoom"]')) {
       const option = make('option', 'Mouse wheel / MSFS zoom'); option.value = 'simZoom'; $('mc-binding-kind').appendChild(option);
     }
     const query = $('mc-binding-search').value.trim().toLowerCase();
@@ -4085,6 +4101,7 @@
       sections.forEach((section, index) => {
         total += section[1].length;
         const rows = section[1].filter(spec => {
+          if (XPLANE) return !query || [section[0], spec.name, spec.detail, xpCommand(spec.action, spec.viewId) || ''].join(' ').toLowerCase().indexOf(query) >= 0;
           const matches = bindingsFor(spec.action, spec.viewId), binding = matches[0];
           if (status === 'assigned' && !binding || status === 'unassigned' && binding) return false;
           if (kind !== 'all' && !matches.some(b => b.input.kind === kind)) return false;
@@ -4108,7 +4125,27 @@
     updateBindingToggle();
     $('mc-binding-count').textContent = shown + ' of ' + total + ' bindings';
   }
+  function xpBindingRow(spec) {
+    const row = make('div', undefined, 'mc-binding-row mc-binding-xp');
+    const name = make('div', spec.name, 'mc-binding-name');
+    name.appendChild(make('small', spec.detail)); row.appendChild(name);
+    const command = xpCommand(spec.action, spec.viewId);
+    const group = make('div', undefined, 'mc-binding-slot');
+    group.appendChild(make('small', 'X-Plane command'));
+    if (!command) { group.appendChild(make('span', 'None: commands cover view IDs 1 to 30', 'mc-note')); row.appendChild(group); return row; }
+    const field = make('input'); field.type = 'text'; field.readOnly = true; field.value = command; field.className = 'mc-binding-command';
+    field.setAttribute('aria-label', 'X-Plane command for ' + spec.name); field.addEventListener('click', () => field.select());
+    const copy = button('Copy', () => {
+      field.focus(); field.select();
+      let copied = false; try { copied = !!(document.execCommand && document.execCommand('copy')); } catch (_) { /* not allowed here */ }
+      setBindingResult(copied ? command + ' copied. Paste it into the search box of X-Plane\'s Keyboard or Joystick settings.' : 'Press Ctrl+C to copy ' + command + '.');
+    }, 'mc-secondary');
+    copy.setAttribute('aria-label', 'Copy ' + command);
+    add(group, field, copy); row.appendChild(group);
+    return row;
+  }
   function bindingRow(spec) {
+    if (XPLANE) return xpBindingRow(spec);
     const key = spec.action + (spec.viewId ? ':' + spec.viewId : '');
     const row = make('div', undefined, 'mc-binding-row mc-binding-dual');
     row.setAttribute('data-binding', key);
@@ -4770,14 +4807,14 @@
     let fileCode = '', reading = false, importing = false, readSequence = 0;
     const native = bridge.mode !== 'demo';
     const available = !native && typeof window.FileReader === 'function' && file.type === 'file';
-    let selectedFilename = '', refreshing = false;
+    let selectedFilename = '', selectedXCamera = null, refreshing = false;
     let refreshButton = null;
     const currentDialog = () => document.documentElement.contains(file);
     if (native) {
       choose.hidden = true;
       const folderLabel = make('label', 'Profile imports folder', 'mc-field'), folder = make('input');
       folder.type = 'text'; folder.readOnly = true; folder.setAttribute('aria-label', 'Profile imports folder');
-      folder.value = '%APPDATA%\\Microsoft Flight Simulator 2024\\WASM\\MSFS2024\\fs-camera-studio\\work\\imports';
+      folder.value = XPLANE ? 'X-Plane 12\\Output\\preferences\\XPCameraStudio\\work\\imports' : '%APPDATA%\\Microsoft Flight Simulator 2024\\WASM\\MSFS2024\\fs-camera-studio\\work\\imports';
       folder.addEventListener('click', () => folder.select()); folderLabel.appendChild(folder);
       const copy = button('Copy folder path', () => {
         folder.focus(); folder.select();
@@ -4789,9 +4826,20 @@
       const list = make('div', undefined, 'mc-profile-list');
       list.setAttribute('aria-label', 'Profile files'); list.setAttribute('role', 'group');
       list.style.maxHeight = '220px'; list.style.overflowY = 'auto';
+      // X-Camera (X-Plane): each aircraft's own camera file, community sets for the loaded aircraft and .csv files
+      // in the imports folder, converted into a new profile.
+      const xcam = make('div'); xcam.hidden = true;
+      const xcamList = make('div', undefined, 'mc-profile-list');
+      xcamList.setAttribute('aria-label', 'X-Camera files'); xcamList.setAttribute('role', 'group');
+      xcamList.style.maxHeight = '220px'; xcamList.style.overflowY = 'auto';
+      add(xcam, make('h3', 'X-Camera views'),
+        make('p', 'Convert X-Camera\'s cameras into a new profile. Listed: every aircraft\'s own X-Camera file, community sets for the loaded aircraft and .csv files in the folder above. X-Camera\'s files are not changed.', 'mc-note'),
+        xcamList);
+      const pickButtons = () => Array.prototype.slice.call(list.querySelectorAll('button')).concat(Array.prototype.slice.call(xcamList.querySelectorAll('button')));
+      const markPicked = pick => pickButtons().forEach(b => { b.setAttribute('aria-pressed', b === pick ? 'true' : 'false'); b.className = b === pick ? 'mc-primary' : 'mc-secondary'; });
       const refresh = async () => {
         if (refreshing || importing) return;
-        refreshing = true; refreshButton.disabled = true; selectedFilename = ''; empty(list);
+        refreshing = true; refreshButton.disabled = true; selectedFilename = ''; selectedXCamera = null; empty(list); empty(xcamList); xcam.hidden = true;
         status.textContent = 'Reading the imports folder...'; dialogError('');
         try {
           const ack = await bridge.request('ListImportFiles', {});
@@ -4803,14 +4851,28 @@
           names.forEach(name => {
             const pick = button(name, () => {
               if (importing) return;
-              selectedFilename = name; input.value = ''; fileCode = '';
-              Array.prototype.forEach.call(list.querySelectorAll('button'), b => { b.setAttribute('aria-pressed', b === pick ? 'true' : 'false'); b.className = b === pick ? 'mc-primary' : 'mc-secondary'; });
+              selectedFilename = name; selectedXCamera = null; input.value = ''; fileCode = '';
+              markPicked(pick);
               status.textContent = 'Ready to import ' + name; dialogError('');
             }, 'mc-secondary');
             pick.setAttribute('aria-pressed', 'false'); pick.style.display = 'block'; pick.style.width = '100%';
             list.appendChild(pick);
           });
-          status.textContent = names.length ? 'Select a profile file, then Import.' : 'No JSON files found. Add profiles to this folder, then Refresh.';
+          const xfiles = Array.isArray(result.xcamera) ? result.xcamera.filter(f => f && typeof f.id === 'string') : [];
+          xfiles.forEach(f => {
+            const where = f.source === 'community' ? 'community set' : f.source === 'imports' ? 'imports folder' : '';
+            const label = (f.aircraft || 'Aircraft') + ' - ' + (f.label || 'X-Camera file') + (where ? ' (' + where + ')' : '') + (f.loadedAircraft ? ', loaded aircraft' : '');
+            const pick = button(label, () => {
+              if (importing) return;
+              selectedXCamera = f; selectedFilename = ''; input.value = ''; fileCode = '';
+              markPicked(pick);
+              status.textContent = 'Ready to convert ' + (f.label || 'the X-Camera file') + ' for ' + (f.aircraft || 'its aircraft'); dialogError('');
+            }, 'mc-secondary');
+            pick.setAttribute('aria-pressed', 'false'); pick.style.display = 'block'; pick.style.width = '100%'; pick.style.textAlign = 'left';
+            xcamList.appendChild(pick);
+          });
+          xcam.hidden = !xfiles.length;
+          status.textContent = names.length || xfiles.length ? 'Select a file, then Import.' : 'No JSON files found. Add profiles to this folder, then Refresh.';
           if (result.error) dialogError(result.error);
         } catch (_) { if (currentDialog()) { status.textContent = 'Could not list profile files.'; dialogError('Refresh to try again.'); } }
         finally { refreshing = false; refreshButton.disabled = false; }
@@ -4818,7 +4880,7 @@
       refreshButton = button('Refresh', refresh, 'mc-secondary');
       body.insertBefore(folderLabel, status);
       body.insertBefore(make('p', 'Open this location in File Explorer, copy your profile JSON files into it, then Refresh. The simulator does not provide a Windows file picker or Open folder action.', 'mc-note'), status);
-      body.insertBefore(copy, status); body.insertBefore(refreshButton, status); body.insertBefore(list, status);
+      body.insertBefore(copy, status); body.insertBefore(refreshButton, status); body.insertBefore(list, status); body.insertBefore(xcam, status);
       nextFrame(refresh);
     } else if (!available) {
       choose.disabled = true;
@@ -4828,7 +4890,7 @@
       body.appendChild(make('p', 'If the simulator does not open a file picker, use Paste profile code instead.', 'mc-note'));
     }
     input.addEventListener('input', () => {
-      ++readSequence; fileCode = ''; reading = false; file.value = ''; selectedFilename = '';
+      ++readSequence; fileCode = ''; reading = false; file.value = ''; selectedFilename = ''; selectedXCamera = null;
       status.textContent = 'Using pasted profile code.';
       dialogError('');
     });
@@ -4871,11 +4933,12 @@
       if (importing) return;
       if (reading) { dialogError('Wait for the profile file to finish loading.'); return; }
       const code = fileCode || input.value.trim();
-      if (!code && !selectedFilename) { dialogError('Choose a profile file or paste its code first.'); return; }
+      if (!code && !selectedFilename && !selectedXCamera) { dialogError('Choose a profile file or paste its code first.'); return; }
       importing = true; choose.disabled = true; input.disabled = true; if (refreshButton) refreshButton.disabled = true;
       dialogError('');
       try {
-        const ack = selectedFilename ? await bridge.request('ImportProfileFile', { filename: selectedFilename }) : await bridge.request('ImportProfile', { code });
+        const ack = selectedXCamera ? await bridge.request('ImportXCameraFile', { id: selectedXCamera.id })
+          : selectedFilename ? await bridge.request('ImportProfileFile', { filename: selectedFilename }) : await bridge.request('ImportProfile', { code });
         if (ack.status === 'Pending') {
           const done = await waitForCommit(ack.requestId);
           if (!document.documentElement.contains(file)) return;
@@ -4892,15 +4955,23 @@
   }
   function showImportReport(result) {
     const report = result.report || {};
-    const body = openDialog('Profile imported');
-    body.appendChild(make('p', '"' + (report.name || 'The profile') + '" was added as a copy with new camera IDs.'));
+    const xcamera = report.source === 'xcamera';
+    const body = openDialog(xcamera ? 'X-Camera views imported' : 'Profile imported');
+    body.appendChild(make('p', xcamera ? '"' + (report.name || 'The profile') + '" was made from X-Camera\'s cameras. Check each view before relying on it.'
+      : '"' + (report.name || 'The profile') + '" was added as a copy with new camera IDs.'));
     const kv = make('dl', undefined, 'mc-kv');
     const am = report.aircraftMatch || { matches: report.matchesLoadedAircraft, displayName: report.aircraft };
     add(kv, make('dt', 'Aircraft'), make('dd', (am.matches ? 'Matches the loaded aircraft' : 'Not the loaded aircraft') + (am.displayName ? ' - ' + am.displayName : '')));
     add(kv, make('dt', 'Cameras'), make('dd', String(report.cameraCount || 0)));
     body.appendChild(kv);
     const unsupported = report.unsupported || report.notes || [];
-    if (unsupported.length) {
+    if (unsupported.length && xcamera) {
+      body.appendChild(make('p', 'How X-Camera\'s cameras were converted:', 'mc-note'));
+      const ul = make('ul', undefined, 'mc-report-list');
+      unsupported.forEach(item => ul.appendChild(make('li', typeof item === 'string' ? item : (item.message || item.name || ''))));
+      body.appendChild(ul);
+    } else if (xcamera) body.appendChild(make('p', 'Every camera was converted as it was.'));
+    else if (unsupported.length) {
       body.appendChild(make('p', 'Kept, but not available in this version:', 'mc-warn'));
       const ul = make('ul', undefined, 'mc-report-list');
       unsupported.forEach(item => ul.appendChild(make('li', typeof item === 'string' ? item : (item.message || item.name || ''))));
@@ -5013,7 +5084,10 @@
     $('mc-name-display-label').textContent='Mini panel category display';
     root.dataset.nameDisplay = ui.nameDisplay === 'icons' || ui.nameDisplay === 'labels' ? ui.nameDisplay : 'both';
     layoutMiniCategories();
-    if (IS_MINI) applyMiniMode(ui.miniEnabled === false ? 'off' : ui.miniHover !== false ? 'hover' : 'always');
+    // X-Plane opens the mini as its own window (Plugins menu or xpcs/toggle_mini): the page shows the dock, and the plugin
+    // hides and reveals the whole window at the bottom edge (bridge.js reads data-xp-hover).
+    if (IS_MINI) applyMiniMode(ui.miniEnabled === false ? 'off' : ui.miniHover !== false && bridge.mode !== 'xplane' ? 'hover' : 'always');
+    if (IS_MINI && bridge.mode === 'xplane') root.dataset.xpHover = String(ui.miniEnabled !== false && ui.miniHover !== false);
     if (Boolean(ui.miniPinned) !== miniPinned) setMiniPinned(Boolean(ui.miniPinned), false);
   }
   /** Mini surface (design sec. 4.4/sec. 4.5): handle + hover reveal, fixed dock, or a short note when turned off. */
@@ -5057,7 +5131,7 @@
       group=make('div');group.id='mc-global-tracking-settings';
       group.appendChild(make('div','Global tracking','mc-section-label mc-spaced'));
       const head=make('label',undefined,'mc-switch-row'),copy=make('span',undefined,'mc-switch-copy');
-      add(copy,make('span','Head tracking'),make('small','TrackIR and compatible MSFS inputs. Shared by all cameras and profiles; off by default.'));
+      add(copy,make('span','Head tracking'),make('small','TrackIR and compatible '+SIM_NAME+' inputs. Shared by all cameras and profiles; off by default.'));
       const toggle=make('input',undefined,'mc-switch');toggle.type='checkbox';toggle.id='mc-setting-global-head-tracking';
       toggle.addEventListener('change',()=>trackingPreference(null,toggle.checked?'on':'off'));add(head,copy,toggle);group.appendChild(head);
       const row=make('section',undefined,'mc-airport-tracking-settings');

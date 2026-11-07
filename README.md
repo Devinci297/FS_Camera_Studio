@@ -1,18 +1,23 @@
 # FS Camera Studio
 
-A camera manager for **Microsoft Flight Simulator 2024** that lives entirely inside the simulator: aircraft
-profiles, organised views, precise editing, smooth transitions and shortcuts — opened from the sim's toolbar, with a
-mini control panel at the bottom of the screen.
+A camera manager for **Microsoft Flight Simulator 2024** and **X-Plane 12** that lives entirely inside the simulator:
+aircraft profiles, organised views, precise editing, smooth transitions and shortcuts — opened from the sim's
+toolbar or menu, with a mini control panel at the bottom of the screen. The X-Plane version is called
+**XP Camera Studio**; it runs the same module logic and the same editor and mini panel (see
+[X-Plane 12](#x-plane-12-xp-camera-studio)).
 
-**Status: in-sim testing, with a new build awaiting live verification.** The module and panels have run in MSFS;
-version 0.4.0 adds camera feel, cinematic mode, world and drone cameras, traffic spotting and gamepad drones, and is
-built with SDK 1.8.1.
-Automated checks and installed-file verification are separate from live controller and scenery acceptance.
-Camera axes, template poses and hosting behaviour still require live qualification — see
-[`doc/qualification.md`](doc/qualification.md).
+**Version 0.5.0:** one Windows installer for Microsoft Flight Simulator 2024, X-Plane 12, or both.
+Installed and tested successfully in both simulators by the release tester on November 7, 2026.
+The MSFS build uses SDK 1.8.1; XP Camera Studio requires X-Plane 12.4.4 or newer on Windows x64.
+Both simulators share one version number and one update check.
 
-[Download 0.4.0](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.4.0)
+[Download 0.5.0](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.5.0)
 for the Windows installer, illustrated manual, example profile and checksums.
+
+See the [release notes](doc/releases/0.5.0.md) and
+[validation record](doc/test-evidence/2026-11-07-v0.5.0.md) for automated checks, live acceptance and known limits.
+Aircraft-specific camera poses and controller setups can still need adjustment; see
+[`doc/qualification.md`](doc/qualification.md).
 
 ![Camera Studio editor](doc/manual/images/editor.png)
 
@@ -35,6 +40,18 @@ FSCameraStudio.wasm — standalone module loaded by MSFS from the package
 
 There is no desktop app, background service or external process. Both panels are mirrors of one authoritative
 state held in the module, so the editor and the mini panel always agree.
+
+In X-Plane 12 the same module and UI run inside a native plugin:
+
+```text
+Plugins menu / xpcs/ commands ── editor and mini panel in X-Plane browser windows (the same ui/)
+                         │  xplane.fscs(frame) / FSCXPlaneReceive(frame), the same protocol
+                         ▼
+XPCameraStudio.xpl — X-Plane plugin, run from a flight loop
+   the same module logic · profiles as files · apt.dat airports · TCAS traffic
+                         │
+        pilots_head datarefs (cockpit views) · XPLMControlCamera (exterior, airport, spotting)
+```
 
 * **Safety first:** the module starts in *Observing* and never moves the view on its own. Release Camera is always
   available (both panels and a binding). If anything goes wrong — another add-on takes the camera, the sim takes
@@ -80,6 +97,31 @@ state held in the module, so the editor and the mini panel always agree.
   [airport defaults and overrides](doc/airport-camera-settings.md) for global tracking, category heights, auto zoom
   and distant-target horizon protection. Each airport camera can override these defaults independently.
 
+## X-Plane 12 (XP Camera Studio)
+
+Everything above works the same in X-Plane, with these differences:
+
+* **Opening it:** Plugins > XP Camera Studio > Editor / Mini panel, or the commands `xpcs/toggle_editor` and
+  `xpcs/toggle_mini`. The editor can be popped out to its own window; the mini panel shows on hover at the bottom.
+* **Bindings are X-Plane commands.** Every action is an `xpcs/` command (`xpcs/view_1` to `xpcs/view_30`,
+  `xpcs/peek_1` to `xpcs/peek_30`, `xpcs/next_camera`, `xpcs/spot_next` and so on). The Bindings tab lists each one
+  with **Copy**; assign keys and buttons in X-Plane's Keyboard and Joystick settings. Read-only datarefs
+  (`xpcs/camera_active`, `xpcs/active_view`, `xpcs/active_camera`, `xpcs/fov_deg` and more) are published for
+  cockpit builders and scripts.
+* **Cameras:** cockpit views move the pilot's head, so the 3D cockpit stays clickable; exterior, orbit, fly-by,
+  airport and spotting views are drawn by the plugin. Picking another X-Plane view hands the camera back.
+* **Airports** come from X-Plane's own scenery: every enabled pack in `scenery_packs.ini` plus Global Airports, with
+  X-Plane's priority (your custom scenery wins). Runways, the tower, gates and parking, the taxi network and taxi
+  signs come from `apt.dat`.
+* **Spotting** follows X-Plane's AI traffic and anything multiplayer or traffic plugins publish to X-Plane's TCAS
+  targets.
+* **X-Camera import:** Profiles > Import also lists X-Camera's camera files for the loaded aircraft and converts them
+  into a new profile.
+* **Profiles** are saved in `X-Plane 12/Output/preferences/XPCameraStudio`.
+
+Requirements: X-Plane 12.4.4 or newer on Windows 11 x64. Details, the full command and dataref lists and the build
+are in [`src/XPlanePlugin/README.md`](src/XPlanePlugin/README.md).
+
 ## Build
 
 The tester release and illustrated manual are available from
@@ -88,26 +130,31 @@ The app bar displays the version; click it for update detection and the installe
 Close MSFS before installing an update. Saved airport cameras load automatically within the configured radius
 (25 NM by default); other airports get a temporary set until you save it. Auto switch is a separate viewpoint control.
 
-### Reproduce version 0.4.0
+### Reproduce version 0.5.0
 
 The reviewed simulator host is frozen in `package/validated-host`, with hashes in
-`package/validated-host.json`. For 0.4.0 it is refreshed from the compiled package of the release commit, the same
-`tools\package.ps1 -Compile` build that was flown during testing. Close MSFS before the compile step.
+`package/validated-host.json`. It is refreshed from the compiled package of the release commit, the same
+`tools\package.ps1 -Compile` build that is flown during testing. Close MSFS before the compile step. The X-Plane
+plugin is built at the same version and goes into the same setup.
 
 ```powershell
-python tools/diagnostics/stage-v0.4.py --freeze
+python tools/diagnostics/stage-v0.5.py --freeze
 cmake --preset tests; cmake --build --preset tests; ctest --preset tests
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.4.0
-tools\package.ps1 -Compile -Wasm build/wasm/release-0.4.0/FSCameraStudio.wasm -OutputDirectory build/release-0.4.0-compile
-python tools/diagnostics/stage-v0.4.py --host build/release-0.4.0-compile/Packages/fs-camera-studio
-python tools/diagnostics/stage-v0.4.py
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.5.0
+tools\package.ps1 -Compile -Wasm build/wasm/release-0.5.0/FSCameraStudio.wasm -OutputDirectory build/release-0.5.0-compile
+python tools/diagnostics/stage-v0.5.py --host build/release-0.5.0-compile/Packages/fs-camera-studio
+python tools/diagnostics/stage-v0.5.py
+cmake -S . -B build-xp -G "Visual Studio 17 2022" -A x64 -DFSCS_BUILD_XPLANE=ON
+cmake --build build-xp --config Release --target xpcs_plugin
 node tools/capture-manual.cjs
 python tools/build-manual.py
-python tools/build-installer.py --version 0.4.0 --package build/release/0.4.0/fs-camera-studio --receipt build/release/0.4.0/staged.json
+python tools/build-installer.py --version 0.5.0 --package build/release/0.5.0/fs-camera-studio --receipt build/release/0.5.0/staged.json --xplane build-xp/XPCameraStudio
+python tools/build-installer.py --test-harness --version 0.5.0 --package build/release/0.5.0/fs-camera-studio --receipt build/release/0.5.0/staged.json --xplane build-xp/XPCameraStudio
+python tools/test-installer.py --test-harness --version 0.5.0
 ```
 
-See [release notes](doc/releases/0.4.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
-and the bundled illustrated manual. [Release evidence and live checks](doc/test-evidence/2026-11-07-v0.4.0.md)
+See [release notes](doc/releases/0.5.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
+and the bundled illustrated manual. [0.5.0 release evidence and live checks](doc/test-evidence/2026-11-07-v0.5.0.md)
 separate automated verification from simulator acceptance. Earlier tester recipes remain available in their Git tags.
 
 Install ReportLab for manual generation and obtain Inno Setup with `tools/get-installer-compiler.ps1`.
@@ -142,6 +189,17 @@ UI tests and browser preview: `node ui/tests/math.test.mjs`, `node ui/tests/brid
 `node ui/tests/panel.test.mjs`, and open
 `ui/index.html` in a browser (demo mode with an in-memory module).
 
+X-Plane plugin (Visual Studio 2022 x64; the X-Plane SDK is vendored in `third_party/XPSDK`):
+
+```powershell
+cmake -S . -B build-xp -G "Visual Studio 17 2022" -A x64 -DFSCS_BUILD_XPLANE=ON
+cmake --build build-xp --config Release --target xpcs_plugin   # -> build-xp\XPCameraStudio
+```
+
+Copy `build-xp\XPCameraStudio` to `X-Plane 12\Resources\plugins\`. The plugin's own test runs it against a fake
+X-Plane (`xpcs_fake_xplane`, also on Linux); `node ui/tests/xplane-bridge.test.mjs` and
+`node ui/tests/xplane-bindings.test.cjs` cover the X-Plane side of the UI.
+
 ## Repository layout
 
 | Path | Contents |
@@ -150,6 +208,7 @@ UI tests and browser preview: `node ui/tests/math.test.mjs`, `node ui/tests/brid
 | `src/Profiles` | Profile schema v4, validation, bindings/settings, the two-slot repository, profile codes |
 | `src/Protocol` | Panel ⇄ module envelopes and CommBus chunking |
 | `src/WasmModule` | Coordinator, input router and module app (pure); `wasm/` holds the SDK adapters and entry points |
+| `src/XPlanePlugin` | XP Camera Studio: the X-Plane 12 plugin (camera, panels, storage, apt.dat airports, TCAS traffic) and its fake-X-Plane test |
 | `ui/` | The in-sim panels (one codebase, `main` and `mini` surfaces) |
 | `package/` | MSFS project, package definition, toolbar panel definitions and icons |
 | `tests/` | Native test suite with fake camera, services and storage |

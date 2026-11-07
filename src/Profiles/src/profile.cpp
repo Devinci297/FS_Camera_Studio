@@ -690,6 +690,14 @@ const char* builtinViewIcon(const std::string& name) {
         {"Flight instruments", "view-instrument"},
         {"Radios and navigation", "view-instrument"},
         {"Lower controls", "view-controls"},
+        {"Primary instruments", "view-instrument"},
+        {"Center display", "view-instrument"},
+        {"Full panel", "view-instrument"},
+        {"Lower panel", "view-instrument"},
+        {"Throttle and mixture", "view-controls"},
+        {"Trim and fuel selector", "view-controls"},
+        {"Switches and lights", "view-controls"},
+        {"Right window", "view-window"},
     };
     const auto it = icons.find(name);
     return it == icons.end() ? "camera" : it->second;
@@ -740,9 +748,9 @@ bool isC172(const std::string& modelKey, const std::string& displayName) {
            text.find("cessna 172") != std::string::npos;
 }
 
-json makeC172Profile(const std::string& modelKey, const std::string& displayName) {
-    json doc = makeStarterProfile("Cessna 172 - Complete views", modelKey, displayName);
-    doc["builtinTemplate"] = "c172-complete-v1";
+json makeC172Profile(const std::string& modelKey, const std::string& displayName, bool xplane) {
+    json doc = makeStarterProfile(xplane ? "Cessna 172 - X-Plane views" : "Cessna 172 - Complete views", modelKey, displayName);
+    doc["builtinTemplate"] = xplane ? kC172XPlaneTemplate : kC172Template;
     doc["categories"] = json::array();
     doc["cameras"] = json::array();
     const json cameraTemplate = makeStarterProfile("", "", "")["cameras"][0];
@@ -779,6 +787,23 @@ json makeC172Profile(const std::string& modelKey, const std::string& displayName
     view(group, "Pilot - landing", 0.08, 0, -0.08, -3, 0, 58, true);
     view(group, "Pilot - wide cockpit", -0.06, 0.12, -0.04, -8, 0, 82);
     view(group, "Copilot", 0, 0.74, 0, 0, 0, 62);
+    if (xplane) {
+        // Framed in X-Plane 12's Laminar C172 (G1000 and steam gauges share the aircraft folder, so one profile):
+        // offsets from the pilot's eyepoint, as the X-Plane plugin measures them.
+        group = category("Instruments");
+        view(group, "Primary instruments", 0.25, -0.02, 0.12, -12, 0, 46, true);
+        view(group, "Center display", 0.22, 0.31, 0.12, -13, 0, 50, true);
+        view(group, "Full panel", 0.16, 0.22, 0.10, -14, 0, 68);
+        view(group, "Lower panel", 0.25, 0.22, 0.12, -28, 0, 50);
+        group = category("Controls");
+        view(group, "Throttle and mixture", 0.28, 0.24, 0.15, -40, 0, 45, true);
+        view(group, "Trim and fuel selector", 0.18, 0.24, 0.05, -52, 0, 60);
+        view(group, "Switches and lights", 0.25, -0.07, 0.12, -28, 0, 50);
+        group = category("Cabin");
+        view(group, "Left window", 0, 0, 0, -8, -80, 75);
+        view(group, "Right window", 0, 0, 0, -10, 80, 70);
+        view(group, "Rear seats - forward", -0.95, 0.35, -0.02, -5, 0, 80);
+    } else {
     group = category("Instruments");
     view(group, "G1000 - PFD", 0.38, 0.02, 0.08, -12, 0, 35, true);
     view(group, "G1000 - MFD", 0.38, 0.38, 0.08, -12, 0, 35, true);
@@ -790,6 +815,7 @@ json makeC172Profile(const std::string& modelKey, const std::string& displayName
     view(group, "Overhead and cabin lighting", -0.05, 0.30, -0.18, 40, 0, 66);
     group = category("Cabin");
     view(group, "Rear seats - forward", -0.95, 0.35, -0.02, -5, 0, 80);
+    }
     group = category("Exterior (Preview)");
     auto outside = [&](const char* name, double f, double r, double d, double fov, bool favorite = true) {
         const double heading = std::atan2(-r, -f) * core::kRadToDeg;

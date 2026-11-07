@@ -112,6 +112,10 @@ public:
     // Read-only current world position, separate from capture/seed replies.
     // MSFS may lift airport cameras above terrain or buildings after submission.
     virtual std::optional<core::Vec3> worldCameraPosition() { return std::nullopt; }
+    // Airport cameras: the ground altitude (meters MSL) their height was measured from, NAN for any other camera. A
+    // simulator that does not lift airport cameras over its terrain itself (X-Plane) raises a world camera by how much
+    // the terrain under it is above this, so the height holds on sloping ground.
+    virtual void setGroundBase(double baseAltitudeMeters) { (void)baseAltitudeMeters; }
     virtual bool enumerateDefinitions() = 0;
     virtual bool setUsingDefinition(const std::string& name) = 0;
     virtual std::optional<bool> headTracking() { return std::nullopt; }

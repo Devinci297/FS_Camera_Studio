@@ -122,7 +122,10 @@ ProfileSnapshot toSnapshot(const json& doc);
 // A fresh profile with one Cockpit category and a Pilot view at the eyepoint.
 json makeStarterProfile(const std::string& name, const std::string& modelKey, const std::string& displayName);
 bool isC172(const std::string& modelKey, const std::string& displayName);
-json makeC172Profile(const std::string& modelKey, const std::string& displayName);
+// The C172 starter: MSFS's G1000 views, or (xplane) views framed in X-Plane 12's Laminar C172.
+constexpr const char* kC172Template = "c172-complete-v1";
+constexpr const char* kC172XPlaneTemplate = "c172-xplane-v1";
+json makeC172Profile(const std::string& modelKey, const std::string& displayName, bool xplane = false);
 bool isA320(const std::string& modelKey, const std::string& displayName);
 // Pilot-eyepoint starter views, independently saved against the loaded aircraft package.
 json makeA320Profile(const std::string& modelKey, const std::string& displayName);

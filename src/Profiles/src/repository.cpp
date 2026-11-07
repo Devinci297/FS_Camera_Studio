@@ -410,4 +410,19 @@ std::optional<ImportReport> importProfileCode(const std::string& code, std::stri
     return report;
 }
 
+std::optional<ImportReport> importXCamera(const xcamera::Source& source, std::string* error) {
+    auto converted = xcamera::convert(source, error);
+    if (!converted) return std::nullopt;
+    auto v = validateProfile(converted->profile);
+    if (!v.ok()) {
+        if (error) *error = "This X-Camera file could not be converted: " + v.summary();
+        return std::nullopt;
+    }
+    ImportReport report;
+    report.cameraCount = js::array(converted->profile, "cameras").size();
+    report.notes = std::move(converted->notes);
+    report.profile = std::move(converted->profile);
+    return report;
+}
+
 }  // namespace fscs::profiles

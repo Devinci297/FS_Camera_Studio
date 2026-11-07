@@ -31,6 +31,10 @@ const {chromium}=require(process.env.FSCS_PLAYWRIGHT||'playwright'),fs=require('
  await mini.evaluate(()=>{FSCApp.state.working.settings.ui.miniHover=false;FSCDemo.setOwnership('Observing');document.getElementById('mc-mini-pin').click();});
  for(const [width,file] of [[1600,'airport-controls-mini'],[1200,'airport-controls-mini-detail'],[760,'airport-controls-mini-narrow']]){await mini.setViewportSize({width,height:400});await mini.waitForTimeout(100);await mini.locator('#mc-mini-panel').screenshot({path:out+'/'+file+'.png'});}
  await mini.evaluate(()=>FSCDemo.traffic({time:100}));await mini.setViewportSize({width:1200,height:400});await mini.locator('#mc-dock-traffic-tab').click();await mini.waitForTimeout(200);await mini.locator('#mc-mini-panel').screenshot({path:out+'/mini-traffic.png'});
+ // X-Plane (XP Camera Studio): the plugin serves ui/ itself; ?host=xplane with a stand-in xplane namespace.
+ const xp=await browser.newPage({viewport:{width:860,height:1060},deviceScaleFactor:2});await xp.addInitScript(()=>{window.xplane={fscs:()=>true,fscsPanel:()=>true};});
+ await xp.goto('file:///'+path.resolve('ui/index.html').replaceAll('\\','/')+'?surface=main&host=xplane');await xp.waitForFunction(()=>window.FSCApp&&FSCApp.bridge.mode==='xplane');
+ await xp.locator('#mc-nav-bindings').click();await xp.fill('#mc-binding-search','spot');await xp.mouse.move(1240,20);await xp.waitForTimeout(400);const box=await xp.locator('#mc-page-bindings').boundingBox(),end=await xp.locator('#mc-binding-result').boundingBox();await xp.screenshot({path:out+'/xplane-bindings.png',clip:{x:box.x,y:box.y,width:box.width,height:end.y+end.height+18-box.y}});
  fs.writeFileSync(out+'/capture.json',JSON.stringify({version:await page.evaluate(()=>FSCS_BUILD_VERSION),source:path.relative(process.cwd(),source),environment:'Browser demo fixtures; not a live simulator capture',captured:new Date().toISOString()},null,2)+'\n');
  console.log('Captured current release UI images.');
  }finally{await browser.close();}

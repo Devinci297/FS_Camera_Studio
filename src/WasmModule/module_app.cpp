@@ -53,6 +53,31 @@ core::ManualInput add(core::ManualInput a, const core::ManualInput& b) {
     return a;
 }
 
+// Held host commands as motion, as the input router counts held bindings: each action once.
+core::ManualInput hostManual(const std::map<std::pair<profiles::Action, int>, std::uint64_t>& held) {
+    using profiles::Action;
+    core::ManualInput m;
+    for (const auto& [key, id] : held) {
+        switch (key.first) {
+            case Action::LookLeft: m.lookRight -= 1; break;
+            case Action::LookRight: m.lookRight += 1; break;
+            case Action::LookUp: m.lookUp += 1; break;
+            case Action::LookDown: m.lookUp -= 1; break;
+            case Action::MoveFast: m.fast = true; break;
+            case Action::MoveForward: m.moveForward += 1; break;
+            case Action::MoveBack: m.moveForward -= 1; break;
+            case Action::MoveRight: m.moveRight += 1; break;
+            case Action::MoveLeft: m.moveRight -= 1; break;
+            case Action::MoveUp: m.moveUp += 1; break;
+            case Action::MoveDown: m.moveUp -= 1; break;
+            case Action::ZoomIn: m.zoomIn += 1; break;
+            case Action::ZoomOut: m.zoomIn -= 1; break;
+            default: break;
+        }
+    }
+    return m;
+}
+
 core::ManualInput manualFromJson(const json& j) {
     core::ManualInput m;
     m.lookRight = js::num(j, "lookRight", 0);
@@ -86,6 +111,23 @@ void ModuleApp::start(double now) {
     now_ = now;
     diag("module " + appVersion_ + " boot " + bootId_);
     repo_.load([this](std::vector<std::string> notes) { loadFromRepository(std::move(notes), now_); });
+}
+
+void ModuleApp::hostAction(profiles::Action action, int viewId, bool pressed, double now) {
+    if (!profiles::actionTakesViewId(action)) viewId = 0;
+    const std::pair<profiles::Action, int> key{action, viewId};
+    if (pressed) {
+        if (hostHeld_.count(key)) return;
+        const std::uint64_t id = nextHostHold_++;
+        hostHeld_[key] = id;
+        coord_.onAction({action, viewId, true, id}, now);
+        return;
+    }
+    const auto it = hostHeld_.find(key);
+    if (it == hostHeld_.end()) return;
+    const std::uint64_t id = it->second;
+    hostHeld_.erase(it);
+    coord_.onAction({action, viewId, false, id}, now);
 }
 
 void ModuleApp::shutdown(double now) {
@@ -137,7 +179,7 @@ void ModuleApp::update(double now) {
     }
     // UI gesture leases: expiry neutralises motion only, never releases the camera.
     for (auto it = gestures_.begin(); it != gestures_.end();) it = now > it->second.expires ? gestures_.erase(it) : std::next(it);
-    core::ManualInput manual = router_.manualInput();
+    core::ManualInput manual = add(router_.manualInput(), hostManual(hostHeld_));
     for (const auto& [token, g] : gestures_) manual = add(manual, g.input);
     updateGamepad(manual);
     coord_.setManualInput(manual);
@@ -948,9 +990,29 @@ void ModuleApp::handle(const Command& c, double now) {
         storage_.listImportFiles([this, c](std::vector<std::string> names, std::string error) {
             json files = json::array();
             for (const auto& name : names) if (profiles::validProfileImportFilename(name)) files.push_back(name);
-            reply(c, AckStatus::Completed, {}, {{"files", files}, {"error", error},
-                {"folder", "%APPDATA%\\Microsoft Flight Simulator 2024\\WASM\\MSFS2024\\fs-camera-studio\\work\\imports"},
-                {"nativePicker", false}, {"openFolder", false}});
+            storage_.listXCameraFiles([this, c, files, error](std::vector<profiles::xcamera::File> found) {
+                json xcamera = json::array();
+                for (const auto& f : found)
+                    xcamera.push_back({{"id", f.id}, {"label", f.label}, {"aircraft", f.aircraft}, {"source", f.source},
+                                       {"loadedAircraft", f.loadedAircraft}});
+                reply(c, AckStatus::Completed, {}, {{"files", files}, {"error", error}, {"folder", storage_.importFolderLabel()},
+                    {"xcamera", xcamera}, {"nativePicker", false}, {"openFolder", false}});
+            });
+        });
+        return;
+    }
+    if (a == "ImportXCameraFile") {
+        const auto id = js::str(p, "id");
+        if (id.empty() || id.size() > 64) return reply(c, AckStatus::Rejected, "Choose an X-Camera file from the list.");
+        storage_.readXCameraFile(id, [this, c](std::optional<profiles::xcamera::Source> source, std::string error) {
+            if (!source)
+                return reply(c, AckStatus::Rejected, error.empty() ? "That X-Camera file could not be read. Refresh and choose it again." : error);
+            // The loaded aircraft's own name reads better than its folder.
+            if (!aircraftTitle_.empty() && source->modelKey == aircraftModelKey_) source->displayName = aircraftTitle_;
+            std::string err;
+            auto report = profiles::importXCamera(*source, &err);
+            if (!report) return reply(c, AckStatus::Rejected, err);
+            commitImport(c, std::move(*report), "xcamera", now_);
         });
         return;
     }
@@ -976,18 +1038,23 @@ void ModuleApp::importProfileCode(const protocol::Command& c, const std::string&
     std::string err;
     auto report = profiles::importProfileCode(code, &err);
     if (!report) return reply(c, AckStatus::Rejected, err);
-    json rep{{"cameraCount", report->cameraCount},
-             {"unsupportedCount", report->unsupportedCount},
-             {"notes", report->notes},
-             {"name", js::get(report->profile, "name")},
-             {"aircraft", js::get(js::object(report->profile, "aircraftMatch"), "displayName")},
+    commitImport(c, std::move(*report), "profile", now);
+}
+
+void ModuleApp::commitImport(const protocol::Command& c, profiles::ImportReport report, const char* source, double now) {
+    json rep{{"cameraCount", report.cameraCount},
+             {"unsupportedCount", report.unsupportedCount},
+             {"notes", report.notes},
+             {"source", source},
+             {"name", js::get(report.profile, "name")},
+             {"aircraft", js::get(js::object(report.profile, "aircraftMatch"), "displayName")},
              {"matchesLoadedAircraft", !aircraftModelKey_.empty() &&
-                                           js::str(js::object(report->profile, "aircraftMatch"), "modelKey") == aircraftModelKey_}};
+                                           js::str(js::object(report.profile, "aircraftMatch"), "modelKey") == aircraftModelKey_}};
     CommitRequest req;
-    req.upsertProfiles.push_back(report->profile);
+    req.upsertProfiles.push_back(report.profile);
     req.navigation = navigation();
     req.requestId = c.uiInstanceId + ":" + c.requestId;
-    reply(c, AckStatus::Pending, {}, {{"report", rep}, {"profileId", js::get(report->profile, "profileId")}});
+    reply(c, AckStatus::Pending, {}, {{"report", rep}, {"profileId", js::get(report.profile, "profileId")}});
     commit(std::move(req), {c.requestId, "import", working_.draftRevision, rep, {}}, now);
 }
 
@@ -1417,21 +1484,24 @@ void ModuleApp::resolveAircraftProfile(double now) {
         }
     }
     if (profiles::isC172(aircraftModelKey_, aircraftTitle_) && !aircraftDirty() && !pendingCommit_) {
+        // X-Plane's C172 has its own cockpit (and eyepoint): its own starter, beside any MSFS one already there.
+        const bool xplane = coord_.simVersion().rfind("X-Plane", 0) == 0;
+        const std::string templateId = xplane ? profiles::kC172XPlaneTemplate : profiles::kC172Template;
         bool installed = false;
         for (const auto& [id, rec] : st.profiles) {
-            if (js::str(rec.current, "builtinTemplate") == "c172-complete-v1" &&
+            if (js::str(rec.current, "builtinTemplate") == templateId &&
                 js::str(js::object(rec.current, "aircraftMatch"), "modelKey") == aircraftModelKey_) installed = true;
         }
         if (!installed && defaultProfileAttempts_.insert(aircraftModelKey_).second) {
-            json doc = profiles::makeC172Profile(aircraftModelKey_, aircraftTitle_);
+            json doc = profiles::makeC172Profile(aircraftModelKey_, aircraftTitle_, xplane);
             const std::string id = js::str(doc, "profileId");
             CommitRequest req;
             req.upsertProfiles.push_back(doc);
             req.navigation = navigation();
             (*req.navigation)["lastProfileId"] = id;
             (*req.navigation)["lastByModel"][aircraftModelKey_] = id;
-            req.requestId = "builtin:c172-complete-v1:" + aircraftModelKey_;
-            diag("installing C172 default: 12 cockpit and 8 exterior views");
+            req.requestId = "builtin:" + templateId + ":" + aircraftModelKey_;
+            diag(xplane ? "installing X-Plane C172 starter: 14 cockpit and 8 exterior views" : "installing C172 default: 12 cockpit and 8 exterior views");
             commit(std::move(req), {"builtin-c172", "create", working_.draftRevision, nullptr, id}, now);
             resolveAircraft_ = true;
             return;

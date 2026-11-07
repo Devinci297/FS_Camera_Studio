@@ -141,7 +141,9 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
    towerPending=false;
    const auto t=geo(js::get(f,"tower"));auto pos=local(origin,t);pos.z-=height;
    const bool usable=t.valid()&&(t.lat!=0||t.lon!=0)&&std::max({std::abs(pos.x),std::abs(pos.y),std::abs(pos.z)})<=core::kMaxPositionMeters;
-   if(usable)add("Tower","tower","Tower overview",pos,{0,0,0});
+   // tower.viewHeightMeters (X-Plane's tower viewpoint height above the field) keeps the camera out of the tower
+   // building itself: no lower than the real cab. MSFS facilities do not carry it.
+   if(usable)add("Tower","tower","Tower overview",pos,{0,0,0},js::num(js::get(f,"tower"),"viewHeightMeters",-1));
    else {
      // Some scenery omits tower coordinates (or reports zero). Place a clearly labelled virtual
      // tower abeam the longest runway's midpoint, on the side with more parking (left when even

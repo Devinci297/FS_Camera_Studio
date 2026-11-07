@@ -5,7 +5,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
  try {
   const page=await browser.newPage({viewport:{width:1400,height:1000}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
-  const url='file:///'+path.resolve(process.argv[2]||'build/review/readable-icons-import/fs-camera-studio/html_ui/InGamePanels/FSCameraStudio/main.html').replaceAll('\\','/');
+  const url='file:///'+path.resolve(process.argv[2]||'ui/index.html').replaceAll('\\','/');
   for(const surface of ['main','mini']){
    await page.goto((surface==='main'?url:url.replace(/main\.html$/,'mini.html'))+'?surface='+surface);
    await page.waitForFunction(()=>window.FSCApp&&FSCApp.state.snapshot);
@@ -25,7 +25,10 @@ const assert=require('node:assert/strict'),path=require('node:path');
     await page.evaluate(()=>{const s=FSCApp.state,c=s.working.profile.cameras[0];c.color='#75baff';s.selection.cameraId=c.id;FSCDemo.setOwnership('Observing');});
     await page.screenshot({path:'build/review/icon-integration-main.png'});
     await page.locator('#mc-camera-icon').click();
-    assert.equal(await page.locator('[data-icon-choice]').count(),39);
+    assert.equal(await page.locator('[data-icon-choice]').count(),43);
+    for (const name of ['auto','view-walkaround','view-flyby','view-cinematic','view-spotting','folder-open','map']) {
+     assert.equal(await page.locator(`[data-icon-choice="${name}"]`).count(),1,name+' offered in picker');
+    }
     await page.screenshot({path:'build/review/icon-integration-picker.png'});
     await page.locator('[data-icon-choice="view-tower"]').click();
     assert.equal(await page.locator('#mc-camera-icon > svg').getAttribute('data-icon'),'view-tower');

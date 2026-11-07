@@ -1,10 +1,12 @@
-FS CAMERA STUDIO - VERSION 0.4.0
-Microsoft Flight Simulator 2024 | Windows 11 x64
+FS CAMERA STUDIO - VERSION 0.5.0
+Microsoft Flight Simulator 2024 and X-Plane 12 | Windows 11 x64
 
 INSTALL
-1. Close Microsoft Flight Simulator 2024.
+1. Close Microsoft Flight Simulator 2024 (and X-Plane, if you install for it).
 2. Run the included FS-Camera-Studio-...-Setup.exe under your normal Windows
    account. No SDK, Python, Node, external app or background service is needed.
+   On the components page choose MSFS 2024, X-Plane 12 or both. For X-Plane
+   see INSTALL FOR X-PLANE 12 below.
 3. Confirm the detected Community / Community2024 folder, or Browse to it.
    Steam, Microsoft Store / Xbox app and custom package locations are supported.
    If no folder is detected, launch MSFS once. Use the simulator's Community
@@ -12,6 +14,23 @@ INSTALL
 4. Finish setup, then start MSFS and load a flight.
 5. Open Camera Studio from the MSFS toolbar. The mini panel appears at the
    bottom of the simulator window. Enable the toolbar item if it is hidden.
+
+INSTALL FOR X-PLANE 12 (XP CAMERA STUDIO)
+1. Close X-Plane. X-Plane 12.4.4 or newer is required.
+2. Choose X-Plane 12 on the components page and confirm the detected X-Plane 12
+   folder (the one that contains X-Plane.exe), or Browse to it. Steam and
+   standalone installs are supported. Setup puts the plugin in
+   Resources\plugins\XPCameraStudio and backs up an older copy first.
+3. Start X-Plane and load a flight. Open Plugins > XP Camera Studio > Editor.
+   The mini panel shows when the mouse reaches the bottom of the screen.
+4. Keys and buttons are X-Plane commands: the Bindings tab lists each xpcs/
+   command with Copy. Assign them in X-Plane's Settings > Keyboard or Joystick
+   (search for xpcs).
+5. Profiles are saved in X-Plane 12\Output\preferences\XPCameraStudio and are
+   kept on upgrade and uninstall. Profiles > Import also converts X-Camera
+   camera files for the loaded aircraft.
+Log lines start with "XP Camera Studio:" in X-Plane 12\Log.txt; include them
+when you report an X-Plane problem.
 
 This tester installer is not code-signed. Windows may show an unknown-publisher
 or SmartScreen message. Confirm you received it from the developer and compare
@@ -83,9 +102,10 @@ If your chosen Community folder is protected, use a writable simulator package
 location. Do not run setup as a different Windows account.
 
 UNINSTALL / ROLLBACK
-Close MSFS. Windows Settings > Apps > Installed apps > FS Camera Studio (Tester)
-> Uninstall. This removes installer-owned files and preserves MSFS profile
-storage, backups and any additional files you placed in the package directory.
+Close MSFS and X-Plane. Windows Settings > Apps > Installed apps > FS Camera
+Studio (Tester) > Uninstall. This removes installer-owned files (the MSFS
+package and the X-Plane plugin) and preserves profile storage in both
+simulators, backups and any additional files you placed in the package directory.
 
 For rollback: after uninstalling, copy the entire fs-camera-studio folder from
 the desired backup into your Community folder. Ensure only one copy is active.
@@ -122,6 +142,22 @@ INCLUDED FEATURES
   then Refresh, select a file and Import. Pasting profile code is also supported.
 - Successful saves request a native confirmation chime. Settings > Test sound
   checks the simulator UI sound route; spoken WAV is browser-only.
+
+NEW IN VERSION 0.5.0
+- X-Plane 12 support: XP Camera Studio, the same editor, mini panel, cameras,
+  airport cameras and spotting as a native X-Plane 12 plugin (12.4.4 or newer).
+  See INSTALL FOR X-PLANE 12 above.
+- One setup for both simulators: choose MSFS 2024, X-Plane 12 or both.
+- In X-Plane every action is an xpcs/ command; the Bindings tab lists them with
+  Copy. Airports come from X-Plane's apt.dat scenery, traffic from X-Plane's
+  TCAS targets, and Profiles > Import converts X-Camera camera files.
+- MSFS: messages and update hints name the simulator in use. No other MSFS
+  behavior changes; 0.5.0 reads and writes the same schema 4 profiles as 0.4.0.
+
+Please check in 0.5.0 (X-Plane): setup finds your X-Plane 12 folder; the editor
+and mini panel open; cockpit and exterior views; airport cameras at your home
+airport; spotting AI or multiplayer traffic; assigning xpcs/ commands to keys;
+X-Camera import if you use X-Camera; uninstall leaves other plugins alone.
 
 NEW IN VERSION 0.4.0
 - Camera feel: per-camera Follow horizon slider (0 follows bank, 1 stays level),

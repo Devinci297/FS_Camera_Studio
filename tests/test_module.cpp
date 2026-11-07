@@ -961,6 +961,36 @@ TEST_CASE("module: folder profile import lists JSON files and validates before c
     CHECK_EQ(m.storage.files[prefix + "test.JSON"], std::string("\xEF\xBB\xBF") + fscs::profiles::exportProfileCode(original, false));
 }
 
+TEST_CASE("module: X-Camera files are listed with the imports and import as a new profile") {
+    ModuleRig m;
+    m.flight();
+    m.panel("Hello", {{"surface", "main"}});
+    m.panel("CreateProfile", {{"name", "Original"}, {"forAircraft", true}});
+    const auto original = m.app.workingProfile();
+    const auto count = m.app.repository().committed().profiles.size();
+    m.storage.xcameraFiles.push_back({"x1", "X-Camera_a319.csv", "ToLissA319", "aircraft", false});
+    fscs::profiles::xcamera::Source source;
+    source.csv = "Category Name,Camera Name,View ID,X,Y,Z,heading,pitch\nCockpit,Pilot View,1,-0.5,2.0,-12.0,0,351\n";
+    source.eyepointBody = fscs::core::Vec3{-0.5, 2.0, -12.0};
+    source.modelKey = "toliss a319";
+    source.displayName = "ToLiss A319";
+    m.storage.xcameraSources["x1"] = source;
+    m.drain();
+    auto listing = m.ackFor(m.panel("ListImportFiles"));
+    CHECK_EQ(js::str(listing, "status"), std::string("Completed"));
+    CHECK_EQ(listing["result"]["xcamera"].size(), std::size_t{1});
+    CHECK_EQ(js::str(listing["result"]["xcamera"][0], "label"), std::string("X-Camera_a319.csv"));
+    CHECK_EQ(js::str(m.ackFor(m.panel("ImportXCameraFile", {{"id", "x9"}})), "status"), std::string("Rejected"));
+    CHECK_EQ(js::str(m.ackFor(m.panel("ImportXCameraFile", {{"id", ""}})), "status"), std::string("Rejected"));
+    CHECK_EQ(m.app.repository().committed().profiles.size(), count);
+    const json ack = m.ackFor(m.panel("ImportXCameraFile", {{"id", "x1"}}));
+    CHECK_EQ(js::str(ack, "status"), std::string("Pending"));
+    CHECK_EQ(js::str(js::object(js::object(ack, "result"), "report"), "source"), std::string("xcamera"));
+    CHECK_EQ(js::str(js::object(js::object(ack, "result"), "report"), "name"), std::string("ToLiss A319 - X-Camera"));
+    CHECK_EQ(m.app.repository().committed().profiles.size(), count + 1);
+    CHECK_EQ(m.app.workingProfile(), original);
+}
+
 TEST_CASE("module: folder import failures preserve saved profiles") {
     ModuleRig m;
     m.flight();
