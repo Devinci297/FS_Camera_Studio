@@ -45,6 +45,8 @@ public:
     // The camera X-Plane is drawing now, relative to the aircraft or in the world, as the coordinator reads it.
     std::optional<host::SdkPose> currentPose(host::Referential ref);
     bool controlling() const { return mode_ == Mode::Control; }
+    // A new user aircraft: its eyepoint is read again before the next cockpit view.
+    void aircraftChanged() { eyeValid_ = false; }
     // The horizontal field of view on screen, degrees: the module's while it drives the camera, else X-Plane's.
     double fovDeg() const;
     bool acquired() const { return acquired_; }
@@ -61,6 +63,7 @@ private:
     };
 
     void findRefs();
+    core::Vec3 eyepoint();
     void enterHead();
     void enterControl();
     void leaveControl();
@@ -81,7 +84,9 @@ private:
     std::vector<host::BackendEvent> staged_;
 
     XPLMDataRef head_[6] = {};  // pilots_head_x, _y, _z, _psi, _the, _phi
-    XPLMDataRef eye_[3] = {};   // acf_peX, _Y, _Z
+    XPLMDataRef eye_[3] = {};   // acf_peX, _Y, _Z: they move with the pilot's head in X-Plane 12
+    core::Vec3 eye_body_;       // the eyepoint (body), read once per aircraft before the module moves the head
+    bool eyeValid_ = false;
     XPLMDataRef fov_ = nullptr, viewType_ref_ = nullptr, external_ = nullptr;
     XPLMDataRef local_[3] = {}, attitude_[3] = {};  // local_x/y/z, theta/phi/psi
     XPLMCommandRef cockpitCmd_ = nullptr, chaseCmd_ = nullptr;

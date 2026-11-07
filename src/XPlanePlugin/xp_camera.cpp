@@ -62,10 +62,22 @@ void XPCamera::findRefs() {
     if (!probe_) probe_ = XPLMCreateProbe(xplm_ProbeY);
 }
 
+// The pilot's eyepoint relative to the reference point (body axes). X-Plane 12 moves acf_pe* along with
+// pilots_head_*, so it is read only while the module is not moving the head, and kept: reading it every frame
+// would add each view's offset again and again.
+core::Vec3 XPCamera::eyepoint() {
+    if (!eyeValid_ && mode_ != Mode::Head) {
+        eye_body_ = {getf(eye_[0]), getf(eye_[1]), getf(eye_[2])};
+        eyeValid_ = std::isfinite(eye_body_.x) && std::isfinite(eye_body_.y) && std::isfinite(eye_body_.z);
+    }
+    return eye_body_;
+}
+
 bool XPCamera::tryConnect() {
     if (open_) return true;
     findRefs();
     open_ = head_[0] && local_[0] && attitude_[0];
+    eyepoint();
     if (open_) requestStatus();
     return open_;
 }
@@ -99,6 +111,7 @@ bool XPCamera::acquire(const std::string&) {
         stage(be::CameraStatus{SdkAvailability::AcquiredByOther, false});
         return true;
     }
+    eyepoint();  // before the first head write, after an aircraft change
     for (int i = 0; i < 6; ++i) saved_.head[i] = getf(head_[i]);
     saved_.fovDeg = getf(fov_, 60);
     saved_.external = external_ && XPLMGetDatai(external_) != 0;
@@ -185,8 +198,7 @@ bool XPCamera::submitPose(const SdkPose& pose) {
 void XPCamera::writeHead() {
     if (!pose_ || pose_->referential != Referential::Eyepoint) return;
     const core::CameraPose p = host::fromSdk(*pose_, kContract);
-    const core::Vec3 eye{getf(eye_[0]), getf(eye_[1]), getf(eye_[2])};
-    const core::Vec3 body = eye + geo::frdToBody(p.positionFRD);
+    const core::Vec3 body = eyepoint() + geo::frdToBody(p.positionFRD);
     const auto a = p.orientation.toPbh();
     const float values[6] = {static_cast<float>(body.x), static_cast<float>(body.y), static_cast<float>(body.z),
                              static_cast<float>(a.headingDeg), static_cast<float>(a.pitchDeg), static_cast<float>(a.bankDeg)};
@@ -235,7 +247,7 @@ bool XPCamera::cameraFor(XPLMCameraPosition_t& out) {
     } else {
         core::Vec3 offset = p.positionFRD;
         if (pose_->referential == Referential::Eyepoint)
-            offset = offset + geo::bodyToFrd({getf(eye_[0]), getf(eye_[1]), getf(eye_[2])});
+            offset = offset + geo::bodyToFrd(eyepoint());
         c = geo::relativeToGl(a, offset, p.orientation);
     }
     if (aboveGround_ && probe_) {
@@ -301,7 +313,7 @@ std::optional<SdkPose> XPCamera::currentPose(Referential ref) {
                           geo::attitude(getf(attitude_[0]), getf(attitude_[1]), getf(attitude_[2]))};
     geo::glToRelative(a, c, pose.positionFRD, pose.orientation);
     if (ref == Referential::Eyepoint)
-        pose.positionFRD = pose.positionFRD - geo::bodyToFrd({getf(eye_[0]), getf(eye_[1]), getf(eye_[2])});
+        pose.positionFRD = pose.positionFRD - geo::bodyToFrd(eyepoint());
     return host::toSdk(pose, kContract, ref);
 }
 

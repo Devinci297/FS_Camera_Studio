@@ -174,7 +174,15 @@ int XPLMGetDatai(XPLMDataRef r) {
 }
 float XPLMGetDataf(XPLMDataRef r) { return static_cast<float>(static_cast<Ref*>(r)->v[0]); }
 double XPLMGetDatad(XPLMDataRef r) { return static_cast<Ref*>(r)->v[0]; }
-void XPLMSetDataf(XPLMDataRef r, float value) { static_cast<Ref*>(r)->v[0] = value; }
+void XPLMSetDataf(XPLMDataRef r, float value) {
+    auto* ref = static_cast<Ref*>(r);
+    ref->v[0] = value;
+    // As in X-Plane 12, the aircraft's eyepoint follows the pilot's head.
+    static const std::map<std::string, std::string> follows{{"sim/graphics/view/pilots_head_x", "sim/aircraft/view/acf_peX"},
+                                                            {"sim/graphics/view/pilots_head_y", "sim/aircraft/view/acf_peY"},
+                                                            {"sim/graphics/view/pilots_head_z", "sim/aircraft/view/acf_peZ"}};
+    if (const auto it = follows.find(ref->name); it != follows.end()) dr(it->second) = value;
+}
 int XPLMGetDatavf(XPLMDataRef r, float* values, int offset, int max) {
     const auto& v = static_cast<Ref*>(r)->v;
     if (!values) return static_cast<int>(v.size());
@@ -589,6 +597,30 @@ int main(int argc, char** argv) {
         XPLMReadCameraPosition(&cp);
         check(near(cp.x, -20) && near(cp.z, 0) && near(cp.heading, 90), "turning with the aircraft (now 20 m west, heading east)");
         dr("sim/flightmodel/position/psi") = 0;
+
+        // A cockpit view away from the eyepoint (X-Plane 12 moves acf_pe* with the head): the head goes to the
+        // eyepoint plus the offset and stays there.
+        json side = cam;
+        side["id"] = "6f1d2c3b-4a5e-4f60-8172-93a4b5c6d7e8";
+        side["name"] = "XP right seat";
+        side["viewId"] = 3;
+        side["positionMetersFRD"] = json::array({0.3, 0.5, 0.1});
+        const std::string sideAdded = page.send("UpdateDraft", {{"ops", json::array({{{"op", "setCamera"}, {"camera", side}}})}});
+        { const json a = page.ack(page.drain(), sideAdded); check(a.value("status", "") == "Completed", "a cockpit camera with an offset is added: " + a.dump()); }
+        page.send("ActivateCamera", {{"cameraId", side["id"]}});
+        frames(120);
+        const auto headAt = [&](double x, double y, double z) {
+            return near(dr("sim/graphics/view/pilots_head_x"), x) && near(dr("sim/graphics/view/pilots_head_y"), y) &&
+                   near(dr("sim/graphics/view/pilots_head_z"), z);
+        };
+        const std::string headText = std::to_string(dr("sim/graphics/view/pilots_head_x")) + " " +
+                                     std::to_string(dr("sim/graphics/view/pilots_head_y")) + " " +
+                                     std::to_string(dr("sim/graphics/view/pilots_head_z"));
+        check(headAt(0.25, 0.8, -0.9), "an offset cockpit view puts the head 0.5 m right, 0.1 m down, 0.3 m forward: " + headText);
+        frames(120);
+        check(headAt(0.25, 0.8, -0.9), "and the head stays there (no drift)");
+        page.send("ActivateCamera", {{"cameraId", chase["id"]}});
+        frames(120);
 
         // X-Plane commands and the published datarefs.
         check(pubi("xpcs/camera_active") == 1 && pubi("xpcs/active_view") == 2 && pubs("xpcs/active_camera") == "XP chase" &&

@@ -271,6 +271,7 @@ void checkAircraft() {
     if (rel.empty()) return;
     if (rel != g->aircraftPath) {
         g->aircraftPath = rel;
+        g->camera.aircraftChanged();
         deliver(be::AircraftLoaded{rel});
     }
     std::string title;
@@ -492,7 +493,7 @@ PLUGIN_API void XPluginDisable(void) {
 PLUGIN_API void XPluginReceiveMessage(XPLMPluginID, int inMessage, void* inParam) {
     if (!g) return;
     if (inMessage == XPLM_MSG_PLANE_LOADED && reinterpret_cast<intptr_t>(inParam) == XPLM_USER_AIRCRAFT)
-        g->aircraftDirty = true;
+        g->aircraftDirty = true, g->camera.aircraftChanged();
     else if (inMessage == XPLM_MSG_AIRPORT_LOADED)
         deliver(be::FlightLoaded{});
 }
