@@ -6,19 +6,18 @@ toolbar or menu, with a mini control panel at the bottom of the screen. The X-Pl
 **XP Camera Studio**; it runs the same module logic and the same editor and mini panel (see
 [X-Plane 12](#x-plane-12-xp-camera-studio)).
 
-**Status: in-sim testing, with a new build awaiting live verification.** The module and panels have run in MSFS;
-version 0.4.0 adds camera feel, cinematic mode, world and drone cameras, traffic spotting and gamepad drones, and is
-built with SDK 1.8.1.
-Automated checks and installed-file verification are separate from live controller and scenery acceptance.
-Camera axes, template poses and hosting behaviour still require live qualification — see
-[`doc/qualification.md`](doc/qualification.md).
+**Version 0.5.0:** one Windows installer for Microsoft Flight Simulator 2024, X-Plane 12, or both.
+Installed and tested successfully in both simulators by the release tester on November 7, 2026.
+The MSFS build uses SDK 1.8.1; XP Camera Studio requires X-Plane 12.4.4 or newer on Windows x64.
+Both simulators share one version number and one update check.
 
-[Download 0.4.0](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.4.0)
+[Download 0.5.0](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.5.0)
 for the Windows installer, illustrated manual, example profile and checksums.
 
-**X-Plane 12: in testing, not released yet.** XP Camera Studio runs on the developer's PC in X-Plane 12.4.4. From
-the next release, one Windows installer offers both simulators: choose MSFS 2024, X-Plane 12 or both. Both share one
-version number and one update check.
+See the [release notes](doc/releases/0.5.0.md) and
+[validation record](doc/test-evidence/2026-11-07-v0.5.0.md) for automated checks, live acceptance and known limits.
+Aircraft-specific camera poses and controller setups can still need adjustment; see
+[`doc/qualification.md`](doc/qualification.md).
 
 ![Camera Studio editor](doc/manual/images/editor.png)
 
@@ -155,7 +154,7 @@ python tools/test-installer.py --test-harness --version 0.5.0
 ```
 
 See [release notes](doc/releases/0.5.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
-and the bundled illustrated manual. [0.4.0 release evidence and live checks](doc/test-evidence/2026-11-07-v0.4.0.md)
+and the bundled illustrated manual. [0.5.0 release evidence and live checks](doc/test-evidence/2026-11-07-v0.5.0.md)
 separate automated verification from simulator acceptance. Earlier tester recipes remain available in their Git tags.
 
 Install ReportLab for manual generation and obtain Inno Setup with `tools/get-installer-compiler.ps1`.
