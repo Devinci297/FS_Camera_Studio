@@ -4,8 +4,9 @@ The X-Plane 12 version of FS Camera Studio. It runs the same module logic (`Modu
 MSFS WASM module and shows the same HTML UI (`ui/`) in X-Plane's built-in browser windows. Requires X-Plane 12.4.4
 or newer (SDK 4.4.0, vendored in `third_party/XPSDK`).
 
-Phase 1 (this folder today): the plugin loads, hosts the module from a flight loop, stores profiles as files and opens
-the editor and the mini panel. It never moves the camera yet: the module stays in Observing.
+The plugin hosts the module from a flight loop, stores profiles as files, opens the editor and the mini panel in
+browser windows, flies cockpit, exterior, airport and spotting cameras, and builds airport cameras from apt.dat. From
+the next release it ships in the same Windows installer as the MSFS version, with the same version number.
 
 ## Build (Windows, Visual Studio 2022 x64)
 
