@@ -1,11 +1,8 @@
 #pragma once
-// XP Camera Studio: the module's simulator seams for X-Plane 12 (phase 1).
-//  XPCamera   ICameraBackend. Phase 1 stays in Observing: it never acquires or writes the camera, so the coordinator
-//             reports "The simulator did not accept the camera request." if a view is activated. Phase 2 drives
-//             XPLMControlCamera and the pilot-head datarefs here.
+// XP Camera Studio: the module's non-camera seam for X-Plane 12 (the camera is xp_camera.hpp).
 //  XPServices IModuleServices: panel messages go to the browser windows; inputs, controllers, airports and traffic
 //             are phase 2-4 (X-Plane commands, TCAS targets, apt.dat).
-// Both stage their answers as BackendEvents for the next flight-loop pass, as the MSFS adapters do, so the module
+// It stages its answers as BackendEvents for the next flight-loop pass, as the MSFS adapters do, so the module
 // never runs inside an X-Plane callback.
 
 #include "backend.hpp"
@@ -30,33 +27,6 @@ public:
 
 private:
     std::vector<BackendEvent> staged_;
-};
-
-class XPCamera final : public host::ICameraBackend {
-public:
-    bool tryConnect() override { open_ = true; return true; }
-    void disconnect() override { open_ = false; }
-    bool isOpen() const override { return open_; }
-    void dispatch(const std::function<void(BackendEvent)>& sink) override { queue_.drain(sink); }
-
-    bool requestStatus() override {
-        queue_.stage(host::backend_event::CameraStatus{host::SdkAvailability::NotAcquired, false});
-        return open_;
-    }
-    bool acquire(const std::string&) override { return false; }  // phase 2
-    bool release(const std::string&) override { return open_; }
-    bool submitPose(const host::SdkPose&) override { return false; }
-    bool setFlag(host::CameraFlag, bool) override { return false; }
-    bool requestCameraData(host::Referential) override { return false; }
-    bool enumerateDefinitions() override {
-        queue_.stage(host::backend_event::DefinitionList{});
-        return open_;
-    }
-    bool setUsingDefinition(const std::string&) override { return false; }
-
-private:
-    bool open_ = false;
-    EventQueue queue_;
 };
 
 class XPServices final : public host::IModuleServices {

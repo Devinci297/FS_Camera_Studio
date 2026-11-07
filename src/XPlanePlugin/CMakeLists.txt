@@ -11,7 +11,7 @@ set(XPCS_VERSION "0.1.0" CACHE STRING "XP Camera Studio version")
 # The module libraries are linked into a shared plugin.
 set_target_properties(fscs_core fscs_profiles fscs_protocol fscs_modulelib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-add_library(xpcs_plugin MODULE plugin_main.cpp xp_panels.cpp xp_storage.cpp)
+add_library(xpcs_plugin MODULE plugin_main.cpp xp_camera.cpp xp_panels.cpp xp_storage.cpp)
 target_link_libraries(xpcs_plugin PRIVATE fscs_modulelib fscs_json)
 target_include_directories(xpcs_plugin SYSTEM PRIVATE "${FSCS_XPSDK_DIR}/CHeaders/XPLM")
 target_compile_definitions(xpcs_plugin PRIVATE XPCS_VERSION="${XPCS_VERSION}"

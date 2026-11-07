@@ -1,9 +1,10 @@
-// XP Camera Studio: X-Plane 12 plugin entry points (phase 1). The same module logic as the MSFS WASM module
-// (ModuleApp), driven by an X-Plane flight loop, with profiles stored as files and the shared HTML UI in X-Plane
-// browser windows. Phase 1 never moves the camera: the coordinator stays in Observing.
+// XP Camera Studio: X-Plane 12 plugin entry points. The same module logic as the MSFS WASM module (ModuleApp),
+// driven by an X-Plane flight loop, with profiles stored as files, the shared HTML UI in X-Plane browser windows and
+// the camera through the pilot's head datarefs and XPLMControlCamera (xp_camera.hpp).
 
 #include "module_app.hpp"
 #include "xp_backends.hpp"
+#include "xp_camera.hpp"
 #include "xp_panels.hpp"
 #include "xp_storage.hpp"
 #include "fscs/profiles/profile.hpp"
@@ -39,6 +40,8 @@ namespace fs = std::filesystem;
 // XPLM 4.4.0 ships with X-Plane 12.4.4: the first version with browser windows for the shared UI.
 constexpr int kMinXplmVersion = 440;
 constexpr double kAircraftCheckSeconds = 1.0;
+constexpr double kGroundCheckSeconds = 0.25;
+constexpr double kStandardGravity = 9.80665;
 
 void log(const std::string& text) { XPLMDebugString(("XP Camera Studio: " + text + "\n").c_str()); }
 
@@ -80,6 +83,13 @@ struct Host {
     std::string aircraftPath, aircraftTitle;
     int paused = -1;
     XPLMDataRef pausedRef = nullptr, uiNameRef = nullptr;
+    double nextGroundCheck = 0;
+    // Telemetry for camera effects, free cameras and spotting (the MSFS module reads the same from SimConnect).
+    struct Telemetry {
+        XPLMDataRef lat = nullptr, lon = nullptr, elevation = nullptr, truePsi = nullptr, theta = nullptr, phi = nullptr;
+        XPLMDataRef onGround = nullptr, groundSpeed = nullptr, verticalSpeed = nullptr, agl = nullptr;
+        XPLMDataRef gNormal = nullptr, gAxial = nullptr, gSide = nullptr, rpm = nullptr;
+    } tel;
 };
 
 Host* g = nullptr;
@@ -123,6 +133,52 @@ void checkAircraft() {
     }
 }
 
+void findTelemetry(Host::Telemetry& t) {
+    t.lat = XPLMFindDataRef("sim/flightmodel/position/latitude");
+    t.lon = XPLMFindDataRef("sim/flightmodel/position/longitude");
+    t.elevation = XPLMFindDataRef("sim/flightmodel/position/elevation");
+    t.truePsi = XPLMFindDataRef("sim/flightmodel/position/true_psi");
+    t.theta = XPLMFindDataRef("sim/flightmodel/position/theta");
+    t.phi = XPLMFindDataRef("sim/flightmodel/position/phi");
+    t.onGround = XPLMFindDataRef("sim/flightmodel/failures/onground_any");
+    t.groundSpeed = XPLMFindDataRef("sim/flightmodel/position/groundspeed");
+    t.verticalSpeed = XPLMFindDataRef("sim/flightmodel/position/vh_ind");
+    t.agl = XPLMFindDataRef("sim/flightmodel/position/y_agl");
+    t.gNormal = XPLMFindDataRef("sim/flightmodel/forces/g_nrml");
+    t.gAxial = XPLMFindDataRef("sim/flightmodel/forces/g_axil");
+    t.gSide = XPLMFindDataRef("sim/flightmodel/forces/g_side");
+    t.rpm = XPLMFindDataRef("sim/cockpit2/engine/indicators/engine_speed_rpm");
+}
+
+float f(XPLMDataRef r, float fallback = 0) { return r ? XPLMGetDataf(r) : fallback; }
+double d(XPLMDataRef r, double fallback = 0) { return r ? XPLMGetDatad(r) : fallback; }
+
+// Every frame: where the aircraft is and how it moves. Signs as the module expects: pitch nose up, bank right wing
+// down, accelerations forward and right in m/s^2.
+void publishTelemetry() {
+    const auto& t = g->tel;
+    if (!t.lat || !t.lon) return;
+    const double lat = d(t.lat), lon = d(t.lon), elevation = d(t.elevation);
+    deliver(be::AircraftPosition{lat, lon, elevation, f(t.truePsi)});
+    host::backend_event::MotionTelemetry m;
+    m.motion.onGround = t.onGround && XPLMGetDatai(t.onGround) != 0 ? 1 : 0;
+    m.motion.groundSpeed = f(t.groundSpeed);
+    m.motion.verticalSpeed = f(t.verticalSpeed);
+    m.motion.gForce = f(t.gNormal, 1);
+    m.motion.forwardAcceleration = f(t.gAxial) * kStandardGravity;
+    m.motion.lateralAcceleration = f(t.gSide) * kStandardGravity;
+    float rpm = 0;
+    if (t.rpm) XPLMGetDatavf(t.rpm, &rpm, 0, 1);
+    m.motion.engineRpm = rpm;
+    m.pitchDeg = f(t.theta);
+    m.bankDeg = f(t.phi);
+    if (m.motion.finite()) deliver(m);
+    if (t.agl && t.elevation && g->now >= g->nextGroundCheck) {
+        g->nextGroundCheck = g->now + kGroundCheckSeconds;
+        deliver(be::GroundElevation{elevation - f(t.agl)});
+    }
+}
+
 float flightLoop(float elapsedSinceLastCall, float, int, void*) {
     if (!g || !g->app) return -1.0f;
     if (elapsedSinceLastCall > 0 && elapsedSinceLastCall < 1.0f) g->now += elapsedSinceLastCall;
@@ -145,11 +201,13 @@ float flightLoop(float elapsedSinceLastCall, float, int, void*) {
             deliver(be::Paused{p != 0});
         }
     }
+    publishTelemetry();
     std::vector<BackendEvent> events;
     g->services.dispatch([&](BackendEvent e) { events.push_back(std::move(e)); });
     g->camera.dispatch([&](BackendEvent e) { events.push_back(std::move(e)); });
     for (const auto& e : events) deliver(e);
     g->app->update(g->now);
+    g->camera.frame();
     g->panels.updateDrag();
     g->panels.flush();
     return -1.0f;  // every frame
@@ -187,6 +245,7 @@ bool startHost() {
 
     g->pausedRef = XPLMFindDataRef("sim/time/paused");
     g->uiNameRef = XPLMFindDataRef("sim/aircraft/view/acf_ui_name");
+    findTelemetry(g->tel);
 
     const std::string index = toUtf8(xplane::pathFromUtf8(g_pluginFolder) / "ui" / "index.html");
     g->panels.init(xplane::fileUrl(index), &onInbound);

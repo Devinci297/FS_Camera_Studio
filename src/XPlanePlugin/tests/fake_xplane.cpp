@@ -6,6 +6,7 @@
 // naming the loaded aircraft; a profile created, edited and saved from the panel is in the profiles folder after the
 // plugin is disabled and enabled again; TextFocus hands the window X-Plane's keyboard.
 
+#include <XPLMCamera.h>
 #include <XPLMDataAccess.h>
 #include <XPLMDefs.h>
 #include <XPLMDisplay.h>
@@ -13,6 +14,7 @@
 #include <XPLMPlanes.h>
 #include <XPLMPlugin.h>
 #include <XPLMProcessing.h>
+#include <XPLMScenery.h>
 #include <XPLMUtilities.h>
 
 #include "fscs/protocol/protocol.hpp"
@@ -22,6 +24,7 @@
 #include <dlfcn.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -52,6 +55,25 @@ void* g_loopRefcon = nullptr;
 std::string g_returned;
 int g_paused = 0;
 const char* kUiName = "Cessna 172 SP";
+
+// Datarefs by name; the plugin finds what it needs and the test reads and sets values.
+struct Ref { std::string name; std::vector<double> v = std::vector<double>(1, 0.0); };
+std::map<std::string, Ref*> g_refs;
+Ref* ref(const std::string& name) {
+    auto& r = g_refs[name];
+    if (!r) r = new Ref{name};
+    return r;
+}
+double& dr(const std::string& name) { return ref(name)->v[0]; }
+
+// The world: a flat patch around 47 N 8 E (no grid convergence), terrain at 400 m.
+constexpr double kLat0 = 47, kLon0 = 8, kTerrain = 400;
+constexpr double kMetersPerDegLat = 111000, kMetersPerDegLon = 75700;
+
+// Views: 1026 the 3D cockpit, 1017 chase. The camera: a plugin's control callback, or the pilot's head.
+XPLMCameraControl_f g_camera = nullptr;
+void* g_cameraRefcon = nullptr;
+int g_commandsRun = 0;
 
 void out(char* buffer, const std::string& text) { std::snprintf(buffer, 512, "%s", text.c_str()); }
 
@@ -101,12 +123,68 @@ XPLMFlightLoopID XPLMCreateFlightLoop(XPLMCreateFlightLoop_t* p) {
 void XPLMScheduleFlightLoop(XPLMFlightLoopID, float, int) {}
 void XPLMDestroyFlightLoop(XPLMFlightLoopID) { g_loop = nullptr; }
 
-XPLMDataRef XPLMFindDataRef(const char* name) {
-    if (!std::strcmp(name, "sim/time/paused")) return reinterpret_cast<XPLMDataRef>(1);
-    if (!std::strcmp(name, "sim/aircraft/view/acf_ui_name")) return reinterpret_cast<XPLMDataRef>(2);
-    return nullptr;
+XPLMDataRef XPLMFindDataRef(const char* name) { return ref(name); }
+int XPLMGetDatai(XPLMDataRef r) {
+    if (static_cast<Ref*>(r)->name == "sim/time/paused") return g_paused;
+    return static_cast<int>(static_cast<Ref*>(r)->v[0]);
 }
-int XPLMGetDatai(XPLMDataRef) { return g_paused; }
+float XPLMGetDataf(XPLMDataRef r) { return static_cast<float>(static_cast<Ref*>(r)->v[0]); }
+double XPLMGetDatad(XPLMDataRef r) { return static_cast<Ref*>(r)->v[0]; }
+void XPLMSetDataf(XPLMDataRef r, float value) { static_cast<Ref*>(r)->v[0] = value; }
+int XPLMGetDatavf(XPLMDataRef r, float* values, int offset, int max) {
+    const auto& v = static_cast<Ref*>(r)->v;
+    if (!values) return static_cast<int>(v.size());
+    int n = 0;
+    for (int i = offset; i < static_cast<int>(v.size()) && n < max; ++i) values[n++] = static_cast<float>(v[i]);
+    return n;
+}
+XPLMCommandRef XPLMFindCommand(const char* name) { return XPLMCreateCommand(name, ""); }
+void XPLMCommandOnce(XPLMCommandRef cmd) {
+    const std::string name = static_cast<Command*>(cmd)->name;
+    ++g_commandsRun;
+    if (name == "sim/view/chase") {
+        dr("sim/graphics/view/view_type") = 1017;
+        dr("sim/graphics/view/view_is_external") = 1;
+    } else if (name == "sim/view/3d_cockpit_cmnd_look") {
+        dr("sim/graphics/view/view_type") = 1026;
+        dr("sim/graphics/view/view_is_external") = 0;
+    }
+}
+void XPLMWorldToLocal(double lat, double lon, double alt, double* x, double* y, double* z) {
+    *x = (lon - kLon0) * kMetersPerDegLon;
+    *y = alt;
+    *z = -(lat - kLat0) * kMetersPerDegLat;
+}
+void XPLMLocalToWorld(double x, double y, double z, double* lat, double* lon, double* alt) {
+    *lat = kLat0 - z / kMetersPerDegLat;
+    *lon = kLon0 + x / kMetersPerDegLon;
+    *alt = y;
+}
+void XPLMControlCamera(XPLMCameraControlDuration, XPLMCameraControl_f f, void* refcon) {
+    g_camera = f;
+    g_cameraRefcon = refcon;
+}
+void XPLMDontControlCamera() { g_camera = nullptr; }
+int XPLMIsCameraBeingControlled(XPLMCameraControlDuration*) { return g_camera != nullptr; }
+// The aircraft is level and heads grid north in this test, so body axes are OpenGL axes (x right, y up, z aft).
+void XPLMReadCameraPosition(XPLMCameraPosition_t* p) {
+    if (g_camera && g_camera(p, 0, g_cameraRefcon)) return;
+    p->x = static_cast<float>(dr("sim/flightmodel/position/local_x") + dr("sim/graphics/view/pilots_head_x"));
+    p->y = static_cast<float>(dr("sim/flightmodel/position/local_y") + dr("sim/graphics/view/pilots_head_y"));
+    p->z = static_cast<float>(dr("sim/flightmodel/position/local_z") + dr("sim/graphics/view/pilots_head_z"));
+    p->heading = static_cast<float>(dr("sim/graphics/view/pilots_head_psi"));
+    p->pitch = static_cast<float>(dr("sim/graphics/view/pilots_head_the"));
+    p->roll = static_cast<float>(dr("sim/graphics/view/pilots_head_phi"));
+    p->zoom = 1;
+}
+XPLMProbeRef XPLMCreateProbe(XPLMProbeType) { return reinterpret_cast<XPLMProbeRef>(5); }
+void XPLMDestroyProbe(XPLMProbeRef) {}
+XPLMProbeResult XPLMProbeTerrainXYZ(XPLMProbeRef, float x, float, float z, XPLMProbeInfo_t* info) {
+    info->locationX = x;
+    info->locationY = static_cast<float>(kTerrain);
+    info->locationZ = z;
+    return xplm_ProbeHitTerrain;
+}
 int XPLMGetDatab(XPLMDataRef, void* value, int offset, int max) {
     const int n = static_cast<int>(std::strlen(kUiName));
     if (!value) return n;
@@ -306,6 +384,23 @@ int main(int argc, char** argv) {
     g_prefs = (fs::path(g_root) / "Output" / "preferences" / "X-Plane.prf").string();
     g_pluginPath = (fs::path(g_root) / "Resources" / "plugins" / "XPCameraStudio" / "lin_x64" / "XPCameraStudio.xpl").string();
 
+    // A Cessna standing level at 47 N 8 E, heading grid north, in the 3D cockpit.
+    dr("sim/graphics/view/view_type") = 1026;
+    dr("sim/graphics/view/view_is_external") = 0;
+    dr("sim/graphics/view/field_of_view_deg") = 70;
+    dr("sim/flightmodel/position/local_y") = kTerrain + 1;
+    dr("sim/flightmodel/position/latitude") = kLat0;
+    dr("sim/flightmodel/position/longitude") = kLon0;
+    dr("sim/flightmodel/position/elevation") = kTerrain + 1;
+    dr("sim/flightmodel/position/y_agl") = 1;
+    dr("sim/flightmodel/failures/onground_any") = 1;
+    dr("sim/aircraft/view/acf_peX") = -0.25;
+    dr("sim/aircraft/view/acf_peY") = 0.9;
+    dr("sim/aircraft/view/acf_peZ") = -0.6;
+    dr("sim/graphics/view/pilots_head_x") = -0.25;
+    dr("sim/graphics/view/pilots_head_y") = 0.9;
+    dr("sim/graphics/view/pilots_head_z") = -0.6;
+
     Plugin plugin;
     if (!plugin.load(argv[1])) return 1;
     char name[256] = {}, sig[256] = {}, desc[256] = {};
@@ -393,6 +488,67 @@ int main(int argc, char** argv) {
         g_mouseX += 100;
         frames(1);
         check(win->params.left == left + 40, "the window stays put after the drag ends");
+    }
+
+    // Cameras (phase 2). The cockpit camera sits on the default eyepoint: the pilot's head goes there, with its FOV.
+    auto state = [&]() {
+        page.send("RequestSnapshot");
+        return page.find(page.drain(), "Snapshot")["payload"]["ownership"].value("state", "");
+    };
+    const auto near = [](double a, double b) { return std::abs(a - b) < 1e-3; };
+    {
+        const std::string cockpitId = cam.value("id", "");
+        page.send("ActivateCamera", {{"cameraId", cockpitId}});
+        frames(90);
+        check(state() == "Active", "activating the cockpit camera takes the camera");
+        check(near(dr("sim/graphics/view/pilots_head_x"), -0.25) && near(dr("sim/graphics/view/pilots_head_y"), 0.9) &&
+                  near(dr("sim/graphics/view/pilots_head_z"), -0.6) && near(dr("sim/graphics/view/pilots_head_psi"), 0),
+              "the cockpit view puts the pilot's head on the eyepoint");
+        check(std::abs(dr("sim/graphics/view/field_of_view_deg") - 62.0) < 0.05, "and sets its field of view (62 deg)");
+        check(!g_camera && dr("sim/graphics/view/view_type") == 1026, "in X-Plane's 3D cockpit, without camera control");
+
+        // An exterior camera 20 m behind and 3 m above the reference point: X-Plane's chase view, drawn by the plugin.
+        json chase = cam;
+        chase["id"] = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
+        chase["name"] = "XP chase";
+        chase["viewId"] = 2;
+        chase["mode"] = "aircraftExterior";
+        chase["icon"] = "view-exterior";
+        chase["positionMetersFRD"] = json::array({-20.0, 0.0, -3.0});
+        chase["requiredCapabilities"] = json::array({"exteriorPose", "fov"});
+        const std::string added = page.send("UpdateDraft", {{"ops", json::array({{{"op", "setCamera"}, {"camera", chase}}})}});
+        { const json a = page.ack(page.drain(), added); check(a.value("status", "") == "Completed", "an exterior camera is added: " + a.dump()); }
+        page.send("ActivateCamera", {{"cameraId", chase["id"]}});
+        frames(120);
+        XPLMCameraPosition_t cp{};
+        XPLMReadCameraPosition(&cp);
+        check(g_camera && dr("sim/graphics/view/view_type") == 1017, "the exterior camera switches to an external view and controls the camera");
+        check(near(cp.x, 0) && near(cp.y, kTerrain + 1 + 3) && near(cp.z, 20) && near(cp.heading, 0) &&
+                  std::abs(cp.pitch + std::atan2(3.0, 20.0) * 180 / M_PI) < 0.01 && near(cp.roll, 0),
+              "the camera is 20 m behind and 3 m above the aircraft, looking down at it: " + std::to_string(cp.x) + " " +
+                  std::to_string(cp.y) + " " + std::to_string(cp.z) + " hdg " + std::to_string(cp.heading) + " pitch " + std::to_string(cp.pitch) + " roll " + std::to_string(cp.roll));
+        check(std::abs(cp.zoom - std::tan(35 * M_PI / 180) / std::tan(31 * M_PI / 180)) < 1e-3, "62 deg through zoom on a 70 deg view");
+
+        // The aircraft turns right 90 deg: the camera stays behind it.
+        dr("sim/flightmodel/position/psi") = 90;
+        XPLMReadCameraPosition(&cp);
+        check(near(cp.x, -20) && near(cp.z, 0) && near(cp.heading, 90), "turning with the aircraft (now 20 m west, heading east)");
+        dr("sim/flightmodel/position/psi") = 0;
+
+        // The user picks X-Plane's 3D cockpit: control goes back to X-Plane and the module observes.
+        XPLMCommandOnce(XPLMFindCommand("sim/view/3d_cockpit_cmnd_look"));
+        frames(10);
+        check(!g_camera && state() == "Observing", "picking another X-Plane view hands the camera back");
+
+        // Back to the cockpit camera, then Release: the pilot's head and FOV return to where they were.
+        dr("sim/graphics/view/pilots_head_x") = 0.1;
+        page.send("ActivateCamera", {{"cameraId", cockpitId}});
+        frames(90);
+        page.send("ReleaseCamera");
+        frames(30);
+        check(state() == "Observing" && near(dr("sim/graphics/view/pilots_head_x"), 0.1) &&
+                  std::abs(dr("sim/graphics/view/field_of_view_deg") - 70) < 0.01,
+              "Release puts the pilot's head and FOV back");
     }
 
     page.send("TextFocus", {{"focused", true}});
