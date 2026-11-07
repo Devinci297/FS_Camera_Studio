@@ -20,7 +20,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
     return {count:names.length,all:names.every(n=>{const icon=FSCIcons.icon(n);return icon.children.length>0&&!icon.querySelector('image')&&icon.getAttribute('stroke')==='currentColor';}),
      visible:[...document.querySelectorAll('svg.mc-icon')].filter(e=>e.getBoundingClientRect().width&&e.getBoundingClientRect().height).length};
    });
-   assert.equal(result.count,36);assert.ok(result.all);assert.ok(result.visible>5);
+   assert.equal(result.count,40);assert.ok(result.all);assert.ok(result.visible>5);
    if(surface==='main'){
     await page.evaluate(()=>{const s=FSCApp.state,c=s.working.profile.cameras[0];c.color='#75baff';s.selection.cameraId=c.id;FSCDemo.setOwnership('Observing');});
     await page.screenshot({path:'build/review/icon-integration-main.png'});
@@ -47,6 +47,6 @@ const assert=require('node:assert/strict'),path=require('node:path');
     assert.equal(await page.locator('#mc-control-tooltip').textContent(),await camera.getAttribute('data-camera-name'));
    }
   }
-  assert.deepEqual(errors,[]);console.log('PASS: 36 simple SVG icons; picker selection; exact color; main and mini controls; camera tooltip visibility.');
+  assert.deepEqual(errors,[]);console.log('PASS: 40 simple SVG icons; picker selection; exact color; main and mini controls; camera tooltip visibility.');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

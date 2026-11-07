@@ -111,7 +111,11 @@
     if (/wing/.test(text)) return 'view-wing';
     if (/tail|rear/.test(text)) return 'view-tail';
     if (/front|nose/.test(text)) return 'view-front';
-    if (/orbit|walkaround|fly.by/.test(text)) return 'view-orbit';
+    if (/walk.?around/.test(text)) return 'view-walkaround';
+    if (/fly.?by|flypast|fly.?past/.test(text)) return 'view-flyby';
+    if (/orbit/.test(text)) return 'view-orbit';
+    if (/cinematic|movie|film/.test(text)) return 'view-cinematic';
+    if (/spotting|spotter|binocular/.test(text)) return 'view-spotting';
     if (/window/.test(text)) return 'view-window';
     if (/gear|wheel/.test(text)) return 'view-wheel';
     if (/drone/.test(text)) return 'view-drone';
@@ -137,9 +141,13 @@
   const glanceOf = view => (typeof view.glance === 'boolean' ? view.glance : glanceDefault(view));
   /** The glance on screen, or null: {cameraId, returnCameraId, held}. */
   const glanceState = () => (S.active && S.active.glance && S.active.glance.cameraId === S.active.cameraId && S.ownership.state === 'Active' ? S.active.glance : null);
+  // Icons stored automatically before walkaround, fly-by and cinematic had their own: the name's newer icon wins
+  // unless the user picked the icon (iconCustomized).
+  const SHARED_AUTO_ICONS = { 'view-orbit': ['view-walkaround', 'view-flyby', 'view-cinematic'], 'view-wheel': ['view-walkaround'] };
   function entityIcon(entity, isCategory) {
     const legacy = entity.airportIcao && !entity.iconCustomized && (!entity.icon || entity.icon === 'map-pin' || entity.icon === 'camera');
-    return !legacy && window.FSCIcons.names.indexOf(entity.icon) >= 0 ? entity.icon : viewIcon(entity.name, isCategory);
+    const named = viewIcon(entity.name, isCategory), upgraded = !entity.iconCustomized && (SHARED_AUTO_ICONS[entity.icon] || []).indexOf(named) >= 0;
+    return !legacy && !upgraded && window.FSCIcons.names.indexOf(entity.icon) >= 0 ? entity.icon : named;
   }
   function setLabel(control, text) { const span = control.querySelector('span'); if (span) span.textContent = text; }
   function keepFocus(container, render) {
@@ -1904,7 +1912,7 @@
     if(!P()||readOnly())return;
     if(P().cameras.length>492||P().categories.length>98){announce('This profile has no room for the eight external views.', 'warn');return;}
     const group={id:M.uuid(),name:'External motion',icon:'view-orbit',cameraIds:[]};
-    const walk={id:M.uuid(),name:'Walkaround',icon:'view-wheel',cameraIds:[]},ops=[];
+    const walk={id:M.uuid(),name:'Walkaround',icon:'view-walkaround',cameraIds:[]},ops=[];
     const insert=(cat,name,mode,pos,heading,pitch)=>{
       const view=newCamera(cat.id,name);view.mode=mode;view.interaction=false;view.trackingPolicy='off';
       view.requiredCapabilities=[];view.positionMetersFRD=pos;view.orientationCameraToAnchorXYZW=M.quatFromHpb(heading,pitch,0);
@@ -2809,7 +2817,7 @@
     if (toggle.parentNode !== group || toggle.previousSibling !== after) group.insertBefore(toggle, after.nextSibling);
     const on = Boolean(S.cinematic && S.cinematic.enabled);
     toggle.textContent = cinematicLabel();
-    setIcon(toggle, 'view-orbit');
+    setIcon(toggle, 'view-cinematic');
     toggle.hidden = false;
     toggle.setAttribute('aria-pressed', String(on));
     toggle.disabled = !S.snapshot || (!on && !S.caps.canActivate);
@@ -2866,7 +2874,7 @@
   }
 
   /* ------------- Spotting (other aircraft; the module picks the view and flies the camera) ------------- */
-  const SPOT_VIEWS = [['tower', 'Tower', 'view-tower'], ['runway', 'Runway', 'view-runway'], ['chase', 'Chase', 'view-tail'], ['flyby', 'Fly-by', 'view-orbit'], ['track', 'Track', 'crosshair']];
+  const SPOT_VIEWS = [['tower', 'Tower', 'view-tower'], ['runway', 'Runway', 'view-runway'], ['chase', 'Chase', 'view-tail'], ['flyby', 'Fly-by', 'view-flyby'], ['track', 'Track', 'crosshair']];
   const SPOT_VIEW_NAMES = { tower: 'Tower', runway: 'Runway', chase: 'Chase', flyby: 'Fly-by', track: 'Track', spot: 'Saved view' };
   const TRAFFIC_STATUS = { parked: 'Parked', taxi: 'Taxiing', takeoff: 'Takeoff', departing: 'Departing', arriving: 'Arriving', landing: 'Landing', cruise: 'Cruise' };
   const TRAFFIC_FILTERS = {
