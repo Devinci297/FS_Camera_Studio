@@ -6,7 +6,7 @@ mini control panel at the bottom of the screen.
 
 **Status: in-sim testing, with a new build awaiting live verification.** The module and panels have run in MSFS;
 version 0.4.0 adds camera feel, cinematic mode, world and drone cameras, traffic spotting and gamepad drones, and is
-built with SDK 1.7.3.
+built with SDK 1.8.1.
 Automated checks and installed-file verification are separate from live controller and scenery acceptance.
 Camera axes, template poses and hosting behaviour still require live qualification — see
 [`doc/qualification.md`](doc/qualification.md).
@@ -121,7 +121,7 @@ For a shareable Windows tester setup, see [`installer/README.md`](installer/READ
 The installer packages an explicitly verified build, detects the MSFS Community folder, supports upgrades and
 uninstall, and preserves saved camera profiles. Testers do not need the SDK or developer tools.
 
-Requirements: Windows 11 x64, the MSFS 2024 SDK (`MSFS2024_SDK` set; 1.7.3 is the baseline), PowerShell. For the
+Requirements: Windows 11 x64, the MSFS 2024 SDK (`MSFS2024_SDK` set; 1.8.1 is the baseline), PowerShell. For the
 native tests: Visual Studio 2022 Build Tools and CMake 3.25+.
 
 ```powershell
