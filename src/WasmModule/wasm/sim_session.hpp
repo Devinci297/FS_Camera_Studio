@@ -5,6 +5,7 @@
 // as BackendEvents and handed to the module on the next frame.
 
 #include "backend.hpp"
+#include "gamepad.hpp"
 
 #include <string>
 #include <vector>
@@ -27,6 +28,9 @@ public:
     bool captureControllerInputs(int deviceId, std::uint64_t generation = 0) override;
     bool enumerateControllers() override;
     void setNativeMouseEnabled(bool enabled) override;
+    bool mapAxes(const std::vector<std::string>& definitions, bool mask) override;
+    void setAxesEnabled(bool enabled) override;
+    bool captureControllerAxes(int deviceId, std::uint64_t generation = 0) override;
 
     bool requestNearbyAirports() override;
     bool requestAirport(const std::string&, std::uint32_t) override;
@@ -71,6 +75,13 @@ private:
     struct CapturePacket { int input = -1; std::string stage; };
     std::map<unsigned long, CapturePacket> capturePackets_;
     std::vector<bool> captureInputsValid_;
+    // Gamepad sticks: mapped axes (kAxisGroup, off until enabled) and Settings > Gamepad listening (kAxisCaptureGroup).
+    std::vector<std::string> axesMapped_;
+    std::size_t axisEventsDefined_ = 0;
+    bool axesMask_ = false, axesEnabled_ = false;
+    int axisCaptureDevice_ = -1;
+    unsigned long axisCaptureBase_ = 0, nextAxisCaptureBase_ = 0;
+    std::uint64_t axisCaptureGeneration_ = 0;
     std::vector<backend_event::TrafficAircraft> trafficPending_;  // the poll being received
     std::uint32_t userObjectId_ = 0;                               // from the user aircraft's own data requests
     unsigned long watchedTarget_ = 0;                              // spotting target with per-frame data (0: none)

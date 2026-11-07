@@ -1438,6 +1438,17 @@
           ack(env,'Accepted'); return event('ControllerCaptureStatus',{state:'listening',deviceId:payload.deviceId,captureId:payload.captureId},env.uiInstanceId);
         case 'StopControllerCapture':
           m.controllerCapture = null; return ack(env,'Completed');
+        case 'StartAxisCapture': {
+          // Demo: a gamepad's left stick, right stick and combined triggers, as SimConnect names them.
+          const demoAxes = { forward: ['YAxis', 'Y axis', 0, -32767], right: ['XAxis', 'X axis', 0, 32767], climb: ['ZAxis', 'Z axis', 0, -32767],
+            descend: ['ZAxis', 'Z axis', 0, 32767], yaw: ['RxAxis', 'X rotation', 0, 32767], pitch: ['RyAxis', 'Y rotation', 0, -32767] }[payload.function];
+          if (!demoAxes) return ack(env, 'Rejected', 'Choose a drone motion to assign.');
+          ack(env, 'Accepted', null, { seconds: 15 });
+          event('AxisCaptureStatus', { state: 'listening', deviceId: payload.deviceId, captureId: payload.captureId }, env.uiInstanceId);
+          return event('ControllerAxisCaptured', { captureId: payload.captureId, axis: { function: payload.function, definition: 'joystick:' + payload.deviceId + ':' + demoAxes[0],
+            label: 'Xbox Controller - ' + demoAxes[1], rest: demoAxes[2], full: demoAxes[3], deviceId: payload.deviceId, deviceName: 'Xbox Controller' } }, env.uiInstanceId, 900);
+        }
+        case 'StopAxisCapture': return ack(env, 'Completed');
         case 'TestInput': {
           ack(env, 'Accepted');
           const definition = payload.input && payload.input.definition;

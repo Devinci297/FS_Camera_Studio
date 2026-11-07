@@ -1862,6 +1862,12 @@ constexpr double kFreeMaxPlacementMeters = 9000;  // keeps a placed pose inside 
 constexpr double kDroneDefaultFovRad = 1.0821;
 }  // namespace
 
+bool Coordinator::freeCameraShown() const {
+    if (state_ != Ownership::Active || spot_ || glanceCurrent()) return false;
+    const CameraEntry* cam = activeEntry();
+    return cam && cam->mode == profiles::CameraMode::Free;
+}
+
 bool Coordinator::aircraftPositionFresh(double now) const {
     return targetAt_ >= 0 && now - targetAt_ <= 5 && aircraftGeo().valid() && std::isfinite(targetHeading_);
 }

@@ -77,6 +77,15 @@ public:
     int captureDevice = -1;
     std::uint64_t captureGeneration = 0;
     bool captureControllerInputs(int deviceId, std::uint64_t generation = 0) override { captureDevice = deviceId; captureGeneration = generation; return true; }
+    // Gamepad sticks: the latest axis mapping, its mask, whether the group is on, and the axis listening device.
+    std::vector<std::string> axes;
+    bool axesMask = false, axesEnabled = false;
+    int axisMaps = 0, axisCaptureDevice = -1;
+    std::uint64_t axisCaptureGeneration = 0;
+    std::vector<bool> axisEnableChanges;
+    bool mapAxes(const std::vector<std::string>& defs, bool mask) override { axes = defs; axesMask = mask; axesEnabled = false; ++axisMaps; return true; }
+    void setAxesEnabled(bool enabled) override { if (enabled != axesEnabled) axisEnableChanges.push_back(enabled); axesEnabled = enabled; }
+    bool captureControllerAxes(int deviceId, std::uint64_t generation = 0) override { axisCaptureDevice = deviceId; axisCaptureGeneration = generation; return true; }
     int nearbyRequests = 0;
     std::vector<std::pair<std::string,std::uint32_t>> airportRequests;
     bool requestNearbyAirports() override { ++nearbyRequests; return true; }

@@ -17,7 +17,12 @@ namespace {
 enum : DWORD { kEvtAircraftLoaded = 1, kEvtFlightLoaded, kEvtSim, kEvtPause, kEvtMouseRight, kEvtMouseX, kEvtMouseY, kEvtTest = 900, kEvtTestPovRelease = 901, kEvtInputBase = 1000, kEvtPovReleaseBase = 4000 };
 enum : DWORD { kReqAircraftState = 1, kReqTitle, kReqTitleOnce, kReqMotion, kReqPosition, kReqGround, kReqTraffic, kReqTarget };
 enum : DWORD { kDefTitle = 1, kDefMotion, kDefPosition, kDefGround, kDefTraffic, kDefTarget };
-enum : DWORD { kInputGroup = 1, kTestInputGroup = 2, kMouseInputGroup = 3, kMouseAxesGroup = 4, kCaptureInputGroup = 5 };
+enum : DWORD { kInputGroup = 1, kTestInputGroup = 2, kMouseInputGroup = 3, kMouseAxesGroup = 4, kCaptureInputGroup = 5, kAxisGroup = 6, kAxisCaptureGroup = 7 };
+// Gamepad sticks: one private client event per mapped axis, and a fresh block of events for each Listen request so a
+// queued sample from an earlier request is never read as the new one's rest value.
+constexpr DWORD kEvtAxisBase = 5000;
+constexpr std::size_t kMaxAxes = 16;
+constexpr DWORD kFirstAxisCaptureEvent = 500000;
 enum : DWORD { kNotifyInput = 1 };
 enum : DWORD { kEvtZoomIn = 800, kEvtZoomOut, kEvtZoomPlus, kEvtZoomMinus };
 constexpr std::size_t kMaxInputs = 1000; // SDK input-group limit, including primary/secondary and modifier aliases
@@ -142,6 +147,76 @@ void SimSession::setup() {
     clientEventsDefined_ = 0; povReleaseEventsDefined_.clear();
     zoomRegistered_ = false;
     captureDevice_ = -1; captureEventBase_ = nextCaptureEventBase_ = kFirstCaptureEvent; captureGeneration_ = 0; capturePackets_.clear(); captureInputsValid_.clear();
+    axesMapped_.clear(); axisEventsDefined_ = 0; axesMask_ = axesEnabled_ = false;
+    axisCaptureDevice_ = -1; axisCaptureBase_ = nextAxisCaptureBase_ = kFirstAxisCaptureEvent; axisCaptureGeneration_ = 0;
+}
+
+bool SimSession::mapAxes(const std::vector<std::string>& definitions, bool mask) {
+    if (!handle_) return definitions.empty();
+    const HANDLE h = asHandle(handle_);
+    SimConnect_SetInputGroupState(h, kAxisGroup, SIMCONNECT_STATE_OFF);
+    if (!axesMapped_.empty()) SimConnect_ClearInputGroup(h, kAxisGroup);
+    axesMapped_.clear();
+    axesEnabled_ = false;
+    axesMask_ = mask;
+    const std::size_t n = (std::min)(definitions.size(), kMaxAxes);
+    bool ok = n == definitions.size();
+    for (; axisEventsDefined_ < n; ++axisEventsDefined_) {
+        const DWORD id = kEvtAxisBase + static_cast<DWORD>(axisEventsDefined_);
+        if (FAILED(SimConnect_MapClientEventToSimEvent(h, id, "")) ||
+            FAILED(SimConnect_AddClientEventToNotificationGroup(h, kNotifyInput, id, FALSE))) return false;
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        // An axis reports its position as the event data; there is no release edge. Masked, the simulator (the
+        // aircraft's own bindings for the same axis) does not see it while the group is on.
+        const DWORD id = kEvtAxisBase + static_cast<DWORD>(i);
+        const HRESULT hr = SimConnect_MapInputEventToClientEvent_EX1(h, kAxisGroup, definitions[i].c_str(), id, 0,
+            static_cast<SIMCONNECT_CLIENT_EVENT_ID>(SIMCONNECT_UNUSED), 0, mask ? TRUE : FALSE);
+        ok = SUCCEEDED(hr) && ok;
+        axesMapped_.push_back(definitions[i]);  // keep indices aligned with the module's list even if one failed
+    }
+    if (n > 0) {
+        SimConnect_SetInputGroupPriority(h, kAxisGroup, mask ? SIMCONNECT_GROUP_PRIORITY_HIGHEST_MASKABLE : SIMCONNECT_GROUP_PRIORITY_HIGHEST);
+        SimConnect_SetInputGroupState(h, kAxisGroup, SIMCONNECT_STATE_OFF);
+    }
+    return ok;
+}
+
+void SimSession::setAxesEnabled(bool enabled) {
+    enabled = enabled && !axesMapped_.empty();
+    if (!handle_ || enabled == axesEnabled_) return;
+    SimConnect_SetInputGroupState(asHandle(handle_), kAxisGroup, enabled ? SIMCONNECT_STATE_ON : SIMCONNECT_STATE_OFF);
+    axesEnabled_ = enabled;
+}
+
+bool SimSession::captureControllerAxes(int deviceId, std::uint64_t generation) {
+    if (!handle_) return deviceId < 0;
+    const HANDLE h = asHandle(handle_);
+    SimConnect_SetInputGroupState(h, kAxisCaptureGroup, SIMCONNECT_STATE_OFF);
+    if (axisCaptureDevice_ >= 0) {
+        SimConnect_ClearInputGroup(h, kAxisCaptureGroup);
+        for (DWORD i = 0; i < kGamepadAxisNames.size(); ++i) SimConnect_RemoveClientEvent(h, kNotifyInput, axisCaptureBase_ + i);
+    }
+    axisCaptureDevice_ = -1;
+    if (deviceId < 0) return true;
+    axisCaptureBase_ = nextAxisCaptureBase_;
+    nextAxisCaptureBase_ += static_cast<DWORD>(kGamepadAxisNames.size());
+    int mapped = 0;
+    for (DWORD i = 0; i < kGamepadAxisNames.size(); ++i) {
+        const DWORD id = axisCaptureBase_ + i;
+        const std::string definition = "joystick:" + std::to_string(deviceId) + ":" + kGamepadAxisNames[i];
+        if (FAILED(SimConnect_MapClientEventToSimEvent(h, id, "")) ||
+            FAILED(SimConnect_AddClientEventToNotificationGroup(h, kNotifyInput, id, FALSE))) continue;
+        // Not masked: listening must not take the axis away from the simulator.
+        if (SUCCEEDED(SimConnect_MapInputEventToClientEvent_EX1(h, kAxisCaptureGroup, definition.c_str(), id, 0,
+                static_cast<SIMCONNECT_CLIENT_EVENT_ID>(SIMCONNECT_UNUSED), 0, FALSE))) ++mapped;
+    }
+    if (mapped == 0) return false;
+    SimConnect_SetInputGroupPriority(h, kAxisCaptureGroup, SIMCONNECT_GROUP_PRIORITY_HIGHEST);
+    if (FAILED(SimConnect_SetInputGroupState(h, kAxisCaptureGroup, SIMCONNECT_STATE_ON))) return false;
+    axisCaptureDevice_ = deviceId;
+    axisCaptureGeneration_ = generation;
+    return true;
 }
 
 void SimSession::setNativeMouseEnabled(bool enabled) {
@@ -459,6 +534,11 @@ void SimSession::onRecv(const void* raw, unsigned long size) {
                         staged_.push_back(backend_event::ControllerButton{captureDevice_, input, e->dwData == 1, captureGeneration_});
                     else staged_.push_back(backend_event::ControllerHat{captureDevice_, 0, povInputValue(release, e->dwData), captureGeneration_});
                 }
+            } else if (e->uEventID >= kEvtAxisBase && e->uEventID < kEvtAxisBase + axesMapped_.size()) {
+                if (axesEnabled_) staged_.push_back(backend_event::AxisInput{static_cast<std::size_t>(e->uEventID - kEvtAxisBase), static_cast<std::int32_t>(e->dwData)});
+            } else if (axisCaptureDevice_ >= 0 && e->uEventID >= axisCaptureBase_ && e->uEventID < axisCaptureBase_ + kGamepadAxisNames.size()) {
+                staged_.push_back(backend_event::ControllerAxis{axisCaptureDevice_, static_cast<int>(e->uEventID - axisCaptureBase_),
+                                                                static_cast<std::int32_t>(e->dwData), axisCaptureGeneration_});
             } else if (e->uEventID >= kEvtPovReleaseBase && e->uEventID < kEvtPovReleaseBase + mapped_.size()) {
                 const std::size_t i = e->uEventID - kEvtPovReleaseBase;
                 if (i < isPov_.size() && isPov_[i]) staged_.push_back(backend_event::InputEvent{i, true, povInputValue(true, e->dwData), false});

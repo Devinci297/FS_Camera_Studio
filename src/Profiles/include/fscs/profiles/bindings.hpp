@@ -66,6 +66,29 @@ json defaultBindingsDocument();
 // One-time migration: expose the old runtime defaults without overwriting custom assignments.
 json upgradeMovementBindings(json doc);
 
+// Gamepad sticks for free cameras (drones), like the simulator's own drone camera: an analog joystick axis per drone
+// motion, mapped in-module only while a drone view is shown. `rest` is the raw value with the control released and
+// `full` the value at full deflection in the motion's positive direction (SimConnect axes report about -32K..32K), so
+// value = (raw - rest) / (full - rest). A centred stick is bipolar; a trigger resting at one end gives 0..1.
+enum class GamepadFunction { Forward, Right, Climb, Descend, Yaw, Pitch };
+const char* toString(GamepadFunction f);
+std::optional<GamepadFunction> parseGamepadFunction(const std::string& s);
+struct GamepadAxis {
+    GamepadFunction function = GamepadFunction::Forward;
+    std::string definition;  // "joystick:<device>:<XAxis|YAxis|ZAxis|RxAxis|RyAxis|RzAxis|Slider>"
+    std::string label;       // display only
+    double rest = 0, full = 32767;
+};
+constexpr std::size_t kGamepadFunctionCount = 6;
+constexpr double kGamepadAxisLimit = 32768;
+constexpr double kGamepadMinSpan = 4096;  // a smaller rest-to-full distance is noise, not a control
+constexpr double kGamepadMaxDeadzone = 0.5;
+// True for a joystick axis definition the module maps for gamepad sticks.
+bool validAxisDefinition(const std::string& definition);
+// At most one axis per function (the first), valid definitions only, rest/full clamped and at least kGamepadMinSpan apart.
+json normalizeGamepadAxes(const json& axes);
+std::vector<GamepadAxis> parseGamepadAxes(const json& axes);
+
 struct HostSettings {
     bool allowUnqualifiedAdapter = false;
     double lookSpeedDegPerSec = 60;
@@ -97,6 +120,11 @@ struct HostSettings {
     // Spotting: traffic within this radius of the user aircraft; auto-spot shows each aircraft at least this long.
     double spottingRadiusNm = 20;
     double autoSpotHoldSeconds = 30;
+    // Gamepad sticks fly drones (free cameras); blocksAircraft masks the mapped axes from the aircraft meanwhile.
+    bool gamepadSticksEnabled = true;
+    bool gamepadBlocksAircraft = true;
+    double gamepadDeadzone = 0.15;
+    std::vector<GamepadAxis> gamepadAxes;
 };
 constexpr double kBinocularsMinFovDeg = 2;
 constexpr double kBinocularsMaxFovDeg = 60;

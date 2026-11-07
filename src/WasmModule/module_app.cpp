@@ -122,6 +122,10 @@ void ModuleApp::update(double now) {
             controllerCapturePoll_ = now + 2;
         }
     }
+    if (axisCaptureDevice_ >= 0) {
+        const auto owner = instances_.find(axisCaptureRequester_);
+        if (now > axisCaptureUntil_ || (owner != instances_.end() && now - owner->second.lastRenew > kLeaseSeconds)) stopAxisCapture("timeout");
+    }
     reassembler_.expire(now);
     if(repo_.loaded() && simRunning_ && now-lastAirportRefresh_>2){lastAirportRefresh_=now;refreshAirports(now);}
     for(auto it=airportJobs_.begin();it!=airportJobs_.end();) {if(now>it->second.deadline){emitNow("AirportPreview",{{"icao",it->second.icao},{"error","No scenery data received within 20 seconds."}},it->second.to);it=airportJobs_.erase(it);}else ++it;}
@@ -133,6 +137,7 @@ void ModuleApp::update(double now) {
     for (auto it = gestures_.begin(); it != gestures_.end();) it = now > it->second.expires ? gestures_.erase(it) : std::next(it);
     core::ManualInput manual = router_.manualInput();
     for (const auto& [token, g] : gestures_) manual = add(manual, g.input);
+    updateGamepad(manual);
     coord_.setManualInput(manual);
     if (manual.moveForward || manual.moveRight || manual.moveUp || manual.lookRight || manual.lookUp)
         lastAutoSwitch_ = now; // Manual movement pauses the shared mode; it does not turn it off.
@@ -190,6 +195,38 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
         }
         return;
     }
+    if (std::holds_alternative<backend_event::Connected>(ev)) {
+        // A new SimConnect connection has no axis mappings yet: map them again (bindings follow their own path).
+        gamepadMapping_.clear();
+        configureGamepad(profiles::parseHostSettings(working_.settings));
+    }
+    if (const auto* axis = std::get_if<backend_event::AxisInput>(&ev)) {
+        if (!gamepadOn_) return;
+        gamepad_.onAxis(axis->index, axis->value);
+        if (gamepadSamples_ < 3) {
+            ++gamepadSamples_;
+            diag("gamepad axis " + (axis->index < gamepad_.definitions().size() ? gamepad_.definitions()[axis->index] : std::string("?")) +
+                 " raw=" + std::to_string(axis->value));
+        }
+        return;
+    }
+    if (const auto* sample = std::get_if<backend_event::ControllerAxis>(&ev)) {
+        if (axisCaptureDevice_ < 0 || sample->deviceId != axisCaptureDevice_ || sample->captureGeneration != axisCaptureGeneration_) return;
+        const auto found = axisListener_.onSample(sample->axis, sample->value);
+        if (!found) return;
+        const auto selected = std::find_if(controllers_.begin(), controllers_.end(), [&](const auto& item) { return item.first == axisCaptureDevice_; });
+        std::string name = selected == controllers_.end() ? "Controller" : selected->second;
+        if (name.size() > 100) name.resize(100);
+        while (!name.empty() && !js::validUtf8(name)) name.pop_back();
+        const json axis{{"function", axisCaptureFunction_},
+                        {"definition", "joystick:" + std::to_string(axisCaptureDevice_) + ":" + kGamepadAxisNames[static_cast<std::size_t>(found->axis)]},
+                        {"label", name + " - " + kGamepadAxisLabels[static_cast<std::size_t>(found->axis)]},
+                        {"rest", found->rest}, {"full", found->full}, {"deviceId", axisCaptureDevice_}, {"deviceName", name}};
+        diag("axis capture found " + js::dump(axis));
+        emitNow("ControllerAxisCaptured", {{"axis", axis}, {"captureId", axisCaptureId_}}, axisCaptureRequester_);
+        stopAxisCapture("stopped");
+        return;
+    }
     if (const auto* mapping = std::get_if<backend_event::InputMappingStatus>(&ev)) {
         diag("input mapping result " + js::dump({{"ready", mapping->ready}, {"definitions", mapping->definitions},
              {"failedCalls", mapping->failedCalls}, {"code", mapping->code}}));
@@ -199,6 +236,8 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
         controllers_ = c->controllers;
         if (controllerCaptureDevice_ >= 0 && std::none_of(controllers_.begin(), controllers_.end(),
             [&](const auto& controller) { return controller.first == controllerCaptureDevice_; })) stopControllerCapture("disconnected");
+        if (axisCaptureDevice_ >= 0 && std::none_of(controllers_.begin(), controllers_.end(),
+            [&](const auto& controller) { return controller.first == axisCaptureDevice_; })) stopAxisCapture("disconnected");
         json list = json::array();
         for (const auto& [id, name] : controllers_) list.push_back({{"deviceId", id}, {"name", name}});
         emitNow("ControllersListed", {{"controllers", list}});
@@ -242,10 +281,12 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
     }
     if (const auto* r = std::get_if<backend_event::SimRunning>(&ev)) {
         simRunning_ = r->running;
-        if (!simRunning_) stopControllerCapture("stopped");
+        if (!simRunning_) { stopControllerCapture("stopped"); stopAxisCapture("stopped"); }
     }
     if (std::holds_alternative<backend_event::FlightLoaded>(ev) || std::holds_alternative<backend_event::Disconnected>(ev)) {
         stopControllerCapture("disconnected");
+        stopAxisCapture("disconnected");
+        gamepad_.neutral();
         stopAutoSpot("A new flight was loaded.");
         for (const auto& a : router_.releaseAll()) coord_.onAction(a, now);
     }
@@ -262,6 +303,47 @@ void ModuleApp::completeControllerCapture(const std::string& suffix, const std::
     if (!pov.empty()) input["pov"] = pov;
     emitNow("ControllerInputCaptured", {{"input", input}, {"captureId", controllerCaptureId_}}, controllerCaptureRequester_);
     stopControllerCapture("stopped");
+}
+
+void ModuleApp::stopAxisCapture(const std::string& state) {
+    if (axisCaptureDevice_ < 0) return;
+    const auto device = axisCaptureDevice_;
+    const auto requester = axisCaptureRequester_;
+    const auto captureId = axisCaptureId_;
+    services_.captureControllerAxes(-1);
+    diag("axis capture " + state + " device=" + std::to_string(device));
+    axisCaptureDevice_ = -1;
+    axisCaptureRequester_.clear(); axisCaptureId_.clear(); axisCaptureFunction_.clear();
+    emitNow("AxisCaptureStatus", {{"state", state}, {"deviceId", device}, {"captureId", captureId}}, requester);
+}
+
+void ModuleApp::configureGamepad(const profiles::HostSettings& settings) {
+    gamepadSticksEnabled_ = settings.gamepadSticksEnabled;
+    const auto& definitions = gamepad_.configure(settings.gamepadAxes, settings.gamepadDeadzone);
+    std::string key = settings.gamepadBlocksAircraft ? "mask" : "pass";
+    for (const auto& d : definitions) key += "|" + d;
+    if (key == gamepadMapping_) return;
+    gamepadMapping_ = key;
+    if (gamepadOn_) services_.setAxesEnabled(false);
+    gamepadOn_ = false;
+    gamepad_.neutral();
+    const bool mapped = services_.mapAxes(definitions, settings.gamepadBlocksAircraft);
+    diag("gamepad axes: " + std::to_string(definitions.size()) + (mapped ? " mapped" : " failed") +
+         (settings.gamepadBlocksAircraft ? " (masked from the aircraft while a drone is shown)" : ""));
+}
+
+void ModuleApp::updateGamepad(core::ManualInput& manual) {
+    // Only while a drone is on screen and nothing listens for inputs: elsewhere the sticks stay the simulator's.
+    const bool on = gamepadSticksEnabled_ && !gamepad_.empty() && axisCaptureDevice_ < 0 && controllerCaptureDevice_ < 0 &&
+                    simRunning_ && !paused_ && coord_.freeCameraShown();
+    if (on != gamepadOn_) {
+        gamepadOn_ = on;
+        gamepad_.neutral();  // nothing held over from before; the first new samples arrive within about 0.2 s
+        gamepadSamples_ = 0;
+        services_.setAxesEnabled(on);
+        diag(std::string("gamepad sticks ") + (on ? "on" : "off"));
+    }
+    if (on) manual = add(manual, gamepad_.input());
 }
 
 void ModuleApp::stopControllerCapture(const std::string& state) {
@@ -539,6 +621,7 @@ void ModuleApp::handle(const Command& c, double now) {
         if (device < 0 || std::none_of(controllers_.begin(), controllers_.end(), [&](const auto& item) { return item.first == device; }))
             return reply(c, AckStatus::Rejected, "Select a connected controller first. Refresh the controller list if needed.");
         stopControllerCapture("stopped");
+        stopAxisCapture("stopped");
         services_.mapTestInput(""); testDefinition_.clear();
         if (!services_.captureControllerInputs(device, ++controllerCaptureGeneration_)) return reply(c, AckStatus::Rejected, "Controller listening is unavailable. Load a flight and try again.");
         for (const auto& e : router_.releaseAll()) coord_.onAction(e, now);
@@ -551,6 +634,30 @@ void ModuleApp::handle(const Command& c, double now) {
         diag("controller capture listening device=" + std::to_string(device));
         emitNow("ControllerCaptureStatus", {{"state", "listening"}, {"deviceId", device}, {"captureId", controllerCaptureId_}}, c.uiInstanceId);
         return reply(c, AckStatus::Accepted, {}, {{"seconds", 20}, {"buttonCount", 32}, {"hatCount", 1}});
+    }
+    if (a == "StartAxisCapture") {
+        const int device = static_cast<int>(js::integer(p, "deviceId", -1));
+        const std::string function = js::str(p, "function");
+        if (!profiles::parseGamepadFunction(function)) return reply(c, AckStatus::Rejected, "Choose a drone motion to assign.");
+        if (device < 0 || std::none_of(controllers_.begin(), controllers_.end(), [&](const auto& item) { return item.first == device; }))
+            return reply(c, AckStatus::Rejected, "Select a connected controller first. Refresh the controller list if needed.");
+        stopAxisCapture("stopped");
+        stopControllerCapture("stopped");
+        if (!services_.captureControllerAxes(device, ++axisCaptureGeneration_))
+            return reply(c, AckStatus::Rejected, "Controller listening is unavailable. Load a flight and try again.");
+        axisListener_.start();
+        axisCaptureDevice_ = device;
+        axisCaptureFunction_ = function;
+        axisCaptureRequester_ = c.uiInstanceId;
+        axisCaptureId_ = js::str(p, "captureId").substr(0, 120);
+        axisCaptureUntil_ = now + kAxisCaptureSeconds;
+        diag("axis capture listening device=" + std::to_string(device) + " function=" + function);
+        emitNow("AxisCaptureStatus", {{"state", "listening"}, {"deviceId", device}, {"captureId", axisCaptureId_}}, c.uiInstanceId);
+        return reply(c, AckStatus::Accepted, {}, {{"seconds", kAxisCaptureSeconds}});
+    }
+    if (a == "StopAxisCapture") {
+        if (axisCaptureRequester_.empty() || axisCaptureRequester_ == c.uiInstanceId) stopAxisCapture("stopped");
+        return reply(c, AckStatus::Completed);
     }
     if (a == "StopControllerCapture") {
         if (controllerCaptureRequester_.empty() || controllerCaptureRequester_ == c.uiInstanceId) stopControllerCapture("stopped");
@@ -1009,7 +1116,9 @@ void ModuleApp::publishWorking(double now, bool bindingsChanged) {
     } else {
         coord_.setProfile(std::nullopt, now);
     }
-    coord_.setSettings(profiles::parseHostSettings(working_.settings), now);
+    const auto hostSettings = profiles::parseHostSettings(working_.settings);
+    coord_.setSettings(hostSettings, now);
+    configureGamepad(hostSettings);
     if (bindingsChanged) {
         for (const auto& e : router_.releaseAll()) coord_.onAction(e, now);
         auto set = profiles::parseBindings(working_.bindings);

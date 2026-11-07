@@ -105,6 +105,8 @@ public:
     void emitFullState();
 
     Ownership ownership() const { return state_; }
+    // A free camera (drone) is on screen and flown by manual input: gamepad sticks map only then.
+    bool freeCameraShown() const;
     std::uint64_t epoch() const { return epoch_; }
     const std::string& activeCameraId() const { return activeCameraId_; }
     bool canActivate() const { return blockReason().empty(); }

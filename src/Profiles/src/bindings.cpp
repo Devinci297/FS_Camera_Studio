@@ -285,7 +285,73 @@ json defaultSettingsDocument() {
                         {"cinematicDrift", cinematic.cinematicDrift}});
     doc["host"].update({{"spottingRadiusNm", cinematic.spottingRadiusNm}, {"autoSpotHoldSeconds", cinematic.autoSpotHoldSeconds}});
     doc["host"]["spottingSpots"] = json::array();
+    doc["host"].update({{"gamepadSticksEnabled", cinematic.gamepadSticksEnabled}, {"gamepadBlocksAircraft", cinematic.gamepadBlocksAircraft},
+                        {"gamepadDeadzone", cinematic.gamepadDeadzone}, {"gamepadAxes", json::array()}});
     return doc;
+}
+
+namespace {
+constexpr std::array<std::pair<GamepadFunction, const char*>, kGamepadFunctionCount> kGamepadFunctions{{
+    {GamepadFunction::Forward, "forward"}, {GamepadFunction::Right, "right"}, {GamepadFunction::Climb, "climb"},
+    {GamepadFunction::Descend, "descend"}, {GamepadFunction::Yaw, "yaw"}, {GamepadFunction::Pitch, "pitch"}}};
+}  // namespace
+
+const char* toString(GamepadFunction f) {
+    for (const auto& [v, name] : kGamepadFunctions) if (v == f) return name;
+    return "forward";
+}
+
+std::optional<GamepadFunction> parseGamepadFunction(const std::string& s) {
+    for (const auto& [v, name] : kGamepadFunctions) if (s == name) return v;
+    return std::nullopt;
+}
+
+bool validAxisDefinition(const std::string& d) {
+    static const char* const kAxes[] = {"XAxis", "YAxis", "ZAxis", "RxAxis", "RyAxis", "RzAxis", "Slider"};
+    if (d.compare(0, 9, "joystick:") != 0) return false;
+    std::size_t i = 9, digits = 0;
+    while (i < d.size() && std::isdigit(static_cast<unsigned char>(d[i]))) { ++i; ++digits; }
+    if (digits == 0 || digits > 3 || i >= d.size() || d[i] != ':') return false;
+    const std::string axis = d.substr(i + 1);
+    return std::any_of(std::begin(kAxes), std::end(kAxes), [&](const char* a) { return axis == a; });
+}
+
+std::vector<GamepadAxis> parseGamepadAxes(const json& axes) {
+    std::vector<GamepadAxis> out;
+    if (!axes.is_array()) return out;
+    for (const auto& v : axes) {
+        if (out.size() >= kGamepadFunctionCount) break;
+        if (!v.is_object()) continue;
+        const auto function = parseGamepadFunction(js::str(v, "function"));
+        const std::string definition = js::str(v, "definition");
+        if (!function || !validAxisDefinition(definition)) continue;
+        if (std::any_of(out.begin(), out.end(), [&](const GamepadAxis& a) { return a.function == *function; })) continue;
+        const auto& restValue = js::get(v, "rest");
+        const auto& fullValue = js::get(v, "full");
+        const double rest = restValue.is_number() ? restValue.get<double>() : 0.0;
+        const double full = fullValue.is_number() ? fullValue.get<double>() : NAN;
+        if (!std::isfinite(rest) || !std::isfinite(full)) continue;
+        GamepadAxis a;
+        a.function = *function;
+        a.definition = definition;
+        a.rest = std::clamp(rest, -kGamepadAxisLimit, kGamepadAxisLimit);
+        a.full = std::clamp(full, -kGamepadAxisLimit, kGamepadAxisLimit);
+        if (std::abs(a.full - a.rest) < kGamepadMinSpan) continue;
+        std::string label;
+        for (const char c : js::str(v, "label")) if (static_cast<unsigned char>(c) >= 32 && c != 127) label.push_back(c);
+        if (label.size() > 120) label.resize(120);
+        while (!label.empty() && !js::validUtf8(label)) label.pop_back();
+        a.label = label.empty() ? definition : label;
+        out.push_back(std::move(a));
+    }
+    return out;
+}
+
+json normalizeGamepadAxes(const json& axes) {
+    json out = json::array();
+    for (const auto& a : parseGamepadAxes(axes))
+        out.push_back({{"function", toString(a.function)}, {"definition", a.definition}, {"label", a.label}, {"rest", a.rest}, {"full", a.full}});
+    return out;
 }
 
 namespace {
@@ -392,6 +458,9 @@ json normalizeSettings(const json& doc) {
     out["host"]["airportAutoGenerate"] = h.airportAutoGenerate;
     out["host"].update({{"spottingRadiusNm", h.spottingRadiusNm}, {"autoSpotHoldSeconds", h.autoSpotHoldSeconds}});
     out["host"]["spottingSpots"] = normalizeSpottingSpots(js::get(js::object(doc, "host"), "spottingSpots"));
+    out["host"].update({{"gamepadSticksEnabled", h.gamepadSticksEnabled}, {"gamepadBlocksAircraft", h.gamepadBlocksAircraft},
+                        {"gamepadDeadzone", h.gamepadDeadzone},
+                        {"gamepadAxes", normalizeGamepadAxes(js::get(js::object(doc, "host"), "gamepadAxes"))}});
     return out;
 }
 
@@ -428,6 +497,10 @@ HostSettings parseHostSettings(const json& doc) {
     s.cinematicDrift = js::boolean(host, "cinematicDrift", true);
     s.spottingRadiusNm = std::clamp(js::num(host, "spottingRadiusNm", 20.0), kSpottingMinRadiusNm, kSpottingMaxRadiusNm);
     s.autoSpotHoldSeconds = std::clamp(js::num(host, "autoSpotHoldSeconds", 30.0), kAutoSpotMinHoldSeconds, kAutoSpotMaxHoldSeconds);
+    s.gamepadSticksEnabled = js::boolean(host, "gamepadSticksEnabled", true);
+    s.gamepadBlocksAircraft = js::boolean(host, "gamepadBlocksAircraft", true);
+    s.gamepadDeadzone = std::clamp(js::num(host, "gamepadDeadzone", 0.15), 0.0, kGamepadMaxDeadzone);
+    s.gamepadAxes = parseGamepadAxes(js::get(host, "gamepadAxes"));
     return s;
 }
 

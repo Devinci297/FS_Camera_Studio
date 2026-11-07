@@ -66,6 +66,10 @@ struct InputEvent { std::size_t index = 0; bool down = true; std::uint32_t value
 struct ControllersList { std::vector<std::pair<int, std::string>> controllers; };
 struct ControllerButton { int deviceId = -1; int button = -1; bool down = false; std::uint64_t captureGeneration = 0; };
 struct ControllerHat { int deviceId = -1; int hat = 0; std::uint32_t angle = 0xffffffffu; std::uint64_t captureGeneration = 0; };
+// Gamepad sticks: a mapped axis (IModuleServices::mapAxes) reported its raw position (about -32K..32K).
+struct AxisInput { std::size_t index = 0; std::int32_t value = 0; };
+// Settings > Gamepad > Listen: one axis (kGamepadAxisNames index) of the controller being listened to.
+struct ControllerAxis { int deviceId = -1; int axis = -1; std::int32_t value = 0; std::uint64_t captureGeneration = 0; };
 struct ControllerCaptureMappingStatus {
     int deviceId = -1;
     std::uint64_t generation = 0;
@@ -80,7 +84,7 @@ using BackendEvent = std::variant<backend_event::Connected, backend_event::Disco
                                   backend_event::CameraData, backend_event::DefinitionList, backend_event::AircraftLoaded,
                                   backend_event::AircraftTitle, backend_event::FlightLoaded, backend_event::SimRunning,
                                   backend_event::Paused, backend_event::CameraException,
-                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::ControllerButton, backend_event::ControllerHat, backend_event::ControllerCaptureMappingStatus, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity, backend_event::GroundElevation, backend_event::Traffic, backend_event::TrafficTarget>;
+                                  backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::ControllerButton, backend_event::ControllerHat, backend_event::ControllerCaptureMappingStatus, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity, backend_event::GroundElevation, backend_event::Traffic, backend_event::TrafficTarget, backend_event::AxisInput, backend_event::ControllerAxis>;
 
 enum class CameraFlag { Interaction, AboveGround };
 
@@ -128,6 +132,12 @@ public:
     // Temporary selected-controller discovery; -1 clears the group. Buttons 0..31 and POV 0.
     // Generation tags reject delayed events from a previous listening request.
     virtual bool captureControllerInputs(int deviceId, std::uint64_t generation = 0) { return deviceId < 0; }
+    // Gamepad sticks: replaces the mapped axis group (AxisInput.index refers to a position in `definitions`), left
+    // off until setAxesEnabled(true). `mask` keeps the mapped axes from the simulator (the aircraft) while enabled.
+    virtual bool mapAxes(const std::vector<std::string>& definitions, bool mask) { (void)mask; return definitions.empty(); }
+    virtual void setAxesEnabled(bool enabled) { (void)enabled; }
+    // Settings > Gamepad > Listen: every axis of one controller as ControllerAxis events; -1 clears the group.
+    virtual bool captureControllerAxes(int deviceId, std::uint64_t generation = 0) { (void)generation; return deviceId < 0; }
     // Native mouse registration is lazy: never subscribe during startup/flight loading.
     virtual void setNativeMouseEnabled(bool enabled) = 0;
     virtual bool enumerateControllers() = 0;

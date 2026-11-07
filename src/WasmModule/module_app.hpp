@@ -5,6 +5,7 @@
 
 #include "backend.hpp"
 #include "cinematic.hpp"
+#include "gamepad.hpp"
 #include "coordinator.hpp"
 #include "input_router.hpp"
 #include "fscs/profiles/airport.hpp"
@@ -236,6 +237,21 @@ private:
     void stopControllerCapture(const std::string& state);
     void completeControllerCapture(const std::string& suffix, const std::string& label, const std::string& pov = {});
     std::vector<std::pair<int, std::string>> controllers_;
+    // Gamepad sticks for drones (gamepad.hpp): mapped when the settings change, enabled only while a drone is shown.
+    GamepadSticks gamepad_;
+    std::string gamepadMapping_;  // definitions + mask last mapped, so unrelated edits do not remap
+    bool gamepadSticksEnabled_ = true, gamepadOn_ = false;
+    int gamepadSamples_ = 0;      // diagnostics: the first samples after enabling
+    void configureGamepad(const profiles::HostSettings& settings);
+    void updateGamepad(core::ManualInput& manual);
+    // Settings > Gamepad > Listen (one axis for one drone motion).
+    AxisListener axisListener_;
+    int axisCaptureDevice_ = -1;
+    std::uint64_t axisCaptureGeneration_ = 0;
+    std::string axisCaptureRequester_, axisCaptureId_, axisCaptureFunction_;
+    double axisCaptureUntil_ = 0;
+    static constexpr double kAxisCaptureSeconds = 15;
+    void stopAxisCapture(const std::string& state);
     std::deque<std::string> diagnostics_;
     bool diagDirty_ = false, diagWriting_ = false;
     double lastDiagWrite_ = -10;

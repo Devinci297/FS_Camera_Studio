@@ -223,6 +223,18 @@ the kind's default; or `position`: with `latitude`, `longitude` and `altitudeMet
 dropped. Like `ui.miniPinned`, the list is a preference: an `UpdateDraft` that changes it saves it at once (only it,
 never the other unsaved edits) and it never marks the settings dirty. The panel shows saved spots on the Traffic page
 and watches from them with `SpotTarget.spot`.
+Gamepad sticks (drones): `host.gamepadSticksEnabled` (default true) lets assigned controller axes fly a free camera
+while it is shown, like the simulator's own drone camera; `host.gamepadBlocksAircraft` (default true) maps them masked
+(`SIMCONNECT_GROUP_PRIORITY_HIGHEST_MASKABLE`) so the aircraft does not see them meanwhile; `host.gamepadDeadzone`
+(default 0.15, clamped 0–0.5). `host.gamepadAxes` (default `[]`) holds at most one entry per motion of {`function`
+(`forward`, `right`, `climb`, `descend`, `yaw`, `pitch`), `definition` (`joystick:<device>:<XAxis|YAxis|ZAxis|RxAxis|RyAxis|RzAxis|Slider>`),
+`label`, `rest` and `full` (raw SimConnect axis values, clamped ±32768, at least 4096 apart)}; the motion's value is
+`(raw − rest) / (full − rest)` clamped to ±1, so a centred stick is bipolar and a trigger resting at one end gives
+0..1; climb less descend is the vertical rate (one combined trigger axis may serve both). After the dead zone the
+response is mostly cubic and full deflection equals the held movement and look keys. The axes are mapped once per
+change and turned on only while a free camera is on screen, not spotting or glancing, and nothing is listening for
+inputs; turning them off forgets the samples. Invalid entries, a second entry for a motion and spans under 4096 are
+dropped. Missing in older files = defaults.
 Spotting needs no camera profile: chase, fly-by, Next target, auto-spot and the computed runway and tower views work
 with no profile, one for another aircraft or a read-only one (`CapabilitiesChanged.spottingAvailable`). Without a
 usable profile Camera Studio takes control with no view underneath (`ActiveCameraChanged.cameraId` null) and
@@ -331,6 +343,7 @@ Rules:
 | `BakeTemporaryLook` | — | Composes look into the active camera's draft (`DraftChanged`) and clears the look |
 | `ListControllers` | — | `ControllersListed` |
 | `StartControllerCapture` / `StopControllerCapture` | `deviceId`, `captureId` / — | Selected controller buttons 1–32 and first POV; capture completes on release/center, times out after 20 s; ordinary actions suppressed while listening |
+| `StartAxisCapture` / `StopAxisCapture` | `deviceId`, `function` (a `host.gamepadAxes` motion), `captureId` / — | Settings > Gamepad: listens to every axis of the selected controller; each axis's first sample is its rest, and the first axis moved at least 16384 from it completes with `full` at the end of travel in that direction (the far end for a trigger resting near one end). Times out after 15 s; the gamepad sticks are off meanwhile |
 | `ListImportFiles` / `ImportProfileFile` | — / `filename` | Enumerates the module imports folder / imports a selected file as a copy |
 | `TestInput` | `input` | Temporarily maps the input; reports `InputTest` down/up events for 15 s |
 | `TestBinding` | `binding` | Dispatches the action once; reply distinguishes dispatch from visible recall |
@@ -386,6 +399,8 @@ being edited.
 | `ControllersListed` | `controllers` [{`deviceId`,`name`}] |
 | `ControllerCaptureStatus` | `state` (`listening`, `stopped`, `timeout`, `disconnected`, `error`), `deviceId`, `captureId`; directed to requester |
 | `ControllerInputCaptured` | `input`, `captureId`; directed to requester, followed by stopped status |
+| `AxisCaptureStatus` | `state` (`listening`, `stopped`, `timeout`, `disconnected`), `deviceId`, `captureId`; directed to requester |
+| `ControllerAxisCaptured` | `axis` {`function`, `definition`, `label`, `rest`, `full`, `deviceId`, `deviceName`}, `captureId`; directed to requester, followed by stopped status. The panel stores it in `host.gamepadAxes` (replacing that motion) |
 | `InputTest` | `definition`, `phase` (`down`\|`up`) |
 | `BindingTriggered` | `action`, `viewId`, `result` |
 | `BinocularsChanged` | `active` (a Binoculars hold is down on an active camera), `fovDeg` (the setting). Sent on press, release and cancellation; display only |
