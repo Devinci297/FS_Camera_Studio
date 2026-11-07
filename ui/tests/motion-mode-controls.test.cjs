@@ -6,7 +6,9 @@ const assert=require('node:assert/strict'),path=require('node:path');
   const page=await browser.newPage({viewport:{width:1400,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   const url='file:///'+path.resolve(process.argv[2]||'ui/index.html').replaceAll('\\','/');
   await page.goto(url+'?surface=main');await page.waitForFunction(()=>window.FSCApp&&FSCApp.state.snapshot);
+  await require('./fixtures/inspection.cjs')(page);
   await page.locator('#mc-add').click();await page.getByRole('button',{name:'External motion views',exact:true}).click();await page.waitForTimeout(600);
+  await page.getByRole('button',{name:'Add inspection views',exact:true}).click();
   await page.locator('#mc-tab-motion').click();
   assert.equal(await page.getByRole('spinbutton',{name:'Seconds per orbit',exact:true}).count(),1);
   assert.equal(await page.locator('#mc-editor-mouse-look-walkaround').isHidden(),true);assert.equal(await page.getByRole('button',{name:'Walkaround settings',exact:true}).count(),0);
@@ -19,7 +21,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   const motion=await page.evaluate(()=>FSCApp.state.working.profile.cameras.find(c=>c.id===flybyId).motion);assert.equal(motion.radiusMeters,200);assert.equal(motion.durationSeconds,20);assert.equal(motion.heightMeters,25);assert.equal(motion.sideMeters,-40);assert.equal(motion.repeat,true);
   const persisted=await page.evaluate(async()=>{await FSCApp.bridge.request('CommitChanges',{});await new Promise(r=>setTimeout(r,500));await FSCApp.bridge.request('RevertChanges',{});return FSCApp.state.working.profile.cameras.find(c=>c.id===flybyId).motion;});assert.deepEqual(persisted,motion);
   await page.evaluate(()=>{const s=FSCApp.state,c=s.working.profile.cameras.find(c=>c.name==='Walkaround - Nose');s.selection.cameraId=c.id;FSCDemo.setOwnership('Observing');});
-  await page.locator('#mc-tab-motion').click();await page.getByRole('button',{name:'Walkaround settings',exact:true}).click();const groups=await page.locator('[aria-label="Walkaround category"] button').allTextContents();assert.ok(groups.includes('Walkaround'));assert.ok(!groups.includes('External motion'));await page.locator('#mc-dialog-close').click();
+  await page.locator('#mc-tab-motion').click();await page.getByRole('button',{name:'Walkaround settings',exact:true}).click();const groups=await page.locator('[aria-label="Walkaround category"] button').allTextContents();assert.ok(groups.includes('Walkaround inspection'));assert.ok(!groups.includes('External motion'));await page.locator('#mc-dialog-close').click();
   await page.goto(url.replace(/main\.html$/,'mini.html')+'?surface=mini');await page.waitForFunction(()=>window.FSCApp&&FSCApp.state.snapshot);
   for(const mode of ['orbit','flyby']){await page.evaluate(mode=>{const s=FSCApp.state,c=s.working.profile.cameras.find(c=>c.mode===mode);s.selection.cameraId=c.id;s.miniCategory=c.categoryId;s.working.settings.ui.miniHover=false;FSCDemo.setOwnership('Observing');},mode);assert.equal(await page.locator('#mc-mouse-look-walkaround').isHidden(),true);}
   assert.deepEqual(errors,[]);console.log('Orbit/flyby mode controls, animated flyby settings persistence, and standalone Walkaround eligibility passed.');

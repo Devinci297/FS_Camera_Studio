@@ -6,6 +6,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   const page=await browser.newPage({viewport:{width:1400,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   const url='file:///'+path.resolve(process.argv[2]||'ui/index.html').replaceAll('\\','/');
   await page.goto(url+'?surface=main');await page.waitForFunction(()=>window.FSCApp&&FSCApp.state.snapshot);
+  await require('./fixtures/inspection.cjs')(page);
   const cockpit=await page.evaluate(()=>{const s=FSCApp.state,c=s.working.profile.cameras.find(c=>c.mode==='aircraftCockpit');s.selection.cameraId=c.id;FSCDemo.setOwnership('Observing');return c.id;});
   await page.locator('#mc-tab-behavior').click();
   assert.equal(await page.locator('#mc-level').count(),0,'the disabled checkbox is gone');
@@ -34,6 +35,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   assert.equal(await page.evaluate(id=>'levelHorizon' in FSCApp.state.working.profile.cameras.find(c=>c.id===id),cockpit),false);
   // World-fixed views keep a level horizon and cannot change it.
   await page.locator('#mc-add').click();await page.getByRole('button',{name:'External motion views',exact:true}).click();await page.waitForTimeout(600);
+  await page.getByRole('button',{name:'Add inspection views',exact:true}).click();
   await page.evaluate(()=>{const s=FSCApp.state,c=s.working.profile.cameras.find(c=>c.mode==='flyby');s.selection.cameraId=c.id;FSCDemo.setOwnership('Observing');});
   await page.locator('#mc-tab-behavior').click();
   assert.equal(await slider.isDisabled(),true);assert.equal(await number.isDisabled(),true);

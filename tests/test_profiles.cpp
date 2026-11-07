@@ -13,6 +13,34 @@
 using namespace fscs::profiles;
 using fscs::host::FakeStorage;
 
+TEST_CASE("profiles: aircraft inspection replaces only the legacy Walkaround category") {
+    auto doc=makeStarterProfile("Test","test","Test");
+    const auto original=doc;
+    const auto legacyGroup=newUuid(),legacyCamera=newUuid(),inspectionGroup=newUuid(),inspectionCamera=newUuid();
+    auto old=doc["cameras"][0];old["id"]=legacyCamera;old["categoryId"]=legacyGroup;old["viewId"]=0;old["mode"]="aircraftExterior";
+    doc["cameras"].push_back(old);
+    doc["categories"].push_back({{"id",legacyGroup},{"name","Walkaround"},{"cameraIds",{legacyCamera}}});
+    auto withoutInspection=doc;
+    CHECK(validateProfile(withoutInspection).ok());
+    CHECK_EQ(withoutInspection["cameras"].size(),std::size_t(2)); // do not delete the only saved route
+    auto inspection=old;inspection["id"]=inspectionCamera;inspection["categoryId"]=inspectionGroup;
+    inspection["walkaroundPerimeter"]={{10,-5,1},{10,5,1},{-10,5,1},{-10,-5,1}};
+    inspection["walkaroundModelKey"]="test";inspection["walkaroundVariantKey"]="";
+    doc["cameras"].push_back(inspection);
+    doc["categories"].push_back({{"id",inspectionGroup},{"name","Walkaround inspection"},{"cameraIds",{inspectionCamera}}});
+    doc["defaultCameraId"]=legacyCamera;
+    const auto validation=validateProfile(doc);CHECK(validation.ok());CHECK(validation.migrated);
+    CHECK_EQ(doc["cameras"].size(),std::size_t(2));CHECK_EQ(doc["categories"].size(),std::size_t(2));
+    CHECK_EQ(doc["defaultCameraId"],json(inspectionCamera));
+    CHECK_EQ(doc["cameras"][0]["positionMetersFRD"],original["cameras"][0]["positionMetersFRD"]);
+    const auto once=doc;CHECK(validateProfile(doc).ok());CHECK_EQ(doc,once);
+    // A studied route may itself be named Walkaround; keep it and unrelated views.
+    doc["categories"][1]["name"]="Walkaround";
+    auto custom=old;custom["categoryId"]=legacyGroup;doc["cameras"].push_back(custom);
+    doc["categories"].push_back({{"id",legacyGroup},{"name","My exterior views"},{"cameraIds",{legacyCamera}}});
+    CHECK(validateProfile(doc).ok());CHECK_EQ(doc["cameras"].size(),std::size_t(3));
+}
+
 TEST_CASE("profiles: legacy mini favorites initialize once across aircraft and airport libraries") {
     StoreState old; old.txn = 1;
     std::vector<std::string> notes;

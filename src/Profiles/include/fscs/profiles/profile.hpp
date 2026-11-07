@@ -64,6 +64,9 @@ struct CameraEntry {
     core::CameraPose pose;
     double originLat=0, originLon=0, originAltitude=0;
     core::TransitionSpec transition;
+    std::vector<core::Vec3> walkaroundPerimeter;
+    std::optional<core::Vec3> walkaroundEntry;
+    std::string walkaroundModelKey, walkaroundVariantKey;
     double motionRadiusMeters = 35, motionHeightMeters = 8, motionDurationSeconds = 30, motionSideMeters = 35;
     bool motionClockwise = true, motionRepeat = false;
     bool interaction = true;

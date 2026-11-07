@@ -1,4 +1,4 @@
-FS CAMERA STUDIO - VERSION 0.5.2
+FS CAMERA STUDIO - VERSION 0.6.0
 Microsoft Flight Simulator 2024 and X-Plane 12 | Windows 11 x64
 
 INSTALL
@@ -148,6 +148,19 @@ INCLUDED FEATURES
   then Refresh, select a file and Import. Pasting profile code is also supported.
 - Successful saves request a native confirmation chime. Settings > Test sound
   checks the simulator UI sound route; spoken WAV is browser-only.
+
+NEW IN VERSION 0.6.0
+- Aircraft-aware inspection walkarounds replace the old fixed-view tour.
+- X-Plane reads the loaded ACF automatically. MSFS supports imported readable
+  aircraft configuration; the public setup includes no local aircraft catalog.
+- Preview the footprint and stops, set clearance/eye height, then add and save.
+- Park on the ground with the parking brake set. Walking follows rounded paths,
+  looks into turns and scans at stops. Manual control stops the inspection.
+- Walking effects: 0 disables motion; 0.1 is light. Speed, dwell and scan are adjustable.
+- A profile with inspection views automatically retires its old Walkaround category.
+- Inspection/import panels no longer darken a large rectangle behind the card.
+- Traffic Auto nearest and six external viewpoints; improved native X-Plane
+  Primary/Secondary camera-key assignment and controls-profile detection.
 
 NEW IN VERSION 0.5.3
 - Update now downloads, verifies and installs the update silently, retaining

@@ -6,18 +6,19 @@ toolbar or menu, with a mini control panel at the bottom of the screen. The X-Pl
 **XP Camera Studio**; it runs the same module logic and the same editor and mini panel (see
 [X-Plane 12](#x-plane-12-xp-camera-studio)).
 
-**Version 0.5.3:** one Windows installer for Microsoft Flight Simulator 2024, X-Plane 12, or both.
-Update now downloads and installs updates silently for both simulators, with a restart choice when needed.
-Install this setup once to enable the complete workflow; future updates are offered in the editor and mini panel.
-Automated validation is recorded below; live acceptance of these patch changes is pending.
+**Version 0.6.0:** aircraft-aware inspection walkarounds with rounded paths, natural head turns,
+configurable walking effects and automatic X-Plane ACF analysis. Also includes improved traffic viewpoints
+and restored X-Plane keyboard assignment controls. One Windows installer supports either simulator or both.
+Updates are offered in the editor and mini panel. Automated validation is recorded below;
+live visual acceptance across supported aircraft remains pending.
 The MSFS build uses SDK 1.8.1; XP Camera Studio requires X-Plane 12.4.4 or newer on Windows x64.
 Both simulators share one version number and one update check.
 
-[Download 0.5.3](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.5.3)
+[Download 0.6.0](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.6.0)
 for the Windows installer, illustrated manual, example profile and checksums.
 
-See the [release notes](doc/releases/0.5.3.md) and
-[validation record](doc/test-evidence/2026-11-07-v0.5.3.md) for automated checks, live acceptance and known limits.
+See the [release notes](doc/releases/0.6.0.md) and
+[validation record](doc/test-evidence/2026-11-07-v0.6.0.md) for automated checks, live acceptance and known limits.
 Aircraft-specific camera poses and controller setups can still need adjustment; see
 [`doc/qualification.md`](doc/qualification.md).
 
@@ -80,6 +81,11 @@ XPCameraStudio.xpl — X-Plane plugin, run from a flight loop
   chase, fly-by and track views of any aircraft, **Ctrl + Alt + T / Y** for the next / previous aircraft, **Ctrl + Alt
   + O** to return and **Ctrl + Alt + J** for auto-spot, which follows landings and departures at the airport. See
   [Spotting](doc/dual-bindings.md#spotting).
+  **Auto nearest** follows the selected traffic from the closest nearby airport camera or saved spotting location,
+  switching as the aircraft moves and falling back to Chase when none is nearby. **External** offers Front, Rear,
+  Left side, Right side, Overhead and Orbit in both the full editor and mini toolbar. Movement, mouse look and zoom
+  remain available; Recenter restores tracking after manual adjustments.
+
 * **Library layout:** category headers contain indented, single-line camera rows, with inline shortcuts and a
   distinct active-view indicator. The main editor shows every camera with its icon and name; the wide bottom mini
   panel shows starred cameras. Its Icons/Labels/Both preference applies only to categories.
@@ -143,7 +149,7 @@ See [updates](doc/automatic-updates.md).
 Close MSFS before installing an update. Saved airport cameras load automatically within the configured radius
 (25 NM by default); other airports get a temporary set until you save it. Auto switch is a separate viewpoint control.
 
-### Reproduce version 0.5.3
+### Reproduce version 0.6.0
 
 The reviewed simulator host is frozen in `package/validated-host`, with hashes in
 `package/validated-host.json`. It is refreshed from the compiled package of the release commit, the same
@@ -151,24 +157,25 @@ The reviewed simulator host is frozen in `package/validated-host`, with hashes i
 plugin is built at the same version and goes into the same setup.
 
 ```powershell
-python tools/diagnostics/stage-v0.5.3.py --freeze
+python tools/diagnostics/stage-v0.6.0.py --freeze
 cmake --preset tests; cmake --build --preset tests; ctest --preset tests
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.5.3
-tools\package.ps1 -Compile -Wasm build/wasm/release-0.5.3/FSCameraStudio.wasm -OutputDirectory build/release-0.5.3-compile
-python tools/diagnostics/stage-v0.5.3.py --host build/release-0.5.3-compile/Packages/fs-camera-studio
-python tools/diagnostics/stage-v0.5.3.py
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.6.0
+tools\package.ps1 -Compile -SkipAircraftStudy -Wasm build/wasm/release-0.6.0/FSCameraStudio.wasm -OutputDirectory build/release-0.6.0-compile
+python tools/diagnostics/stage-v0.6.0.py --host build/release-0.6.0-compile/Packages/fs-camera-studio
+python tools/diagnostics/stage-v0.6.0.py
 cmake -S . -B build-xp -G "Visual Studio 17 2022" -A x64 -DFSCS_BUILD_XPLANE=ON
 cmake --build build-xp --config Release --target xpcs_plugin
 node tools/capture-manual.cjs
+node tools/capture-walkaround.cjs
 python tools/build-manual.py
-python tools/build-installer.py --version 0.5.3 --package build/release/0.5.3/fs-camera-studio --receipt build/release/0.5.3/staged.json --xplane build-xp/XPCameraStudio
-python tools/build-installer.py --test-harness --version 0.5.3 --package build/release/0.5.3/fs-camera-studio --receipt build/release/0.5.3/staged.json --xplane build-xp/XPCameraStudio
+python tools/build-installer.py --version 0.6.0 --package build/release/0.6.0/fs-camera-studio --receipt build/release/0.6.0/staged.json --xplane build-xp/XPCameraStudio
+python tools/build-installer.py --test-harness --version 0.6.0 --package build/release/0.6.0/fs-camera-studio --receipt build/release/0.6.0/staged.json --xplane build-xp/XPCameraStudio
 tools\test-updater.ps1 -LiveDownload
-python tools/test-installer.py --test-harness --version 0.5.3
+python tools/test-installer.py --test-harness --version 0.6.0
 ```
 
-See [release notes](doc/releases/0.5.3.md), [A320 starter guidance](doc/A320-starter-profile.md)
-and the bundled illustrated manual. [0.5.3 release evidence and live checks](doc/test-evidence/2026-11-07-v0.5.3.md)
+See [release notes](doc/releases/0.6.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
+and the bundled illustrated manual. [0.6.0 release evidence and live checks](doc/test-evidence/2026-11-07-v0.6.0.md)
 separate automated verification from simulator acceptance. Earlier tester recipes remain available in their Git tags.
 
 Install ReportLab for manual generation and obtain Inno Setup with `tools/get-installer-compiler.ps1`.

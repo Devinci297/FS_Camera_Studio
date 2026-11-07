@@ -464,14 +464,40 @@ const char* toString(SpotView v) {
         case SpotView::Flyby: return "flyby";
         case SpotView::Track: return "track";
         case SpotView::Spot: return "spot";
+        case SpotView::Nearest: return "nearest";
+        case SpotView::Front: return "front";
+        case SpotView::Rear: return "rear";
+        case SpotView::Left: return "left";
+        case SpotView::Right: return "right";
+        case SpotView::Overhead: return "overhead";
+        case SpotView::Orbit: return "orbit";
     }
     return "chase";
 }
 
 std::optional<SpotView> parseSpotView(const std::string& s) {
-    for (auto v : {SpotView::Tower, SpotView::Runway, SpotView::Chase, SpotView::Flyby, SpotView::Track, SpotView::Spot})
+    for (auto v : {SpotView::Tower, SpotView::Runway, SpotView::Chase, SpotView::Flyby, SpotView::Track, SpotView::Spot, SpotView::Nearest, SpotView::Front, SpotView::Rear, SpotView::Left, SpotView::Right, SpotView::Overhead, SpotView::Orbit})
         if (s == toString(v)) return v;
     return std::nullopt;
+}
+
+bool externalSpotView(SpotView view) {
+    return view==SpotView::Chase || view==SpotView::Front || view==SpotView::Rear || view==SpotView::Left ||
+        view==SpotView::Right || view==SpotView::Overhead || view==SpotView::Orbit;
+}
+core::Vec3 externalOffset(const Pose& target, SpotView view, double orbitDegrees) {
+    if(view==SpotView::Chase)return chaseOffset(target);
+    const double heading=target.headingDeg*core::kDegToRad;
+    const core::Vec3 forward{std::cos(heading),std::sin(heading),0},right{-std::sin(heading),std::cos(heading),0};
+    switch(view) {
+        case SpotView::Front:return forward*80+core::Vec3{0,0,-8};
+        case SpotView::Rear:return forward*(-80)+core::Vec3{0,0,-8};
+        case SpotView::Left:return right*(-65)+core::Vec3{0,0,-12};
+        case SpotView::Right:return right*65+core::Vec3{0,0,-12};
+        case SpotView::Overhead:return forward*(-5)+core::Vec3{0,0,-90};
+        case SpotView::Orbit:{const double angle=orbitDegrees*core::kDegToRad;return forward*(-90*std::cos(angle))+right*(90*std::sin(angle))+core::Vec3{0,0,-25};}
+        default:return chaseOffset(target);
+    }
 }
 
 std::optional<core::Pbh> aim(const Geo& from, const Geo& to) {

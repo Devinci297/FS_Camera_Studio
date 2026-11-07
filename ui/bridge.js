@@ -442,7 +442,6 @@
     ] },
     cabin: { name: 'Cabin', cameras: [['Front cabin', 0, { x: 0, y: 0.3, z: 1.4, yaw: 180 }]] },
     gear: { name: 'Landing gear', cameras: [['Nose gear', 0, { x: 1, y: -1, z: -2, yaw: -90 }, { type: 'external' }]] },
-    walk: { name: 'Walkaround', cameras: [['Walkaround start', 0, {}, { type: 'free' }], ['Walkaround end', 0, { x: 5, y: 1, z: 4 }, { type: 'free' }]] },
     orbit: { name: 'Orbit', cameras: [['Orbit start', 0, { x: 0, y: 4, z: 12 }, { type: 'orbit' }]] },
     flyby: { name: 'Fly-by', cameras: [['Fly-by start', 0, { x: 15, y: 4, z: -15, yaw: -45 }, { type: 'flyby' }]] },
   };
@@ -614,7 +613,7 @@
   }
   function createDemoModule(sendFrame) {
     const g = SEED_GROUPS;
-    const mine = makeProfile({ name: 'My cameras', defaultName: 'Pilot view', aircraftMatch: { strategy: 'aircraftPath', modelKey: C172.modelKey, variantKey: null, displayName: C172.title, confirmed: false }, categories: [g.cockpit, g.external, g.cabin, g.gear, g.walk, g.orbit, g.flyby] });
+    const mine = makeProfile({ name: 'My cameras', defaultName: 'Pilot view', aircraftMatch: { strategy: 'aircraftPath', modelKey: C172.modelKey, variantKey: null, displayName: C172.title, confirmed: false }, categories: [g.cockpit, g.external, g.cabin, g.gear, g.orbit, g.flyby] });
     const cinematic = makeProfile({ name: 'Cinematic collection', defaultName: 'Tail', aircraftMatch: { strategy: 'userConfirmedModelVariant', modelKey: C172.modelKey, variantKey: null, displayName: C172.title, confirmed: true }, categories: [g.external, g.orbit, g.flyby] });
     const airport = makeProfile({ name: 'Airport starter', defaultName: 'Tower', aircraftMatch: { strategy: 'none', modelKey: null, variantKey: null, displayName: 'Airport cameras', confirmed: false }, categories: [{ name: 'Airport', cameras: [
       ['Tower', 1, { x: 50, y: 25, z: 70 }, { type: 'airport', favorite: true }],
@@ -942,7 +941,7 @@
       m.traffic = { aircraft: list, at };
       return clone(m.traffic);
     }
-    const SPOT_VIEWS = ['tower', 'runway', 'chase', 'flyby', 'track', 'spot'];
+    const SPOT_VIEWS = ['tower','runway','chase','flyby','track','spot','nearest','front','rear','left','right','overhead','orbit'];
     const AUTO_STATUSES = ['arriving', 'landing', 'takeoff', 'departing'];
     const AUTO_VIEWS = { arriving: 'runway', landing: 'runway', takeoff: 'runway', taxi: 'tower', departing: 'chase' };
     const NO_VIEW_DATA = { tower: 'No tower position is known for an airport near this aircraft yet.', runway: 'No runway data is known for an airport near this aircraft yet.' };
@@ -1006,7 +1005,7 @@
       return out;
     }
     const spottingState = () => ({ targetId: m.spot.targetId, view: m.spot.view, autoSpot: m.spot.autoSpot, state: m.spot.state, targetLabel: m.spot.targetLabel || '', reason: m.spot.reason || null,
-      views: { tower: airportLoaded(), runway: airportLoaded() }, runways: airportLoaded() ? clone(DEMO_RUNWAYS) : [], spot: m.spot.spot ? clone(m.spot.spot) : null });
+      cameraName: m.spot.cameraName || '', views: { tower: airportLoaded(), runway: airportLoaded() }, runways: airportLoaded() ? clone(DEMO_RUNWAYS) : [], spot: m.spot.spot ? clone(m.spot.spot) : null });
     const spotEnv = () => ({ uiInstanceId: 'module', requestId: 'spotting-' + (++m.seq) });
     function spotAirportCamera(view, target) {
       if (!airportLoaded()) return null;
@@ -1018,9 +1017,31 @@
       runway.sort((a, b) => Math.hypot(a.positionMetersFRD[0] - north, a.positionMetersFRD[1] - east) - Math.hypot(b.positionMetersFRD[0] - north, b.positionMetersFRD[1] - east));
       return runway[0] || null;
     }
+    // Demo counterpart of the native selector: all nearby places compete, with the same dwell/margin.
+    function nearestSpot(target, hold) {
+      const list=[],o=DEMO_AIRCRAFT_ORIGIN,perLon=111320*Math.cos(o.lat*Math.PI/180);
+      const add=(key,name,place)=>{
+        const d=Math.hypot(metersBetween(place,target),place.altitudeMeters-target.altitudeFt*.3048);
+        if(d>=20&&d<=20000)list.push({key,name,place:Object.assign({},place,{name,kind:'position',pinned:false}),d});
+      };
+      const local=(north,east,height)=>({latitude:o.lat+(FIELD.y+north)/111320,longitude:o.lon+east/perLon,altitudeMeters:FIELD.elevationFt*.3048+height});
+      if(airportLoaded()) {
+        demoAirport.profile.cameras.forEach(c=>{const p=c.positionMetersFRD;add('camera:'+c.id,c.name,local(p[0],p[1],-p[2]));});
+        add('runway:27','KDEM 27 fence',local(80,1150,3));
+      }
+      normalizeSpots(m.working.settings.host.spottingSpots).forEach(p=>{
+        if(p.kind==='position')add('saved:'+p.id,p.name,p);
+        else if(airportLoaded()&&p.icao==='KDEM'){
+          const sign=p.runwayEnd==='09'?-1:1;add('saved:'+p.id,p.name,local(sign*(p.sideMeters||80),sign*(1000+(p.behindMeters||150)),p.heightMeters||3));
+        }
+      });
+      list.sort((a,b)=>a.d-b.d||a.key.localeCompare(b.key));
+      const current=list.find(c=>c.key===m.spot.nearestKey),best=list[0];
+      return hold&&current&&best&&current.key!==best.key&&(trafficClock()-m.spot.cameraSince<6||best.d+Math.max(10,current.d*.15)>=current.d)?current:best;
+    }
     /** Validates a spotting request; returns { error } or what spotApply needs. */
     function spotCheck(objectId, view, pinned) {
-      if (SPOT_VIEWS.indexOf(view) < 0) return { error: 'Choose a tower, runway, chase, fly-by, track or spot view.' };
+      if (SPOT_VIEWS.indexOf(view) < 0) return { error: 'Choose a valid traffic viewpoint.' };
       const position = Boolean(pinned) && pinned.kind === 'position';
       if (view === 'spot' && !position) return { error: 'The spot view needs a position spot.' };
       if (pinned && position && view !== 'spot') return { error: 'A position spot can only be used with the spot view.' };
@@ -1037,6 +1058,10 @@
         if (parsed.error) return { error: parsed.error };
         return { target, camera: null, view, runway: parsed.spot };
       }
+      if (view === 'nearest') {
+        const chosen=nearestSpot(target,false);
+        return {target,camera:null,view,runway:chosen?chosen.place:null,cameraName:chosen?chosen.name:'Chase (no nearby camera)',nearestKey:chosen?chosen.key:''};
+      }
       if (view === 'tower' || view === 'runway') {
         // The loaded airport set's view when the profile is usable, else a computed view from scenery data.
         if (!airportLoaded()) return { error: NO_VIEW_DATA[view] };
@@ -1045,7 +1070,7 @@
       }
       if (view === 'track') {
         const shown = m.ownership.state === 'Active' && workingCamera(m.active.cameraId);
-        const overlay = m.spot.state !== 'off' && m.spot.view ? ['tower', 'runway', 'track', 'spot'].indexOf(m.spot.view) >= 0 : false;
+        const overlay = m.spot.state !== 'off' && m.spot.view ? Boolean(m.spot.view) : false;
         if (!caps.canActivate && !overlay) return { error: 'Track aims an airport or free camera from your camera profile. Without one, use Chase, Fly-by, Tower or Runway.' };
         const world = m.spot.state !== 'off' && m.spot.view ? overlay : Boolean(shown && (shown.mode === 'airport' || shown.mode === 'free'));
         if (!world) return { error: 'Track aims the current airport or free camera at the aircraft. Show one of those views first.' };
@@ -1057,7 +1082,7 @@
       const s = m.spot, target = check.target;
       stopCinematic('Spotting started.');
       if (s.state === 'off' || s.state === 'waiting') s.before = m.ownership.state === 'Active' || m.ownership.state === 'Acquiring' ? m.active.cameraId : null;
-      Object.assign(s, { state: 'tracking', targetId: target.objectId, view: check.view, targetLabel: spotLabel(target), reason: null, since: trafficClock(), autoSpot: Boolean(auto), spot: check.runway || null });
+      Object.assign(s, { state: 'tracking', targetId: target.objectId, view: check.view, targetLabel: spotLabel(target), reason: null, since: trafficClock(), autoSpot: Boolean(auto), spot: check.runway || null, cameraName:check.cameraName || '', nearestKey:check.nearestKey || '', cameraSince:trafficClock() });
       clearMotion();
       m.glance = null; m.peek = null;
       const cameraId = check.view === 'track' ? m.active.cameraId : check.camera ? check.camera.id : null;
@@ -1138,6 +1163,10 @@
         const host = m.working.settings.host;
         Object.assign(s, { state: 'lost', reason: 'It left the ' + (host.spottingRadiusNm == null ? 20 : host.spottingRadiusNm) + ' NM traffic radius.' }); changed = true;
       } else if (s.state === 'lost' && target) { Object.assign(s, { state: 'tracking', reason: null }); changed = true; }
+      if (s.state === 'tracking' && s.view === 'nearest' && target) {
+        const chosen=nearestSpot(target,true),key=chosen?chosen.key:'';
+        if(key!==s.nearestKey){s.nearestKey=key;s.cameraSince=trafficClock();s.cameraName=chosen?chosen.name:'Chase (no nearby camera)';s.spot=chosen?chosen.place:null;changed=true;}
+      }
       if (s.autoSpot) {
         const hold = m.working.settings.host.autoSpotHoldSeconds == null ? 30 : m.working.settings.host.autoSpotHoldSeconds;
         const good = Boolean(target) && AUTO_STATUSES.indexOf(target.status) >= 0;

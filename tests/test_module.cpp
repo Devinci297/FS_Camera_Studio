@@ -96,6 +96,30 @@ struct ModuleRig {
 
 }  // namespace
 
+TEST_CASE("module: inspection upgrade removes old walkaround from every panel draft") {
+    ModuleRig m;m.flight();m.panel("Hello",{{"surface","main"}});
+    m.panel("CreateProfile",{{"name","Inspection test"},{"forAircraft",true}});m.drain();
+    auto profile=m.app.workingProfile(),legacy=profile["cameras"][0];
+    const auto oldId=fscs::profiles::newUuid(),oldGroup=fscs::profiles::newUuid();
+    legacy["id"]=oldId;legacy["categoryId"]=oldGroup;legacy["mode"]="aircraftExterior";legacy["viewId"]=0;
+    profile["categories"].push_back({{"id",oldGroup},{"name","Walkaround"},{"cameraIds",{oldId}}});
+    m.panel("UpdateDraft",{{"ops",{{{"op","setCamera"},{"camera",legacy}},{{"op","setCategories"},{"categories",profile["categories"]}}}}},"main-1",m.app.draftRevision());m.drain();
+    auto inspection=legacy;const auto newId=fscs::profiles::newUuid(),newGroup=fscs::profiles::newUuid();
+    inspection["id"]=newId;inspection["categoryId"]=newGroup;
+    inspection["walkaroundPerimeter"]={{10,-5,1},{10,5,1},{-10,5,1},{-10,-5,1}};
+    inspection["walkaroundModelKey"]="asobo-c152";inspection["walkaroundVariantKey"]="";
+    profile["categories"].push_back({{"id",newGroup},{"name","Walkaround inspection"},{"cameraIds",{newId}}});
+    m.panel("UpdateDraft",{{"ops",{{{"op","setCamera"},{"camera",inspection}},{{"op","setCategories"},{"categories",profile["categories"]}}}}},"main-1",m.app.draftRevision());
+    const auto event=m.lastEvent("DraftChanged");CHECK(event.is_object());
+    bool removed=false,categories=false;
+    for(const auto& op:event["payload"]["ops"]){
+        if(js::str(op,"op")=="removeCamera"&&js::str(op,"cameraId")==oldId)removed=true;
+        if(js::str(op,"op")=="setCategories"){categories=true;for(const auto& g:op["categories"])if(js::str(g,"id")==oldGroup)categories=false;}
+    }
+    CHECK(removed);CHECK(categories);
+    for(const auto& c:m.app.workingProfile()["cameras"])CHECK(js::str(c,"id")!=oldId);
+}
+
 TEST_CASE("module: Hello returns an addressed snapshot; unknown boot ids are rejected") {
     ModuleRig m;
     m.drain();

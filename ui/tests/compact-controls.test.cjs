@@ -10,6 +10,7 @@ const assert=require('node:assert/strict'),path=require('node:path'),fs=require(
    await page.waitForFunction(()=>window.FSCApp&&FSCApp.state.snapshot);
    await page.evaluate(()=>{
     const s=FSCApp.state,p=s.working.profile,c=p.cameras.find(c=>c.mode==='aircraftExterior');s.selection.cameraId=c.id;s.miniCategory=c.categoryId;s.working.settings.ui.miniHover=false;
+    for(const v of p.cameras.filter(v=>v.categoryId===c.categoryId)){v.walkaroundPerimeter=[[10,-5,1],[10,5,1],[-10,5,1],[-10,-5,1]];v.walkaroundModelKey=s.aircraft.modelKey;v.walkaroundVariantKey=s.aircraft.variantKey||'';}
     window.calls=[];FSCApp.bridge.request=async(a,p)=>{calls.push({a,p});return {status:'Completed'};};FSCApp.bridge.send=()=>{};FSCDemo.setOwnership('Observing');document.getElementById('mc-mini-pin').click();
    });
    const opener=page.locator('#'+(surface==='mini'?'mc-mouse-look-':'mc-editor-mouse-look-')+'walkaround');
@@ -17,7 +18,7 @@ const assert=require('node:assert/strict'),path=require('node:path'),fs=require(
    const shade=page.locator('#mc-dialog-shade'),dialog=shade.locator('.mc-dialog');
    assert.match(await shade.getAttribute('class'),/mc-context-shade/);assert.match(await shade.getAttribute('class'),/mc-walkaround-shade/);
    assert.equal(await shade.evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');assert.equal(await shade.evaluate(e=>getComputedStyle(e).pointerEvents),'none');
-   const rect=await dialog.boundingBox();assert.ok(rect.width<=380&&rect.height<460,'Walkaround stays compact');assert.ok(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=1500&&rect.y+rect.height<=900);
+   const rect=await dialog.boundingBox();assert.ok(rect.width<=380&&rect.height<884,'Inspection controls fit the viewport');assert.ok(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=1500&&rect.y+rect.height<=900);
    if(surface==='mini'){await page.screenshot({path:'build/release/0.3.0/walkaround-geometry.png'});const dock=await page.locator('#mc-mini-panel').boundingBox();assert.ok(rect.y+rect.height<=dock.y,'Popover sits above dock '+JSON.stringify({rect,dock}));fs.mkdirSync('build/review',{recursive:true});await page.screenshot({path:'build/review/walkaround-compact-packaged.png'});}
    assert.equal(await page.locator('#mc-dialog-actions .mc-primary').innerText(),'Start walkaround');
    await page.getByRole('button',{name:'Repeat: On',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Repeat: Off',exact:true}).getAttribute('aria-pressed'),'false');

@@ -106,6 +106,7 @@ json ModuleApp::spottingState() const {
             {"targetLabel", on ? json(coord_.spotLabel()) : json(nullptr)},
             {"reason", spotReason_.empty() ? json(nullptr) : json(spotReason_)},
             {"views", coord_.spotViewsJson()},
+            {"cameraName", coord_.spotCameraName()},
             {"runways", runways},
             {"spot", spot}};
 }
@@ -372,7 +373,7 @@ bool ModuleApp::handleSpotting(const protocol::Command& c, double now) {
         std::optional<traffic::RunwaySpot> runway;
         std::optional<traffic::PositionSpot> place;
         if (id <= 0 || id > 0xffffffffLL) error = "Choose an aircraft from the traffic list.";
-        else if (!view) error = "Choose a spotting view: tower, runway, chase, flyby, track or spot.";
+        else if (!view) error = "Choose a valid traffic viewpoint.";
         else if (*view == SpotView::Spot && !position) error = "The spot view needs a position spot.";
         else if (!value.is_null() && position && *view != SpotView::Spot) error = "A position spot can only be used with the spot view.";
         else if (!value.is_null() && !position && *view != SpotView::Runway) error = "A runway spot can only be used with the runway view.";

@@ -14,6 +14,7 @@ struct EffectsSettings {
 struct FlightMotion {
     double onGround = 1, groundSpeed = 0, verticalSpeed = 0, gForce = 1;
     double forwardAcceleration = 0, lateralAcceleration = 0, engineRpm = 0;
+    double parkingBrake = NAN;
     bool finite() const {
         return std::isfinite(onGround) && std::isfinite(groundSpeed) && std::isfinite(verticalSpeed) &&
                std::isfinite(gForce) && std::isfinite(forwardAcceleration) &&

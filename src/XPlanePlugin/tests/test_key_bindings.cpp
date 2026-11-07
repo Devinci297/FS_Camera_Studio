@@ -105,3 +105,41 @@ TEST_CASE("xplane keys service rejects profile traversal and leaves preferences 
     }
     CHECK_EQ(read(f.path/"X-Plane Keys.prf"),fixture);
 }
+
+TEST_CASE("xplane key descriptions are valid and untouched lines survive edits byte for byte") {
+    const std::string text="I\r\n1005 Version\r\n1 <NONE> SRS/X-Camera/Select_View_ID_1 Select camera ID 1\r\n"
+        "2 <NONE> xpcs/view_1 XP Camera Studio: Select view 1\r\n"
+        "KEY2 <NONE> sim/operation/reload_aircraft_no_art\r\n"
+        "S CTRL SRS/X-Camera/Save_All_Cameras Saves all camera positions to X-Camera.csv in the aircraft folder\r\n";
+    CHECK_EQ(inspect(text,"xpcs/view_1")["bindings"].size(),1u);
+    const auto change=op(text,{"1","<NONE>"});const auto after=edit(text,change);
+    CHECK(after.find("SRS/X-Camera/Select_View_ID_1")==std::string::npos);
+    CHECK(after.find("2 <NONE> xpcs/view_1 XP Camera Studio: Select view 1\r\n")!=std::string::npos);
+    CHECK(after.find("KEY2 <NONE> sim/operation/reload_aircraft_no_art\r\n")!=std::string::npos);
+    CHECK(after.find("S CTRL SRS/X-Camera/Save_All_Cameras Saves all camera positions to X-Camera.csv in the aircraft folder\r\n")!=std::string::npos);
+}
+TEST_CASE("xplane controls profile detection uses exact saved aircraft mapping") {
+    Folder f;writeAtomic(f.path/"X-Plane Keys.prf",fixture);fs::create_directories(f.path/"control profiles");
+    writeAtomic(f.path/"control profiles/Devinci B2707 - Keys.prf",fixture);
+    writeAtomic(f.path/"Miscellaneous.prf","I\n1100 Version\nP acf_profile Boeing___2707-300 Devinci___B2707\n");
+    std::string aircraft="Boeing 2707-300";Service service(f.path,f.path/"missing.exe",[&]{return aircraft;});
+    auto result=json::parse(service.request(R"({"op":"profiles"})"));
+    CHECK_EQ(result["selectedProfile"].get<std::string>(),"control profiles/Devinci B2707 - Keys.prf");
+    aircraft="Other aircraft";result=json::parse(service.request(R"({"op":"profiles"})"));CHECK_EQ(result["selectedProfile"].get<std::string>(),"");
+    fs::remove(f.path/"control profiles/Devinci B2707 - Keys.prf");
+    result=json::parse(service.request(R"({"op":"profiles"})"));CHECK_EQ(result["selectedProfile"].get<std::string>(),"X-Plane Keys.prf");
+}
+TEST_CASE("xplane independent slot hints keep secondary identity with primary empty") {
+    Folder f;const std::string text="I\n1005 Version\n2 <NONE> xpcs/view_1 Description\n";writeAtomic(f.path/"X-Plane Keys.prf",text);
+    const auto queue=f.path/"XPCameraStudio/native-key-queue.json";
+    const json secondary={{"key","2"},{"modifiers","<NONE>"}};
+    writeAtomic(queue,json{{"version",1},{"revision","1"},{"operations",json::array()},
+        {"slots",{{"X-Plane Keys.prf",{{"xpcs/view_1",{{"primary",nullptr},{"secondary",secondary}}}}}}}}.dump());
+    Service service(f.path,f.path/"missing.exe");
+    auto result=json::parse(service.request(R"({"op":"inspect","profile":"X-Plane Keys.prf","command":"xpcs/view_1"})"));
+    CHECK(result["slots"]["primary"].is_null());CHECK(result["slots"]["secondary"]==secondary);
+    // A removed native binding must never appear assigned because a hint remains.
+    writeAtomic(f.path/"X-Plane Keys.prf","I\n1005 Version\n");
+    result=json::parse(service.request(R"({"op":"inspect","profile":"X-Plane Keys.prf","command":"xpcs/view_1"})"));
+    CHECK(result["slots"]["secondary"].is_null());
+}

@@ -9,6 +9,8 @@ const assert=require('node:assert/strict'),path=require('node:path');
   const page=await browser.newPage({viewport:{width:1600,height:900}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url);await page.waitForFunction(()=>window.FSCApp&&FSCApp.state.snapshot);
+  // Icon compatibility fixture; the retired walkaround is no longer seeded.
+  await page.evaluate(()=>{const p=FSCApp.state.working.profile,g=structuredClone(p.categories.find(g=>g.name==='External'));g.id=crypto.randomUUID();g.name='Walkaround';g.cameraIds=g.cameraIds.map(id=>{const c=structuredClone(p.cameras.find(c=>c.id===id));c.id=crypto.randomUUID();c.categoryId=g.id;p.cameras.push(c);return c.id;});delete g.defaultCameraId;p.categories.push(g);FSCDemo.setOwnership('Observing');});
   await page.evaluate(()=>document.getElementById('mc-mini-pin').click());
   const iconOf=name=>page.locator('#mc-dock-categories button[aria-label="'+name+'"] svg').first().getAttribute('data-icon');
   const shown=async()=>({walk:await iconOf('Walkaround'),orbit:await iconOf('Orbit'),flyby:await iconOf('Fly-by')});

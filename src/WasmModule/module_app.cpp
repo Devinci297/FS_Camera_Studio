@@ -336,6 +336,14 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
         stopAutoSpot("A new flight was loaded.");
         for (const auto& a : router_.releaseAll()) coord_.onAction(a, now);
     }
+    if (const auto* loaded=std::get_if<backend_event::AircraftLoaded>(&ev); loaded && loaded->aircraftPath!=coord_.aircraft().aircraftPath) lastAircraft_.erase("geometry");
+    if(std::holds_alternative<backend_event::Disconnected>(ev))lastAircraft_.erase("geometry");
+    if (const auto* study=std::get_if<backend_event::AircraftGeometry>(&ev)) {
+        if(study->aircraftPath==coord_.aircraft().aircraftPath) {
+            lastAircraft_["geometry"]=study->geometry;
+            emitState("AircraftChanged",lastAircraft_);
+        }
+    }
     coord_.onBackendEvent(ev, now);
 }
 
@@ -1100,7 +1108,10 @@ void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
             aircraftModelKey_ = key;
             for (const auto& e : router_.releaseAll()) coord_.onAction(e, now_);
         }
-        lastAircraft_ = {{"title", js::get(payload, "title")}, {"modelKey", key.empty() ? json(nullptr) : json(key)}};
+        const auto geometry=js::get(lastAircraft_,"geometry");
+        lastAircraft_ = {{"title", js::get(payload, "title")}, {"modelKey", key.empty() ? json(nullptr) : json(key)},
+                         {"variantKey",coord_.aircraft().variantKey}};
+        if (!geometry.is_null()) lastAircraft_["geometry"]=geometry;
         resolveAircraft_ = true;  // handled in update(): never re-enter the coordinator from its own callback
         return;
     }
@@ -1240,6 +1251,7 @@ void ModuleApp::publishWorking(double now, bool bindingsChanged) {
     }
     const auto hostSettings = profiles::parseHostSettings(working_.settings);
     coord_.setSettings(hostSettings, now);
+    coord_.setSavedSpottingSpots(profiles::normalizeSpottingSpots(js::get(js::object(working_.settings, "host"), "spottingSpots")));
     configureGamepad(hostSettings);
     if (bindingsChanged) {
         for (const auto& e : router_.releaseAll()) coord_.onAction(e, now);
@@ -1342,7 +1354,21 @@ bool ModuleApp::applyOps(const json& ops, json& applied, std::string& error) {
         applied.push_back(op);
     }
     if (profile.is_object()) {
+        std::vector<std::string> beforeValidation;
+        for(const auto& camera:js::array(profile,"cameras"))beforeValidation.push_back(js::str(camera,"id"));
+        const auto categoriesBefore=js::array(profile,"categories").size();
         if(!validateCombined(profile,error))return false;
+        // Profile upgrades can retire legacy walkaround cameras. Mirror those
+        // removals to every panel, including the panel that generated the route.
+        if(beforeValidation.size()!=js::array(profile,"cameras").size()||categoriesBefore!=js::array(profile,"categories").size()){
+            for(const auto& id:beforeValidation){
+                const auto& retained=js::array(profile,"cameras");
+                if(std::none_of(retained.begin(),retained.end(),[&](const json& c){return js::str(c,"id")==id;}))
+                    applied.push_back({{"op","removeCamera"},{"cameraId",id}});
+            }
+            applied.push_back({{"op","setCategories"},{"categories",profile["categories"]}});
+            applied.push_back({{"op","setProfileFields"},{"defaultCameraId",profile["defaultCameraId"]}});
+        }
         // Echo normalised camera objects (defaults filled) so every mirror converges on the same draft.
         for (auto& op : applied)
             if (js::str(op, "op") == "setCamera")

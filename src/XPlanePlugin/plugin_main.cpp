@@ -7,6 +7,9 @@
 #include "xp_backends.hpp"
 #include "xp_camera.hpp"
 #include "xp_geometry.hpp"
+#include "xp_aircraft_study.hpp"
+#include <future>
+#include <chrono>
 #include "xp_mouse.hpp"
 #include "xp_key_bindings.hpp"
 #include "xp_panels.hpp"
@@ -94,6 +97,10 @@ struct Host {
     double nextAircraftCheck = 0;
     bool aircraftDirty = true;
     std::string aircraftPath, aircraftTitle;
+    std::future<nlohmann::json> aircraftStudy;
+    std::string studyPath;
+    fs::path pendingStudyFile;
+    std::string pendingStudyPath;
     int paused = -1;
     XPLMDataRef pausedRef = nullptr, uiNameRef = nullptr;
     double nextGroundCheck = 0;
@@ -101,6 +108,7 @@ struct Host {
     struct Telemetry {
         XPLMDataRef lat = nullptr, lon = nullptr, elevation = nullptr, truePsi = nullptr, theta = nullptr, phi = nullptr;
         XPLMDataRef onGround = nullptr, groundSpeed = nullptr, verticalSpeed = nullptr, agl = nullptr;
+        XPLMDataRef parkingBrake = nullptr;
         XPLMDataRef gNormal = nullptr, rpm = nullptr, psi = nullptr;
         XPLMDataRef accel[3] = {};  // local_ax/ay/az: the aircraft's acceleration in OpenGL axes, m/s^2
     } tel;
@@ -285,6 +293,8 @@ void checkAircraft() {
         g->aircraftPath = rel;
         g->camera.aircraftChanged();
         deliver(be::AircraftLoaded{rel});
+        g->pendingStudyFile=xplane::pathFromUtf8(path);
+        g->pendingStudyPath=rel;
     }
     std::string title;
     if (g->uiNameRef) {
@@ -311,6 +321,7 @@ void findTelemetry(Host::Telemetry& t) {
     t.theta = XPLMFindDataRef("sim/flightmodel/position/theta");
     t.phi = XPLMFindDataRef("sim/flightmodel/position/phi");
     t.onGround = XPLMFindDataRef("sim/flightmodel/failures/onground_any");
+    t.parkingBrake = XPLMFindDataRef("sim/cockpit2/controls/parking_brake_ratio");
     t.groundSpeed = XPLMFindDataRef("sim/flightmodel/position/groundspeed");
     t.verticalSpeed = XPLMFindDataRef("sim/flightmodel/position/vh_ind");
     t.agl = XPLMFindDataRef("sim/flightmodel/position/y_agl");
@@ -335,6 +346,7 @@ void publishTelemetry() {
     g->services.setPosition(lat, lon);
     host::backend_event::MotionTelemetry m;
     m.motion.onGround = t.onGround && XPLMGetDatai(t.onGround) != 0 ? 1 : 0;
+    m.motion.parkingBrake = f(t.parkingBrake, NAN);
     m.motion.groundSpeed = f(t.groundSpeed);
     m.motion.verticalSpeed = f(t.verticalSpeed);
     m.motion.gForce = f(t.gNormal, 1);
@@ -376,6 +388,14 @@ float flightLoop(float elapsedSinceLastCall, float, int, void*) {
             g->paused = p;
             deliver(be::Paused{p != 0});
         }
+    }
+    if(g->aircraftStudy.valid() && g->aircraftStudy.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
+        try { deliver(be::AircraftGeometry{g->studyPath,g->aircraftStudy.get()}); }
+        catch(const std::exception&) { deliver(be::AircraftGeometry{g->studyPath,{{"error","Aircraft geometry analysis failed."}}}); }
+    }
+    if(!g->aircraftStudy.valid()&&!g->pendingStudyPath.empty()) {
+        const auto file=g->pendingStudyFile;g->studyPath=std::move(g->pendingStudyPath);g->pendingStudyPath.clear();
+        g->aircraftStudy=std::async(std::launch::async,[file]{return xplane::readAircraftGeometry(file);});
     }
     publishTelemetry();
     if (!g->airportsLogged && g->airports.ready()) {
@@ -448,7 +468,8 @@ bool startHost() {
 
     const std::string index = toUtf8(xplane::pathFromUtf8(g_pluginFolder) / "ui" / "index.html");
     g->keys=std::make_unique<xplane::keys::Service>(folderOf(prefsPath),
-        xplane::pathFromUtf8(g_pluginFolder)/"win_x64"/"XPCSKeyHelper.exe");
+        xplane::pathFromUtf8(g_pluginFolder)/"win_x64"/"XPCSKeyHelper.exe",
+        [] { return g ? g->aircraftTitle : std::string(); });
     g->panels.nativeKeys=[](const std::string& request) { return g->keys->request(request); };
     // Resume any pending transaction from an earlier session; the helper still waits for this process to exit.
     const auto keyStatus=nlohmann::json::parse(g->keys->request("{\"op\":\"profiles\"}"),nullptr,false);

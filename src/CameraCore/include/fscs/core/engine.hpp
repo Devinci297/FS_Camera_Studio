@@ -6,8 +6,10 @@
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace fscs::core {
+std::vector<Vec3> roundRouteCorners(const std::vector<Vec3>& route);
 
 constexpr double kMaxPositionMeters = 10000.0;
 constexpr double kMinFovRad = 0.1;
@@ -31,10 +33,17 @@ enum class Easing { Cut, Smoothstep3, Smoothstep5 };
 
 double ease(Easing kind, double u);
 
+// Ordered simple perimeter, in FRD. Returns the shorter boundary route; no route
+// means an endpoint is off the perimeter and the caller must cut to the view.
+std::vector<Vec3> perimeterRoute(const Vec3& from, const Vec3& to, const std::vector<Vec3>& perimeter, bool roundCorners = true);
+bool validPerimeter(const std::vector<Vec3>& perimeter);
+
 struct TransitionSpec {
     Easing easing = Easing::Smoothstep3;
     double durationSeconds = kDefaultTransitionSeconds;
     double delaySeconds = 0.0;
+    std::vector<Vec3> route;
+    bool walking = false;
 };
 
 // A timed move between two poses, driven by an active-time clock that only advances while the camera may be
@@ -48,8 +57,12 @@ public:
     bool finished() const;
     const CameraPose& target() const { return to_; }
     double elapsed() const { return elapsed_; }
+    double progress() const { return spec_.durationSeconds>0 ? clamp((elapsed_-spec_.delaySeconds)/spec_.durationSeconds,0.,1.) : 1.; }
 
 private:
+    struct WalkingKey { double time; CameraPose pose; };
+    void prepareWalking();
+    std::vector<WalkingKey> walkingKeys_;
     CameraPose from_, to_;
     TransitionSpec spec_;
     double elapsed_ = 0.0;
@@ -124,6 +137,7 @@ public:
     EngineSample sample() const;
     bool hasPose() const { return base_.has_value(); }
     bool transitioning() const { return transition_.has_value(); }
+    double transitionProgress() const { return transition_ ? transition_->progress() : 1.; }
     const TemporaryLook& look() const { return look_; }
     std::optional<CameraPose> basePose() const;  // saved/transition pose without temporary look
     void reset();

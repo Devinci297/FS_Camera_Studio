@@ -13,6 +13,7 @@ param(
     [string] $Wasm,
     [string] $Version,
     [switch] $Compile,
+    [switch] $SkipAircraftStudy,
     [string] $ProjectDirectory = 'build/project',
     [string] $OutputDirectory = 'build/package',
     [string] $TempDirectory = 'build/package-temp'
@@ -46,10 +47,15 @@ $definition = Join-Path $project 'PackageDefinitions\fs-camera-studio.xml'
 # Web UI
 $panelDir = Join-Path $project 'PackageSources\html_ui\InGamePanels\FSCameraStudio'
 New-Item -ItemType Directory -Force $panelDir | Out-Null
-foreach ($f in 'app.css', 'app.js', 'bridge.js', 'icons.js', 'math.js', 'msfs-panel.js', 'version.js', 'updates.js', 'save-feedback.js') {
+foreach ($f in 'app.css', 'app.js', 'walkaround.js', 'aircraft-study.js', 'msfs-study.js', 'aircraft-footprints.js', 'bridge.js', 'icons.js', 'math.js', 'msfs-panel.js', 'version.js', 'updates.js', 'save-feedback.js') {
     Copy-Item (Join-Path $root "ui\$f") $panelDir
 }
 
+# Read installed aircraft configs into this local package only. Do not commit a machine catalog.
+if (-not $SkipAircraftStudy -and (Get-Command node -ErrorAction SilentlyContinue)) {
+    & node (Join-Path $root 'tools/study-aircraft.cjs') --output (Join-Path $panelDir 'aircraft-footprints.js') --report (Join-Path $root 'build/aircraft-study-report.json')
+    if ($LASTEXITCODE -ne 0) { throw 'Local aircraft study failed.' }
+}
 Copy-Item -Recurse (Join-Path $root "ui\audio") $panelDir
 Copy-Item -Recurse (Join-Path $root "ui\icons") $panelDir
 

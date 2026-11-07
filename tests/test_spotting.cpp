@@ -1409,7 +1409,7 @@ TEST_CASE("spotting coordinator: a parked target gives a perfectly still chase a
     r.send("ActivateCamera", {{"cameraId", r.pilot}});
     r.acquire();
     r.advance(.5);
-    for (const auto view : {tr::SpotView::Chase, tr::SpotView::Flyby}) {
+    for (const auto view : {tr::SpotView::Chase, tr::SpotView::Flyby, tr::SpotView::Front, tr::SpotView::Rear, tr::SpotView::Left, tr::SpotView::Right, tr::SpotView::Overhead, tr::SpotView::Nearest}) {
         CHECK_EQ(r.c.spotTarget(7, view, r.t), std::string());
         r.advance(8);  // settled
         const auto settled = r.shown();
@@ -2127,4 +2127,117 @@ TEST_CASE("spotting controls: adjusted chase follows a moving target and holds t
     r.t += .25; r.c.tick(r.t); r.c.setManualInput({}); r.advance(.1);
     const auto after = tr::aim(r.camera(), r.c.spotPose().position); CHECK(after.has_value());
     CHECK_NEAR(core::wrapDeg(r.looking().headingDeg - after->headingDeg), 20, .01);
+}
+
+
+TEST_CASE("traffic angles: heading-relative positions and protocol roundtrip") {
+    tr::Pose target; target.position = kAirport; target.headingDeg = 90;
+    const std::vector<std::pair<tr::SpotView, core::Vec3>> expected{
+        {tr::SpotView::Front,{0,80,-8}}, {tr::SpotView::Rear,{0,-80,-8}},
+        {tr::SpotView::Left,{65,0,-12}}, {tr::SpotView::Right,{-65,0,-12}},
+        {tr::SpotView::Overhead,{0,-5,-90}}, {tr::SpotView::Orbit,{0,-90,-25}}};
+    for (const auto& item : expected) {
+        CHECK_NEAR((tr::externalOffset(target,item.first)-item.second).length(),0,1e-6);
+        CHECK(tr::parseSpotView(tr::toString(item.first)) == item.first);
+        SpotRig r(false,false);
+        r.truth=[](double){return std::vector<be::TrafficAircraft>{plane(7,0,0,300,90,0)};};
+        r.advance(.1); CHECK(r.c.spotTarget(7,item.first,r.t).empty()); r.acquire(); r.advance(1);
+        r.checkAimed(); CHECK_EQ(r.c.spotTargetId(),7u);
+        const auto offset=ap::local(r.c.spotPose().position,r.camera());
+        CHECK(offset.length()>60); CHECK(offset.length()<100);
+        CHECK(r.camera().altitude>=r.c.spotPose().groundAltitude+2);
+        if(item.first!=tr::SpotView::Orbit) CHECK_NEAR((offset-item.second).length(),0,.1);
+    }
+    CHECK(tr::parseSpotView("nearest")==tr::SpotView::Nearest);
+    CHECK(!tr::parseSpotView("not-a-view").has_value());
+}
+
+TEST_CASE("traffic angles: orbit advances and holds on pause and manual input") {
+    SpotRig r(false,false);
+    r.truth=[](double){return std::vector<be::TrafficAircraft>{plane(7,0,0,300,0,0)};};
+    r.advance(.1); CHECK(r.c.spotTarget(7,tr::SpotView::Orbit,r.t).empty()); r.acquire();
+    const auto start=r.camera(); r.advance(3); CHECK(ap::local(start,r.camera()).length()>20);
+    r.c.onBackendEvent(be::Paused{true},r.t); const auto paused=r.camera(); r.advance(2);
+    CHECK_NEAR(ap::local(paused,r.camera()).length(),0,.001);
+    r.c.onBackendEvent(be::Paused{false},r.t); r.advance(1); CHECK(ap::local(paused,r.camera()).length()>2);
+    core::ManualInput in; in.lookRight=.25; r.c.setManualInput(in); r.advance(.2); r.c.setManualInput({});
+    r.advance(5); const auto adjusted=r.camera(); r.advance(2); CHECK_NEAR(ap::local(adjusted,r.camera()).length(),0,.05);
+    r.send("RecenterLook"); r.advance(2); CHECK(ap::local(adjusted,r.camera()).length()>5); r.checkAimed();
+}
+
+namespace {
+json savedSpot(const char* id,const char* name,double north,double east) {
+    const auto p=ap::world(kAirport,{north,east,-20});
+    return {{"id",id},{"name",name},{"kind","position"},{"latitude",p.lat},{"longitude",p.lon},{"altitudeMeters",p.altitude}};
+}
+}
+TEST_CASE("traffic nearest: saved cameras follow target with dwell and a clear distance margin") {
+    SpotRig r(false,false); double east=0;
+    r.c.setSavedSpottingSpots(json::array({savedSpot("a","West camera",100,0),savedSpot("b","East camera",100,1000)}));
+    r.truth=[&](double){return std::vector<be::TrafficAircraft>{plane(7,0,east,0,90,0)};};
+    r.frames=[&](double t){return std::optional<be::TrafficTarget>(frameOf(r.truth(t)[0],{}));};
+    r.advance(.1); CHECK(r.c.spotTarget(7,tr::SpotView::Nearest,r.t).empty()); r.acquire(); r.checkAimed();
+    CHECK_EQ(r.c.spotCameraName(),std::string("West camera"));
+    east=900; r.advance(3); CHECK_EQ(r.c.spotCameraName(),std::string("West camera"));
+    r.advance(5); CHECK_EQ(r.c.spotCameraName(),std::string("East camera")); r.checkAimed();
+    east=480; r.advance(8); CHECK_EQ(r.c.spotCameraName(),std::string("East camera"));
+    r.c.onBackendEvent(be::Paused{true},r.t); east=0; r.advance(4);
+    CHECK_EQ(r.c.spotCameraName(),std::string("East camera"));
+    r.c.onBackendEvent(be::Paused{false},r.t); r.advance(2);
+    CHECK_EQ(r.c.spotCameraName(),std::string("West camera")); CHECK_EQ(r.c.spotTargetId(),7u);
+    core::ManualInput in; in.lookRight=.2; r.c.setManualInput(in); r.advance(.2); r.c.setManualInput({});
+    east=900; r.advance(10); CHECK_EQ(r.c.spotCameraName(),std::string("West camera"));
+    r.send("RecenterLook"); r.advance(2); CHECK_EQ(r.c.spotCameraName(),std::string("East camera"));
+}
+TEST_CASE("traffic nearest: Chase fallback and candidate recovery without a camera profile") {
+    SpotRig r(false,false);
+    r.truth=[](double){return std::vector<be::TrafficAircraft>{plane(7,0,0,300,90,0)};};
+    r.c.setSavedSpottingSpots(json::array({savedSpot("far","Too far",0,30000)}));
+    r.advance(.1); CHECK(r.c.spotTarget(7,tr::SpotView::Nearest,r.t).empty()); r.acquire(); r.advance(1);
+    CHECK_EQ(r.c.spotCameraName(),std::string("Chase (no nearby camera)")); r.checkAimed();
+    CHECK_NEAR(ap::local(r.c.spotPose().position,r.camera()).y,-60,.1);
+    r.c.setSavedSpottingSpots(json::array({savedSpot("hill","Hill",100,0)})); r.advance(2);
+    CHECK_EQ(r.c.spotCameraName(),std::string("Hill")); r.checkAimed();
+    r.c.setSavedSpottingSpots(json::array()); r.advance(2);
+    CHECK_EQ(r.c.spotCameraName(),std::string("Chase (no nearby camera)")); r.checkAimed();
+    CHECK_NEAR(ap::local(r.c.spotPose().position,r.camera()).y,-60,.1);
+}
+TEST_CASE("traffic nearest: scenery views and loaded airport cameras are candidates") {
+    for (const bool profile : {false,true}) {
+        SpotRig r(profile,profile);
+        if(!profile)r.c.setSpotAirports({tr::spotAirport(airportFixture())});
+        r.truth=[](double){return std::vector<be::TrafficAircraft>{plane(7,0,0,150,90,0)};};
+        r.advance(.1); CHECK(r.c.spotTarget(7,tr::SpotView::Nearest,r.t).empty()); r.acquire();
+        CHECK(!r.c.spotCameraName().empty()); CHECK(r.c.spotCameraName().find("Chase")==std::string::npos);
+        CHECK(r.c.spotPlace().has_value()); r.checkAimed();
+        // A saved place closer to the target competes with (not just after) scenery/profile cameras.
+        const auto p=ap::world(kAirport,{30,0,-150});
+        auto saved=savedSpot("close","Close camera",30,0); saved["altitudeMeters"]=p.altitude;
+        r.c.setSavedSpottingSpots(json::array({saved})); r.advance(8);
+        CHECK_EQ(r.c.spotCameraName(),std::string("Close camera")); r.checkAimed();
+    }
+}
+
+TEST_CASE("module: new traffic angles and nearest camera are exposed through the panel protocol") {
+    SpotModule m;
+    m.truth=[](double){return std::vector<be::TrafficAircraft>{plane(7,0,0,300,90,0)};};
+    m.seconds(2);
+    auto settings=m.snapshot()["working"]["settings"];
+    auto place=savedSpot("near","Saved traffic view",50,0); place["altitudeMeters"]=400;
+    settings["host"]["spottingSpots"]=json::array({place});
+    CHECK_EQ(status(m.panel("UpdateDraft",{{"ops",json::array({{{"op","setSettings"},{"settings",settings}}})}})),std::string("Completed"));
+    m.seconds(.2);
+    for(const char* view:{"front","rear","left","right","overhead","orbit","nearest"}) {
+        const auto ack=m.panel("SpotTarget",{{"objectId",7},{"view",view}});
+        CHECK_EQ(status(ack),std::string("Completed"));
+        CHECK_EQ(js::str(ack["result"]["spotting"],"view"),std::string(view));
+        m.seconds(.2); const auto snap=m.snapshot();
+        CHECK_EQ(js::str(snap["spotting"],"view"),std::string(view));
+        CHECK_EQ(snap["spotting"]["targetId"].get<int>(),7);
+        CHECK(snap["activeCamera"]["cameraId"].is_null());
+        if(std::string(view)=="nearest") {
+            CHECK_EQ(js::str(snap["spotting"],"cameraName"),std::string("Saved traffic view"));
+            CHECK(!snap["spotting"]["spot"]["pinned"].get<bool>());
+        }
+    }
 }

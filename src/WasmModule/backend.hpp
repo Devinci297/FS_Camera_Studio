@@ -54,6 +54,7 @@ struct Disconnected { std::string reason; };
 struct CameraStatus { SdkAvailability state = SdkAvailability::NotAcquired; bool gameControlled = false; };
 struct CameraData { SdkPose pose; };
 struct DefinitionList { std::vector<std::string> names; };
+struct AircraftGeometry { std::string aircraftPath; nlohmann::json geometry; };
 struct AircraftLoaded { std::string aircraftPath; };
 struct AircraftTitle { std::string title; };
 struct FlightLoaded { std::string flightPath; };
@@ -82,7 +83,7 @@ struct ControllerCaptureMappingStatus {
 
 using BackendEvent = std::variant<backend_event::Connected, backend_event::Disconnected, backend_event::CameraStatus,
                                   backend_event::CameraData, backend_event::DefinitionList, backend_event::AircraftLoaded,
-                                  backend_event::AircraftTitle, backend_event::FlightLoaded, backend_event::SimRunning,
+                                  backend_event::AircraftGeometry, backend_event::AircraftTitle, backend_event::FlightLoaded, backend_event::SimRunning,
                                   backend_event::Paused, backend_event::CameraException,
                                   backend_event::CommBusMessage, backend_event::InputEvent, backend_event::InputMappingStatus, backend_event::ControllersList, backend_event::ControllerButton, backend_event::ControllerHat, backend_event::ControllerCaptureMappingStatus, backend_event::MotionTelemetry, backend_event::NativeMouseButton, backend_event::NativeMouseAxis, backend_event::NativeMouseMapping, backend_event::AircraftPosition, backend_event::AirportList, backend_event::AirportFacility, backend_event::AirportIdentity, backend_event::GroundElevation, backend_event::Traffic, backend_event::TrafficTarget, backend_event::AxisInput, backend_event::ControllerAxis>;
 

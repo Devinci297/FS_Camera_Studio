@@ -156,9 +156,11 @@ private:
 // Spotting views
 
 // Spot: a fixed position spot (SpotTarget.spot kind "position"), aimed at the target with auto zoom.
-enum class SpotView { Tower, Runway, Chase, Flyby, Track, Spot };
+enum class SpotView { Tower, Runway, Chase, Flyby, Track, Spot, Nearest, Front, Rear, Left, Right, Overhead, Orbit };
 const char* toString(SpotView v);
 std::optional<SpotView> parseSpotView(const std::string& s);
+bool externalSpotView(SpotView view);
+core::Vec3 externalOffset(const Pose& target, SpotView view, double orbitDegrees = 0);
 
 inline constexpr double kChaseBehindMeters = 60, kChaseAboveMeters = 15;
 inline constexpr double kChaseFollowSeconds = .8;   // the chase offset eases round turns with this time constant

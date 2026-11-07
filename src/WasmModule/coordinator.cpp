@@ -107,6 +107,7 @@ Aircraft aircraftFromPath(const std::string& path) {
     if (model == std::string::npos) model = parts.size() >= 2 ? parts.size() - 2 : 0;
     a.modelKey = parts[model];
     for (std::size_t i = model + 1; i + 1 < parts.size(); ++i) a.variantKey += (a.variantKey.empty() ? "" : "/") + parts[i];
+    if (parts.back().ends_with(".acf")) a.variantKey = parts.back();
     return a;
 }
 
@@ -217,6 +218,9 @@ json Coordinator::walkaroundJson() const {
     return {{"running",walkaround_.has_value()},
         {"categoryId",walkaround_ ? json(walkaround_->categoryId) : json(nullptr)},
         {"intervalSeconds",walkaround_ ? walkaround_->interval : 5.0},
+        {"walkingSpeedMps",walkaround_ ? walkaround_->speed : 1.4},
+        {"effectsStrength",walkaround_ ? walkaround_->effects : .35},
+        {"lookAroundDegrees",walkaround_ ? walkaround_->scan : 25},
         {"loop",walkaround_ ? walkaround_->loop : true}};
 }
 
@@ -225,7 +229,12 @@ void Coordinator::emitWalkaround() {
 }
 
 void Coordinator::stopWalkaround() {
-    if (walkaround_) { walkaround_.reset(); emitWalkaround(); }
+    if (walkaround_) {
+        if(walkaround_->inspection) {
+            const auto pose=engine_.sample();if(pose.valid){engine_.place(pose.pose);engine_.recenterLook();}
+        }
+        walkaround_.reset();walkPreviousPosition_.reset();walkDistance_=walkBob_=0;emitWalkaround();
+    }
 }
 
 core::CameraPose Coordinator::motionPose(const CameraEntry& cam) const {
@@ -397,6 +406,9 @@ json Coordinator::handle(const protocol::Command& c, double now) {
         if (!profile_) return ack(c,AckStatus::Rejected,"Open a camera profile first.");
         const auto categoryId = js::str(p,"categoryId");
         const double interval = js::num(p,"intervalSeconds",5);
+        const double speed=js::num(p,"walkingSpeedMps",1.4),effects=js::num(p,"effectsStrength",.35),scan=js::num(p,"lookAroundDegrees",25);
+        if(!std::isfinite(speed)||speed<.4||speed>2.2||!std::isfinite(effects)||effects<0||effects>1||!std::isfinite(scan)||scan<0||scan>60)
+            return ack(c,AckStatus::Rejected,"Choose walking speed 0.4-2.2 m/s, effects 0-1 and look-around 0-60 degrees.");
         if (!std::isfinite(interval) || interval < 1 || interval > 120) return ack(c,AckStatus::Rejected,"Walkaround dwell must be 1-120 seconds.");
         const CameraEntry* first = nullptr;
         for (const auto& category : profile_->categories) if (category.id == categoryId) {
@@ -405,10 +417,24 @@ json Coordinator::handle(const protocol::Command& c, double now) {
                 if (entry && entry->mode == profiles::CameraMode::AircraftExterior) { first = entry; break; }
             }
         }
-        if (!first) return ack(c,AckStatus::Rejected,"Choose a category containing exterior cameras for a walkaround.");
+        if (!first || first->walkaroundPerimeter.empty())
+            return ack(c,AckStatus::Rejected,"Study the aircraft and add inspection views before starting a walkaround.");
+        const bool inspection=!first->walkaroundPerimeter.empty();
+        for(const auto& category:profile_->categories)if(category.id==categoryId)for(const auto& id:category.cameraIds){
+            const auto* entry=profile_->camera(id);if(!entry||entry->mode!=profiles::CameraMode::AircraftExterior)continue;
+            if(inspection!=!entry->walkaroundPerimeter.empty())return ack(c,AckStatus::Rejected,"Keep generated inspection stops in their own category.");
+            if(inspection){
+                if(entry->walkaroundModelKey!=aircraft_.modelKey||entry->walkaroundVariantKey!=aircraft_.variantKey)
+                    return ack(c,AckStatus::Rejected,"Regenerate the inspection for the loaded aircraft variant.");
+                if(entry->walkaroundPerimeter.size()!=first->walkaroundPerimeter.size())return ack(c,AckStatus::Rejected,"Inspection stops must use the same footprint.");
+                for(std::size_t i=0;i<entry->walkaroundPerimeter.size();++i)if((entry->walkaroundPerimeter[i]-first->walkaroundPerimeter[i]).length()>.001)
+                    return ack(c,AckStatus::Rejected,"Inspection stops must use the same footprint.");
+            }
+        }
+        if(inspection&&!inspectionParked(now))return ack(c,AckStatus::Rejected,"Set the parking brake and stop the aircraft on the ground before starting the inspection.");
         const auto error = activate(first->id,now,false);
         if (!error.empty()) return ack(c,AckStatus::Rejected,error);
-        walkaround_ = Walkaround{categoryId,interval,0,js::boolean(p,"loop",true)};
+        walkaround_ = Walkaround{categoryId,interval,0,js::boolean(p,"loop",true),speed,effects,scan,inspection};
         emitWalkaround();
         return ack(c,AckStatus::Accepted);
     }
@@ -563,6 +589,8 @@ std::string Coordinator::activate(const std::string& cameraId, double now, bool 
     const CameraEntry* cam = profile_->camera(cameraId);
     if (!cam) return "That camera is not in the open profile.";
     if (!profiles::modeActivatable(cam->mode)) return "This view type is not available in this version.";
+    if(!cam->walkaroundPerimeter.empty() && (cam->walkaroundModelKey!=aircraft_.modelKey || cam->walkaroundVariantKey!=aircraft_.variantKey))
+        return "This inspection belongs to a different aircraft variant. Study the loaded aircraft and generate its walkaround.";
     if (const auto block = blockReason(); !block.empty()) return block;
     if (cam->mode == profiles::CameraMode::Flyby && (targetAt_ < 0 || now-targetAt_ > 5 || !std::isfinite(targetHeading_)))
         return "Waiting for the aircraft position before starting a fly-by.";
@@ -638,6 +666,7 @@ void Coordinator::startTransition(const CameraEntry& cam, bool cut) {
     airportAutoZoomFov_.reset();
     cancelMouseDrag();
     motionTime_ = 0;
+    walkPreviousPosition_.reset();walkDistance_=walkBob_=0;
     if (cam.mode == profiles::CameraMode::Flyby) {
         flybyLat_ = targetLat_; flybyLon_ = targetLon_; flybyAltitude_ = targetAltitude_; flybyHeading_ = targetHeading_;
     }
@@ -659,6 +688,44 @@ void Coordinator::startTransition(const CameraEntry& cam, bool cut) {
     backend_.setGroundBase(groundBaseFor(&cam));
     core::TransitionSpec spec = cam.transition;
     if (cinematicTransition_) spec = *cinematicTransition_;
+    if (!cam.walkaroundPerimeter.empty()) {
+        // Route from the actual visible position. Manual movement, arbitrary
+        // recalls and entry from a cockpit must never make a chord through the model.
+        const auto from=engine_.sample();
+        if (from.valid && !cut) {
+            auto entry=from.pose.positionFRD;
+            // A gear stop may be reached by a checked access branch beneath an
+            // elevated wing. Retrace that branch before following the perimeter.
+            if(profile_)for(const auto& previous:profile_->cameras){
+                if(previous.walkaroundEntry&&previous.walkaroundModelKey==cam.walkaroundModelKey&&previous.walkaroundVariantKey==cam.walkaroundVariantKey&&
+                   (previous.pose.positionFRD-entry).length()<.002){entry=*previous.walkaroundEntry;break;}
+            }
+            const auto destinationEntry=cam.walkaroundEntry.value_or(target.positionFRD);
+            const auto a=from.pose.positionFRD-entry,b=target.positionFRD-entry;
+            const bool sameApproach=(entry-destinationEntry).length()<.002 &&
+                core::cross(a,b).length()<1e-5 && core::dot(a,b)>=0;
+            spec.route=sameApproach?std::vector<core::Vec3>{from.pose.positionFRD,target.positionFRD}:
+                core::perimeterRoute(entry,destinationEntry,cam.walkaroundPerimeter,false);
+            if(!spec.route.empty()){
+                if((from.pose.positionFRD-spec.route.front()).length()>.001)spec.route.insert(spec.route.begin(),from.pose.positionFRD);
+                if((target.positionFRD-spec.route.back()).length()>.001)spec.route.push_back(target.positionFRD);
+                spec.route=core::roundRouteCorners(spec.route);
+            }
+        }
+        if (spec.route.empty()) {
+            if(walkaround_&&walkaround_->inspection&&walkaroundAdvancing_){
+                stopWalkaround();
+                emit_("FaultRaised",{{"code","inspectionRouteUnavailable"},{"message","Walkaround stopped: the next inspection point no longer joins the studied route. Regenerate the inspection."}});
+                return;
+            }
+            cut=true;
+        }
+        if(walkaround_&&walkaround_->inspection&&!spec.route.empty()){
+            spec.walking=true;spec.easing=core::Easing::Smoothstep5;spec.delaySeconds=0;
+            double length=0;for(std::size_t i=1;i<spec.route.size();++i)length+=(spec.route[i]-spec.route[i-1]).length();
+            spec.durationSeconds=std::max(.5,length/walkaround_->speed+1.);
+        }
+    }
     if (cut || cam.mode == profiles::CameraMode::Flyby) spec.easing = core::Easing::Cut;
     effects_.reset();
     if (!engine_.hasPose()) engine_.place(target);
@@ -807,6 +874,7 @@ void Coordinator::fault(const std::string& code, const std::string& message, dou
 }
 
 void Coordinator::invalidateSession(const std::string& reason, double now) {
+    inspectionTelemetryAt_ = -100;
     ++epoch_;
     airportAutoZoomFov_.reset(); targetAt_ = -100;
     if (state_ == Ownership::Active || state_ == Ownership::SimulatorSuspended || state_ == Ownership::Acquiring)
@@ -820,6 +888,7 @@ void Coordinator::invalidateSession(const std::string& reason, double now) {
 
 // Sim session lost (simulator quit or module shutting down): nothing to release; start over in Observing.
 void Coordinator::resetSession(const std::string& reason, double now) {
+    inspectionTelemetryAt_ = -100;
     stopWalkaround(); motionPaused_ = false;
     rememberedLooks_.clear(); lookOwner_.clear(); targetAt_=-100; airportAutoZoomFov_.reset();
     (void)now;
@@ -911,7 +980,7 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                 if (mouseSamples_++ < 2) emit_("MouseInputDiagnostic", {{"axis", e.horizontal ? "x" : "y"}, {"raw", e.delta}, {"degrees", degrees}});
                 emitLook(now);
             } else if constexpr (std::is_same_v<T, backend_event::MotionTelemetry>) {
-                if (e.motion.finite()) { flightMotion_ = e.motion; motionReceivedAt_ = now; }
+                if (e.motion.finite()) { flightMotion_ = e.motion; motionReceivedAt_ = inspectionTelemetryAt_ = now; }
                 aircraftBankDeg_ = e.motion.finite() ? e.bankDeg : NAN;
                 aircraftPitchDeg_ = e.motion.finite() ? e.pitchDeg : NAN;
             } else if constexpr (std::is_same_v<T, backend_event::GroundElevation>) {
@@ -1164,7 +1233,7 @@ core::CameraPose Coordinator::effectiveAirportPose(const CameraEntry& cam) const
 
 const std::string& Coordinator::aircraftTrackingFor(const CameraEntry& cam) const {
     static const std::string off = "off";
-    if (cam.mode == profiles::CameraMode::Mounted) return off;  // rigid on the airframe: never aims at the aircraft
+    if (cam.mode == profiles::CameraMode::Mounted || !cam.walkaroundPerimeter.empty()) return off;  // rigid on the airframe: never aims at the aircraft
     if (cam.mode == profiles::CameraMode::Airport && cam.airportOverrides.aircraftTracking)
         return *cam.airportOverrides.aircraftTracking;
     return settings_.globalAircraftTracking;
@@ -1313,6 +1382,21 @@ void Coordinator::submit(bool refreshTrackingPosition) {
     s.pose = cinematicPose(*cam, s.pose);  // Commercial drift: presentation only, never written into the engine
     const auto& aircraftTracking = aircraftTrackingFor(*cam);
     auto submittedPose = effects_.apply(s.pose);
+    if(walkaround_&&walkaround_->inspection&&!mouseHeld_&&!engine_.look().active()) {
+        auto angles=submittedPose.orientation.toPbh();
+        if(engine_.transitioning()){
+            const double phase=walkDistance_*2*std::numbers::pi/.75;
+            submittedPose.positionFRD.z-=walkBob_*.025*(1-std::cos(2*phase));
+            angles.bankDeg+=walkBob_*.35*std::sin(phase);
+            angles.pitchDeg+=walkBob_*.25*std::sin(2*phase);
+        } else {
+            const double u=core::clamp(walkaround_->elapsed/walkaround_->interval,0.,1.);
+            const double envelope=std::pow(std::sin(std::numbers::pi*u),2);
+            angles.headingDeg+=walkaround_->scan*envelope*std::sin(2*std::numbers::pi*u);
+            angles.pitchDeg+=walkaround_->scan*.2*envelope*std::sin(4*std::numbers::pi*u);
+        }
+        submittedPose.orientation=core::Quat::fromPbh(angles);
+    }
     // Aircraft-relative exterior views aim at the aircraft origin. Interior cameras
     // never inherit aircraft tracking even though the preference is global.
     if ((cam->mode == profiles::CameraMode::AircraftExterior || cam->mode == profiles::CameraMode::Orbit) &&
@@ -1566,6 +1650,7 @@ void Coordinator::tick(double now) {
         return;
     }
     if (state_ == Ownership::Active && eligibleToSubmit()) {
+        if(walkaround_&&walkaround_->inspection&&!motionPaused_&&!inspectionParked(now))stopWalkaround();
         if (spot_) {
             updateSpot(dt, now);  // may return to the earlier view or release (a target lost for good)
             if (state_ != Ownership::Active || !eligibleToSubmit()) return;
@@ -1604,7 +1689,17 @@ void Coordinator::tick(double now) {
         }
         const bool manualActive = mouseHeld_ || manual_.lookRight != 0 || manual_.lookUp != 0 || manual_.moveForward != 0 ||
             manual_.moveRight != 0 || manual_.moveUp != 0 || manual_.zoomIn != 0;
-        engine_.tick(dt, spot_ ? core::ManualInput{} : effectCamera && effectCamera->mode == profiles::CameraMode::Free ? lookOnly(manual_) : manual_, movement);
+        if(walkaround_ && walkaround_->inspection && manualActive) stopWalkaround();
+        engine_.tick(walkaround_ && walkaround_->inspection && (motionPaused_ || dt>.1) ? 0 : dt, spot_ ? core::ManualInput{} : effectCamera && effectCamera->mode == profiles::CameraMode::Free ? lookOnly(manual_) : manual_, movement);
+        if(walkaround_&&walkaround_->inspection){
+            const auto pose=engine_.sample();const double travel=walkPreviousPosition_?(pose.pose.positionFRD-*walkPreviousPosition_).length():0;
+            walkPreviousPosition_=pose.pose.positionFRD;
+            if(!motionPaused_&&dt>0&&dt<=.1){
+                walkDistance_+=travel;
+                const double ramp=std::pow(std::sin(std::numbers::pi*engine_.transitionProgress()),2);
+                walkBob_=walkaround_->effects*std::min(1.,travel/dt)*ramp;
+            }
+        }
         if (!spot_) updateFreeCamera(dt, now);
         updateGlance(now);
         if (effectCamera && (effectCamera->mode == profiles::CameraMode::Orbit || effectCamera->mode == profiles::CameraMode::Flyby) && !engine_.transitioning() && !spot_ && !manualActive && !motionPaused_ && dt <= .1) {
@@ -2195,6 +2290,45 @@ double Coordinator::towerCameraHeight() const {
     return it != settings_.airportCategoryHeights.end() && std::isfinite(it->second) ? core::clamp(it->second, 0.0, 1000.0) : 35.0;
 }
 
+std::vector<Coordinator::NearestSpot> Coordinator::nearestSpots(const traffic::Pose& target) const {
+    std::vector<NearestSpot> out;
+    const auto add=[&](const std::string& key,const std::string& name,const profiles::airport::Geo& at) {
+        if(!target.valid() || !at.valid())return;
+        const double distance=profiles::airport::local(at,target.position).length();
+        if(std::isfinite(distance) && distance>=20 && distance<=traffic::kSpotAirportRangeMeters)out.push_back({key,name,at,distance});
+    };
+    if(canActivate() && profile_)for(const auto& cam:profile_->cameras)if(cam.mode==profiles::CameraMode::Airport)
+        add("camera:"+cam.id,cam.name,airportCameraWorld(cam,effectiveAirportPose(cam)));
+    for(const auto& airport:spotAirports_) {
+        add("tower:"+airport.icao,airport.icao+" tower",traffic::towerPosition(airport,towerCameraHeight()));
+        for(const auto& end:airport.ends)add("runway:"+end.icao+":"+end.name,end.icao+" "+end.name+" fence",
+            traffic::spotPosition(end,traffic::runwaySpot(end,"fence",runwayCameraHeight())));
+    }
+    for(const auto& value:savedSpottingSpots_) {
+        std::string error;const auto name=js::str(value,"name");const auto key="saved:"+js::str(value,"id");
+        if(js::str(value,"kind")=="position") {
+            if(const auto place=traffic::parsePositionSpot(value,error))add(key,name,positionSpotAt(*place,target));
+        } else if(const auto runway=traffic::parseRunwaySpot(value,spotAirports_,runwayCameraHeight(),error)) {
+            if(const auto* end=traffic::findRunwayEnd(spotAirports_,runway->icao,runway->runwayEnd))add(key,name,traffic::spotPosition(*end,*runway));
+        }
+    }
+    std::sort(out.begin(),out.end(),[](const auto& a,const auto& b){return a.distance==b.distance?a.key<b.key:a.distance<b.distance;});
+    return out;
+}
+void Coordinator::updateNearestSpot(Spot& spot,double now) {
+    const auto candidates=nearestSpots(spot.target);
+    if(candidates.empty()) {
+        if(!spot.nearestKey.empty()){spot.chaseOffset={NAN,NAN,NAN};spot.chaseSmoothed={NAN,NAN,NAN};spot.chaseRate={};}
+        spot.nearestKey.clear();spot.place.reset();return;
+    }
+    const auto current=std::find_if(candidates.begin(),candidates.end(),[&](const auto& c){return c.key==spot.nearestKey;});
+    const auto* chosen=&candidates.front();
+    if(current!=candidates.end() && current->key!=chosen->key &&
+        (now-spot.cameraSince<kSpotRunwayDwellSeconds || chosen->distance+std::max(10.0,current->distance*.15)>=current->distance))chosen=&*current;
+    if(spot.nearestKey!=chosen->key) {spot.nearestKey=chosen->key;spot.cameraSince=now;spot.fovRad=NAN;lastSubmitted_.reset();}
+    spot.place=traffic::PositionSpot{chosen->name,chosen->position};spot.position=chosen->position;
+}
+
 json Coordinator::spotViewsJson() const {
     bool tower = false, runway = false;
     for (const auto& a : spotAirports_) {
@@ -2222,7 +2356,14 @@ bool Coordinator::spotViewAvailable(traffic::SpotView view, std::uint32_t object
                    traffic::pickRunwayEnd(spotAirports_, target, e ? e->status : traffic::Status::Cruise);
         }
         case traffic::SpotView::Chase:
-        case traffic::SpotView::Flyby: return true;
+        case traffic::SpotView::Flyby:
+        case traffic::SpotView::Nearest:
+        case traffic::SpotView::Front:
+        case traffic::SpotView::Rear:
+        case traffic::SpotView::Left:
+        case traffic::SpotView::Right:
+        case traffic::SpotView::Overhead:
+        case traffic::SpotView::Orbit: return true;
         case traffic::SpotView::Spot: return false;  // needs a position spot (SpotTarget.spot)
         case traffic::SpotView::Track: {
             if (state_ != Ownership::Active) return false;
@@ -2366,6 +2507,14 @@ std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView vi
             computed(positionSpotAt(*place, target));
             break;
         }
+        case traffic::SpotView::Nearest:
+            next.overlay=true;updateNearestSpot(next,now);break;
+        case traffic::SpotView::Front:
+        case traffic::SpotView::Rear:
+        case traffic::SpotView::Left:
+        case traffic::SpotView::Right:
+        case traffic::SpotView::Overhead:
+        case traffic::SpotView::Orbit:
         case traffic::SpotView::Chase:
         case traffic::SpotView::Flyby: next.overlay = true; break;
     }
@@ -2388,10 +2537,11 @@ std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView vi
     peek_.reset();
     next.cameraId = cameraId;
     next.cameraSince = next.runwayCheckAt = now;
-    if (spot_ && spot_->targetId == objectId && spot_->view == view && view == traffic::SpotView::Chase) {
+    if (spot_ && spot_->targetId == objectId && spot_->view == view && traffic::externalSpotView(view)) {
         next.chaseOffset = spot_->chaseOffset;  // the same chase again: no restart
         next.chaseSmoothed = spot_->chaseSmoothed;
         next.chaseRate = spot_->chaseRate;
+        next.orbitDegrees = spot_->orbitDegrees;
     }
     cancelMouseDrag();
     engine_.freeze();
@@ -2501,6 +2651,9 @@ void Coordinator::updateSpot(double dt, double now) {
         stopSpotting("The aircraft is no longer in range.", now);
         return;
     }
+    if(spot_->view==traffic::SpotView::Nearest && !motionPaused_ && !spot_->lost && !spot_->manuallyAdjusted && now>=spot_->runwayCheckAt) {
+        spot_->runwayCheckAt=now+kSpotRunwayRecheckSeconds;updateNearestSpot(*spot_,now);
+    }
     // Runway view: follow the target to the best runway end or runway view, with a margin and a minimum dwell.
     if (spot_->view == traffic::SpotView::Runway && !spot_->lost && !spot_->pinned && !spot_->manuallyAdjusted && now >= spot_->runwayCheckAt) {
         spot_->runwayCheckAt = now + kSpotRunwayRecheckSeconds;
@@ -2550,12 +2703,13 @@ void Coordinator::placeSpotOverlay(double dt, double now) {
     // Never below the terrain under the target (its own per-frame GROUND ALTITUDE when watched). Terrain near the user
     // aircraft is not used: it changes with the user's position, not the target's, and would move the camera.
     const double floor = traffic::terrainFloor(t.groundAltitude, NAN);
-    if (s.view == traffic::SpotView::Chase && !s.fixed) {
+    if ((traffic::externalSpotView(s.view) || (s.view==traffic::SpotView::Nearest && !s.place)) && !s.fixed) {
         // Behind and above along the track (the heading when slow); the offset eases round turns, so the chase swings
         // rather than snaps, and a critically damped filter keeps the remaining per-frame changes from shaking it. The
         // camera is the target plus that offset, so the target itself stays steady in frame.
         if (!hold || !s.chaseOffset.finite()) {
-            s.chaseOffset = traffic::follow(s.chaseOffset, traffic::chaseOffset(t), dt);
+            if(s.view==traffic::SpotView::Orbit && !s.manuallyAdjusted && dt>0 && dt<.5)s.orbitDegrees=core::wrapDeg(s.orbitDegrees+dt*8);
+            s.chaseOffset = traffic::follow(s.chaseOffset, traffic::externalOffset(t,s.view,s.orbitDegrees), dt);
             auto wanted = s.chaseOffset;
             if (std::isfinite(floor)) wanted.z = std::min(wanted.z, t.position.altitude - floor);
             s.chaseSmoothed = traffic::smoothDamp(s.chaseSmoothed, s.chaseRate, wanted, dt);

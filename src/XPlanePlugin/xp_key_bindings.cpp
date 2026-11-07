@@ -75,8 +75,10 @@ std::vector<Line> lines(const std::string& text) {
     for(std::size_t i=2;i<result.size();++i) {
         auto& l=result[i]; auto textLine=clean(l.raw);
         if(textLine.empty() || textLine[0]=='#')continue;
-        std::istringstream in(textLine); std::string extra;
-        if(!(in>>l.key.key>>l.key.modifiers>>l.command)||(in>>extra))fail("Unrecognized keyboard preference line; no changes made.");
+        // X-Plane appends optional human-readable command descriptions after the first three tokens.
+        // Keep the complete original line for every untouched binding.
+        std::istringstream in(textLine);
+        if(!(in>>l.key.key>>l.key.modifiers>>l.command))fail("Unrecognized keyboard preference line; no changes made.");
         l.key.modifiers=modifiers(l.key.modifiers); l.binding=true;
     }
     return result;
@@ -108,6 +110,7 @@ json loadQueue(const fs::path& p) {
         if(current==tx.at("after").get<std::string>()) {
             json remaining=json::array();for(const auto& op:j["operations"])if(op["profile"]!=profile)remaining.push_back(op);
             j["operations"]=remaining;
+            if(j.contains("slotsBefore"))j["slotsBefore"].erase(profile);
         } else if(current!=tx.at("before").get<std::string>())fail("An interrupted native-key transaction needs review; its backup is in XPCameraStudio/keyboard-backups.");
         j.erase("transaction");j["revision"]=stamp();writeAtomic(path,j.dump(2));
         if(current==tx.at("after").get<std::string>())writeAtomic(storage(p)/"native-key-result.json",
@@ -141,6 +144,42 @@ struct Lock {
 };
 void prepare(const fs::path& prefs) {
     safePath(prefs);safePath(storage(prefs));fs::create_directories(storage(prefs));
+}
+// Native preference line order is not a stable Primary/Secondary identity. Store only slot hints;
+// a hint is displayed as assigned only when its chord actually exists in the projected native bindings.
+json slotsFor(const json& q,const std::string& profile,const std::string& command,const json& bindings) {
+    json slots={{"primary",nullptr},{"secondary",nullptr}};
+    if(q.contains("slots") && q["slots"].contains(profile) && q["slots"][profile].contains(command)) {
+        const auto& hints=q["slots"][profile][command];
+        for(const auto& slot:{"primary","secondary"})if(hints.contains(slot) && !hints[slot].is_null()) {
+            const auto key=savedChord(hints[slot]);
+            for(const auto& b:bindings)if(same(savedChord(b),key))slots[slot]=asJson(key);
+        }
+    } else {
+        if(!bindings.empty())slots["primary"]=bindings[0];
+        if(bindings.size()>1)slots["secondary"]=bindings[1];
+    }
+    return slots;
+}
+std::string decodeProfileToken(std::string value) {
+    std::size_t pos=0;
+    while((pos=value.find("___",pos))!=std::string::npos){value.replace(pos,3," ");++pos;}
+    return value;
+}
+std::string detectedProfile(const fs::path& prefs,const std::string& aircraft,const json& profiles) {
+    const auto file=prefs/"Miscellaneous.prf";
+    if(!aircraft.empty() && fs::exists(file)) {
+        std::istringstream in(read(file));std::string line;std::set<std::string> matches;
+        while(std::getline(in,line)) {
+            std::istringstream fields(line);std::string prefix,kind,plane,profile;
+            if(fields>>prefix>>kind>>plane>>profile && prefix=="P" && kind=="acf_profile" && decodeProfileToken(plane)==aircraft) {
+                const auto id="control profiles/"+decodeProfileToken(profile)+" - Keys.prf";
+                for(const auto& item:profiles)if(item["id"]==id)matches.insert(id);
+            }
+        }
+        if(matches.size()==1)return *matches.begin();
+    }
+    return profiles.size()==1?profiles[0]["id"].get<std::string>():std::string();
 }
 json replyStatus(const fs::path& prefs,const json& q) {
     json j={{"ok",true},{"pendingCount",q["operations"].size()},{"revision",q["revision"]}};
@@ -271,6 +310,7 @@ void applyPending(const fs::path& prefs,const std::function<bool()>& simulatorRu
             report["applied"].push_back({{"profile",profile},{"backup",utf8(backup)},{"changed",before!=after}});
             json remaining=json::array();
             for(const auto& op:q["operations"])if(op.at("profile")!=profile)remaining.push_back(op);
+            if(q.contains("slotsBefore"))q["slotsBefore"].erase(profile);
             q.erase("transaction");q["operations"]=remaining;q["revision"]=stamp();writeAtomic(queueFile(prefs),q.dump(2));
         } catch(const std::exception& e) {
             report["status"]="error";report["errors"].push_back({{"profile",profile},{"message",e.what()}});
@@ -333,6 +373,10 @@ std::string Service::request(const std::string& text) {
                     safePath(e.path());response["profiles"].push_back({{"id","control profiles/"+name},{"name",name.substr(0,name.size()-11)}});
                 }
             }
+            std::sort(response["profiles"].begin(),response["profiles"].end(),[](const auto& a,const auto& b){return a["name"]<b["name"];});
+            const auto aircraft=aircraftName_?aircraftName_():std::string();
+            response["aircraft"]=aircraft;
+            response["selectedProfile"]=detectedProfile(prefs_,aircraft,response["profiles"]);
             return response.dump();
         }
         const auto profile=input.at("profile").get<std::string>();
@@ -340,19 +384,32 @@ std::string Service::request(const std::string& text) {
         if(action=="cancel") {
             if(input.at("revision")!=q["revision"])fail("Assignments changed in another panel. Refresh and try again.");
             json remaining=json::array();for(const auto& op:q["operations"])if(op["profile"]!=profile)remaining.push_back(op);
-            q["operations"]=remaining;q["revision"]=stamp();writeAtomic(queueFile(prefs_),q.dump(2));
+            q["operations"]=remaining;
+            if(q.contains("slotsBefore") && q["slotsBefore"].contains(profile)) {
+                const auto before=q["slotsBefore"][profile];
+                if(before.is_null())q["slots"].erase(profile);else q["slots"][profile]=before;
+                q["slotsBefore"].erase(profile);
+            }
+            q["revision"]=stamp();writeAtomic(queueFile(prefs_),q.dump(2));
             return replyStatus(prefs_,q).dump();
         }
         const auto command=input.at("command").get<std::string>();commandCheck(command);
         const auto current=projected(prefs_,q,profile);
         if(action=="inspect") {
             response.update(inspect(current,command));
+            response["slots"]=slotsFor(q,profile,command,response["bindings"]);
             response["pending"]=std::any_of(q["operations"].begin(),q["operations"].end(),[&](const auto& op){return op["profile"]==profile;});
             return response.dump();
         }
         if(action!="preview" && action!="assign" && action!="remove")fail("Unknown keyboard operation.");
         const auto key=action=="remove"?savedChord(input.at("key")):chord(input.at("input"));
         auto detail=inspect(current,command,&key);
+        auto slots=slotsFor(q,profile,command,detail["bindings"]);
+        const auto slot=input.value("slot",std::string());
+        if(!slot.empty() && slot!="primary" && slot!="secondary")fail("Invalid assignment slot.");
+        if(!slot.empty() && action=="remove" && slots[slot]!=asJson(key))fail("This slot changed. Review it again.");
+        if(!slot.empty() && action!="remove" && input.value("replace",json())!=slots[slot])
+            fail("This assignment changed. Select the slot and capture the shortcut again.");
         json operation={{"profile",profile},{"command",command},{"mode",action=="remove"?"remove":"assign"},{"key",asJson(key)},{"expected",detail["owners"]}};
         if(input.contains("replace")&&!input["replace"].is_null()) {
             const auto old=savedChord(input["replace"]);
@@ -362,6 +419,7 @@ std::string Service::request(const std::string& text) {
                 operation["replace"]=asJson(old);operation["replaceExpected"]=previous;
             }
         }
+        if(!slot.empty())operation["slot"]=slot;
         // The UI returns the whole reviewed operation: any concurrent change forces a fresh preview.
         if(action=="preview"){response.update(detail);response["review"]=operation;return response.dump();}
         if(action=="assign" && input.at("review")!=operation)fail("Shortcut conflicts changed. Press the key again to review them.");
@@ -370,6 +428,15 @@ std::string Service::request(const std::string& text) {
         (void)edit(current,operation);
         if(q["operations"].size()>=256)fail("Too many pending shortcuts. Restart X-Plane to apply them first.");
         ensureWorker();
+        if(!q.contains("slotsBefore"))q["slotsBefore"]=json::object();
+        if(!q["slotsBefore"].contains(profile))q["slotsBefore"][profile]=q.contains("slots")&&q["slots"].contains(profile)?q["slots"][profile]:json();
+        if(!slot.empty()) {
+            for(const auto& other:{"primary","secondary"})if(slots[other]==asJson(key))slots[other]=nullptr;
+            slots[slot]=action=="remove"?json():asJson(key);
+        } else if(action=="remove") {
+            for(const auto& other:{"primary","secondary"})if(slots[other]==asJson(key))slots[other]=nullptr;
+        }
+        q["slots"][profile][command]=slots;
         q["operations"].push_back(operation);q["revision"]=stamp();writeAtomic(queueFile(prefs_),q.dump(2));
         response=replyStatus(prefs_,q);response["pending"]=true;return response.dump();
     } catch(const std::exception& e) {return json{{"ok",false},{"error",e.what()}}.dump();}

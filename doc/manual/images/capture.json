@@ -1,6 +1,6 @@
 {
-  "version": "0.5.3",
-  "source": "ui\\index.html",
+  "version": "0.6.0",
+  "source": "package\\validated-host\\html_ui\\InGamePanels\\FSCameraStudio\\main.html",
   "environment": "Browser demo fixtures; not a live simulator capture",
-  "captured": "2026-11-07T19:41:36.599Z"
+  "captured": "2026-11-07T23:13:04.976Z"
 }

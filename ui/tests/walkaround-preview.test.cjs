@@ -1,0 +1,21 @@
+const {chromium}=require(process.env.FSCS_PLAYWRIGHT||'playwright');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
+const output=path.resolve('build/walkaround-preview');fs.mkdirSync(output,{recursive:true});
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const page=await browser.newPage({viewport:{width:1500,height:1000}}),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('file:///'+path.resolve(__dirname,'../index.html').replaceAll('\\','/')+'?surface=main');
+ await page.waitForFunction(()=>window.FSCApp?.state.snapshot);
+ const A=require('../aircraft-study.js');
+ const study=process.argv[2]?A.fromAcf(A.parseAcf(fs.readFileSync(process.argv[2],'utf8'))):{version:1,source:'Synthetic test geometry',lengthMeters:20,spanMeters:24,groundDown:3,groundSlope:0,polygons:[[[10,-1,0],[10,1,0],[-10,1,0],[-10,-1,0]],[[2,-12,0],[2,12,0],[-2,12,0],[-2,-12,0]]],landmarks:[{name:'Nose',point:[10,0,0],direction:[1,0]},{name:'Right wing',point:[0,12,0],direction:[0,1]},{name:'Tail',point:[-10,0,0],direction:[-1,0]},{name:'Left wing',point:[0,-12,0],direction:[0,-1]}]};
+ await page.evaluate(s=>{FSCApp.state.aircraft={title:'Aircraft footprint verification',modelKey:'devinci_b2707_300',variantKey:'b2707_300.acf'};window.FSCAircraftFootprints={'devinci_b2707_300|b2707_300.acf':{...s,modelKey:'devinci_b2707_300',variantKey:'b2707_300.acf'}};},study);
+ await page.locator('#mc-add').click();await page.getByRole('button',{name:'External motion views',exact:true}).click();
+ await page.getByRole('button',{name:'Add inspection views',exact:true}).waitFor();
+ assert.equal(await page.locator('.mc-inspection-stops li').count(),study.landmarks.length);
+ await page.screenshot({path:path.join(output,'b2707-preview.png')});
+ await page.getByRole('button',{name:'Add inspection views',exact:true}).click();
+ const cams=await page.evaluate(()=>FSCApp.state.working.profile.cameras.filter(c=>c.walkaroundPerimeter));
+ assert.equal(cams.length,study.landmarks.length);assert.ok(cams.every(c=>c.walkaroundModelKey==='devinci_b2707_300'&&c.walkaroundPerimeter.length>3));
+ assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'generated-profile.json'),JSON.stringify(await page.evaluate(()=>FSCApp.state.working.profile)));fs.writeFileSync(path.join(output,'generated-cameras.json'),JSON.stringify(cams,null,2));
+ console.log('Preview and generated cameras passed; no browser errors.');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});

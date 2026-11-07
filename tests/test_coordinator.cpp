@@ -1051,34 +1051,114 @@ TEST_CASE("motion views: paused flyby remains world stationary and tracks a movi
     CHECK(!next.trackUserAircraft);
 }
 
-TEST_CASE("walkaround: ordered exterior views auto advance dwell after transition and stop at end") {
+TEST_CASE("walkaround: legacy fixed exterior tours cannot start") {
     Rig r;for(auto& cam:r.profile["cameras"]) {cam["mode"]="aircraftExterior";cam["transition"]["kind"]="cut";}
     r.connect();const std::string category=r.profile["categories"][0]["id"];
-    CHECK_EQ(r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",1},{"loop",false}})["status"].get<std::string>(),std::string("Accepted"));
-    r.grant();r.advance(.02,40);CHECK_EQ(r.c.activeCameraId(),r.pilot);
-    r.advance(.02,12);CHECK_EQ(r.c.activeCameraId(),r.pfd);
-    r.advance(.02,55);CHECK_EQ(r.c.activeCameraId(),r.pfd);
-    bool stopped=false;for(const auto& [name,p]:r.events)if(name=="WalkaroundChanged")stopped=!p["running"].get<bool>();
-    CHECK(stopped);
+    be::MotionTelemetry telemetry;telemetry.motion.parkingBrake=1;r.deliver(telemetry);
+    const auto reply=r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",1},{"loop",false}});
+    CHECK_EQ(reply["status"].get<std::string>(),std::string("Rejected"));
+    CHECK(reply["reason"].get<std::string>().find("inspection views")!=std::string::npos);
+    CHECK(!r.c.walkaroundJson()["running"].get<bool>());
 }
 
-TEST_CASE("walkaround: manual motion resets dwell and explicit recall cancels sequence") {
-    Rig r;for(auto& cam:r.profile["cameras"]) {cam["mode"]="aircraftExterior";cam["transition"]["kind"]="cut";}
+TEST_CASE("inspection: parked guard, smooth scan, pause, footprint travel and brake release") {
+    Rig r;
+    for(std::size_t i=0;i<r.profile["cameras"].size();++i){
+        auto& cam=r.profile["cameras"][i];cam["mode"]="aircraftExterior";
+        cam["positionMetersFRD"]={i==0?10:-10,0,1};
+        cam["walkaroundPerimeter"]={{10,-5,1},{10,5,1},{-10,5,1},{-10,-5,1}};
+        cam["walkaroundModelKey"]="asobo-c172";cam["walkaroundVariantKey"]="presets/classic";
+        cam["transition"]={{"kind","smoothstep5"},{"durationSeconds",1},{"delaySeconds",0}};
+    }
     r.connect();const std::string category=r.profile["categories"][0]["id"];
-    r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",1},{"loop",true}});r.grant();
+    auto start=[&]{return r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",2},{"loop",false}});};
+    CHECK_EQ(start()["status"].get<std::string>(),std::string("Rejected"));
+    be::MotionTelemetry telemetry;telemetry.motion.parkingBrake=1;r.deliver(telemetry);
+    CHECK_EQ(start()["status"].get<std::string>(),std::string("Accepted"));r.grant();
+    auto step=[&](int count){for(int i=0;i<count;++i){r.deliver(telemetry);r.advance(.02);}};
+    step(20);const auto scan=r.backend.submitted.back();
+    CHECK(std::abs(scan.headingDeg)>1);
+    r.deliver(be::Paused{true});const auto frozen=r.c.engine().sample().pose;
+    step(150);CHECK_NEAR((r.c.engine().sample().pose.positionFRD-frozen.positionFRD).length(),0,1e-9);
+    CHECK_NEAR(r.backend.submitted.back().headingDeg,scan.headingDeg,1e-9);
+    r.deliver(be::Paused{false});step(90);CHECK_EQ(r.c.activeCameraId(),r.pfd);CHECK(r.c.engine().transitioning());
+    step(200);const auto position=r.c.engine().sample().pose.positionFRD;
+    CHECK(std::abs(position.x)>9.79||std::abs(position.y)>4.79);
+    r.deliver(telemetry);r.advance(.4);CHECK_NEAR((r.c.engine().sample().pose.positionFRD-position).length(),0,1e-9);
+    telemetry.motion.parkingBrake=0;step(1);CHECK(!r.c.engine().transitioning());
+    bool running=true;for(const auto& [name,p]:r.events)if(name=="WalkaroundChanged")running=p["running"].get<bool>();CHECK(!running);
+}
+
+TEST_CASE("inspection: X-Plane ACF variants share model but never geometry identity") {
+    const auto standard=aircraftFromPath("Aircraft/AddOn/b2707_300.acf"),hd=aircraftFromPath("Aircraft/AddOn/b2707_300_HD.acf");
+    CHECK_EQ(standard.modelKey,hd.modelKey);CHECK(standard.variantKey!=hd.variantKey);
+}
+
+TEST_CASE("inspection: gear approaches return to the perimeter before the next stop") {
+    Rig r;
+    for(std::size_t i=0;i<r.profile["cameras"].size();++i){
+        auto& cam=r.profile["cameras"][i];cam["mode"]="aircraftExterior";
+        cam["positionMetersFRD"]={i==0?8:-8,0,1};cam["walkaroundEntry"]={i==0?10:-10,0,1};
+        cam["walkaroundPerimeter"]={{10,-5,1},{10,5,1},{-10,5,1},{-10,-5,1}};
+        cam["walkaroundModelKey"]="asobo-c172";cam["walkaroundVariantKey"]="presets/classic";
+        cam["transition"]={{"kind","smoothstep5"},{"durationSeconds",1},{"delaySeconds",0}};
+    }
+    r.connect();be::MotionTelemetry telemetry;telemetry.motion.parkingBrake=1;r.deliver(telemetry);
+    CHECK_EQ(r.send("StartWalkaround",{{"categoryId",r.profile["categories"][0]["id"]},{"intervalSeconds",1},{"loop",false}})["status"].get<std::string>(),std::string("Accepted"));r.grant();
+    bool sawPerimeter=false;
+    for(int i=0;i<5000;++i){r.deliver(telemetry);r.advance(.02);const auto p=r.c.engine().sample().pose.positionFRD;
+        if(std::abs(p.y)>4.7)sawPerimeter=true;
+        CHECK(std::abs(p.x)>=7.99||std::abs(p.y)>4.7);
+    }
+    CHECK(sawPerimeter);CHECK_NEAR(r.c.engine().sample().pose.positionFRD.x,-8,1e-6);
+}
+
+TEST_CASE("inspection smoothing: neighboring gear views do not retrace their shared approach") {
+    Rig r;
+    for(std::size_t i=0;i<r.profile["cameras"].size();++i){
+        auto& cam=r.profile["cameras"][i];cam["mode"]="aircraftExterior";
+        cam["positionMetersFRD"]={8,0,1};cam["walkaroundEntry"]={10,0,1};
+        cam["orientationCameraToAnchorXYZW"]=i==0?json::array({0,0,0,1}):json::array({0,0,1,0});
+        cam["walkaroundPerimeter"]={{10,-5,1},{10,5,1},{-10,5,1},{-10,-5,1}};
+        cam["walkaroundModelKey"]="asobo-c172";cam["walkaroundVariantKey"]="presets/classic";
+        cam["transition"]["kind"]="cut"; // automatic inspections must still blend
+    }
+    r.connect();be::MotionTelemetry telemetry;telemetry.motion.parkingBrake=1;r.deliver(telemetry);
+    CHECK_EQ(r.send("StartWalkaround",{{"categoryId",r.profile["categories"][0]["id"]},{"intervalSeconds",1},{"loop",false}})["status"].get<std::string>(),std::string("Accepted"));r.grant();
+    auto previous=r.c.engine().sample().pose;
+    for(int i=0;i<1200;++i){r.deliver(telemetry);r.advance(.02);const auto current=r.c.engine().sample().pose;
+        CHECK((current.positionFRD-previous.positionFRD).length()<1e-8);
+        CHECK(fscs::core::angleBetween(previous.orientation,current.orientation)*fscs::core::kRadToDeg<.61);previous=current;
+    }
+    CHECK_EQ(r.c.activeCameraId(),r.pfd);
+}
+
+TEST_CASE("walkaround: manual motion stops inspection until explicitly restarted") {
+    Rig r;for(auto& cam:r.profile["cameras"]) {cam["mode"]="aircraftExterior";cam["transition"]["kind"]="cut";
+        cam["positionMetersFRD"]={10,0,1};cam["walkaroundPerimeter"]={{10,-5,1},{10,5,1},{-10,5,1},{-10,-5,1}};
+        cam["walkaroundModelKey"]="asobo-c172";cam["walkaroundVariantKey"]="presets/classic";}
+    r.connect();const std::string category=r.profile["categories"][0]["id"];
+    be::MotionTelemetry telemetry;telemetry.motion.parkingBrake=1;r.deliver(telemetry);
+    CHECK_EQ(r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",1},{"loop",true}})["status"].get<std::string>(),std::string("Accepted"));r.grant();
     fscs::core::ManualInput input;input.moveForward=1;r.c.setManualInput(input);r.advance(.02,110);
     CHECK_EQ(r.c.activeCameraId(),r.pilot);
+    CHECK(!r.c.walkaroundJson()["running"].get<bool>());
     r.c.setManualInput({});r.advance(.02,30);CHECK_EQ(r.c.activeCameraId(),r.pilot);
-    r.advance(.02,25);CHECK_EQ(r.c.activeCameraId(),r.pfd);
+    r.advance(.02,100);CHECK_EQ(r.c.activeCameraId(),r.pilot);
     r.activate(r.pilot);r.advance(.02,100);CHECK_EQ(r.c.activeCameraId(),r.pilot);
 }
 
 TEST_CASE("walkaround: loops and ignores background airport recall until stopped") {
-    Rig r;for(auto& cam:r.profile["cameras"]) {cam["mode"]="aircraftExterior";cam["transition"]["kind"]="cut";}
+    Rig r;for(auto& cam:r.profile["cameras"]) {cam["mode"]="aircraftExterior";cam["transition"]["kind"]="cut";
+        cam["positionMetersFRD"]={10,0,1};cam["walkaroundPerimeter"]={{10,-5,1},{10,5,1},{-10,5,1},{-10,-5,1}};
+        cam["walkaroundModelKey"]="asobo-c172";cam["walkaroundVariantKey"]="presets/classic";}
     r.connect();const std::string category=r.profile["categories"][0]["id"];
-    r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",1},{"loop",true}});r.grant();
+    be::MotionTelemetry telemetry;telemetry.motion.parkingBrake=1;r.deliver(telemetry);
+    CHECK_EQ(r.send("StartWalkaround",{{"categoryId",category},{"intervalSeconds",1},{"loop",true}})["status"].get<std::string>(),std::string("Accepted"));r.grant();
     CHECK(!r.c.selectAutomaticCamera(r.pfd,r.t));
-    r.advance(.02,103);CHECK_EQ(r.c.activeCameraId(),r.pilot);
+    bool sawSecond=false,looped=false;
+    for(int i=0;i<1000&&!looped;++i){r.deliver(telemetry);r.advance(.02);if(r.c.activeCameraId()==r.pfd)sawSecond=true;else if(sawSecond&&r.c.activeCameraId()==r.pilot)looped=true;}
+    CHECK(looped);
     CHECK_EQ(r.send("StopWalkaround")["status"].get<std::string>(),std::string("Completed"));
     r.advance(.02,100);CHECK_EQ(r.c.activeCameraId(),r.pilot);
     CHECK(r.c.selectAutomaticCamera(r.pfd,r.t));

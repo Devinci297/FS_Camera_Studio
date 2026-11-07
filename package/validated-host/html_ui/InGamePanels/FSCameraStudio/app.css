@@ -1175,6 +1175,21 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 /* Keep enough room for a labeled camera alongside a full keyboard shortcut. */
 @media (min-width:621px) { #mc-sim .mc-camera-layout>.mc-browser { min-width:220px; } }
 
+/* Aircraft inspection preview and walking controls. */
+#mc-sim .mc-inspection-shade{background:transparent;backdrop-filter:none;pointer-events:none}
+#mc-sim .mc-inspection-shade .mc-dialog{pointer-events:auto}
+#mc-sim .mc-inspection-dialog{width:min(760px,95vw)}
+#mc-sim .mc-inspection-map{display:block;width:100%;max-height:480px;background:rgba(0,0,0,.18);border:1px solid var(--mc-line);border-radius:8px}
+#mc-sim .mc-inspection-airframe{fill:#536779;stroke:#a9c0d0;stroke-width:1}
+#mc-sim .mc-inspection-route{fill:none;stroke:#e4a260;stroke-width:1.5;stroke-dasharray:4 3}
+#mc-sim .mc-inspection-sight{stroke:#7a99a8;stroke-width:.6}
+#mc-sim .mc-inspection-stop{fill:#142431;stroke:#79d8f3;stroke-width:1}
+#mc-sim .mc-inspection-map text{fill:#e8f7ff;font:9px sans-serif}
+#mc-sim .mc-inspection-stops{columns:2;padding-left:24px;font-size:12px;line-height:1.7}
+#mc-sim .mc-inspection-fields{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}
+#mc-sim .mc-inspection-fields label{display:flex;align-items:center;gap:8px}
+#mc-sim .mc-inspection-fields input,#mc-sim .mc-walkaround-timing>input{width:72px;min-height:30px}
+
 /* Spotting: Traffic page rows and the dock's one-line spotting status. */
 #mc-sim .mc-spot-state{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 12px;margin-bottom:14px;border:1px solid var(--mc-line);border-radius:8px;background:var(--mc-raised);font-size:12px}
 #mc-sim .mc-spot-state>svg{width:16px;height:16px;flex:none;color:var(--mc-muted)}
@@ -1333,3 +1348,10 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim[data-surface="mini"] .mc-dock>.mc-update-mini{grid-column:1 / -1;grid-row:3;justify-self:start;min-height:28px;max-width:100%;padding:4px 8px;color:var(--mc-accent);border:1px solid var(--mc-accent);font-size:11px}
 
 #mc-sim[data-surface="mini"] .mc-mini-region .mc-dock[data-update-available="true"]{grid-template-rows:28px minmax(0,1fr) 28px}
+
+/* Extra traffic viewpoints use an in-panel picker so the mini toolbar stays compact. */
+#mc-sim .mc-external-spot-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}
+#mc-sim .mc-external-spot-choices button{min-height:44px;text-align:left}
+#mc-sim .mc-external-spot-choices button[aria-pressed="true"]{border-color:var(--mc-accent);background:var(--mc-active)}
+#mc-sim .mc-traffic-views{flex-wrap:wrap}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-views{max-width:100%;flex-wrap:wrap}

@@ -121,6 +121,34 @@ void migrateFrom2(json& doc) {
 // whole document by version instead.
 void migrateFrom3(json& doc) { doc["schemaVersion"] = 4; }
 
+// A studied inspection supersedes the old fixed-view Walkaround category.
+// Leave unrelated exterior views and categories containing studied stops alone.
+bool removeLegacyWalkaround(json& doc) {
+    auto& cameras=doc["cameras"];auto& categories=doc["categories"];
+    const auto studied=[](const json& camera){return js::array(camera,"walkaroundPerimeter").size()>=3;};
+    if(std::none_of(cameras.begin(),cameras.end(),studied))return false;
+    std::set<std::string> removedGroups,removedCameras;
+    for(const auto& group:categories){
+        auto name=js::str(group,"name");
+        name.erase(std::remove_if(name.begin(),name.end(),[](unsigned char c){return !std::isalnum(c);}),name.end());
+        std::transform(name.begin(),name.end(),name.begin(),[](unsigned char c){return std::tolower(c);});
+        if(name!="walkaround")continue;
+        const auto id=js::str(group,"id");
+        const bool hasStudy=std::any_of(cameras.begin(),cameras.end(),[&](const json& camera){return js::str(camera,"categoryId")==id&&studied(camera);});
+        if(hasStudy)continue;
+        removedGroups.insert(id);
+        for(const auto& camera:cameras)if(js::str(camera,"categoryId")==id)removedCameras.insert(js::str(camera,"id"));
+    }
+    if(removedGroups.empty())return false;
+    cameras.erase(std::remove_if(cameras.begin(),cameras.end(),[&](const json& camera){return removedCameras.count(js::str(camera,"id"));}),cameras.end());
+    categories.erase(std::remove_if(categories.begin(),categories.end(),[&](const json& group){return removedGroups.count(js::str(group,"id"));}),categories.end());
+    if(removedCameras.count(js::str(doc,"defaultCameraId"))){
+        const auto next=std::find_if(cameras.begin(),cameras.end(),studied);
+        doc["defaultCameraId"]=(*next)["id"];
+    }
+    return true;
+}
+
 }  // namespace
 
 const char* toString(CameraMode m) {
@@ -297,6 +325,26 @@ ValidationResult validateProfile(json& doc) {
                     c.error(p + ".transition.durationSeconds", "must be 0.1-15 seconds");
                 if (!std::isfinite(delay) || delay < 0 || delay > core::kMaxDelaySeconds) c.error(p + ".transition.delaySeconds", "must be 0-30 seconds");
             }
+            if (cam.contains("walkaroundPerimeter")) {
+                c.text(cam,"walkaroundModelKey",p,1,256);
+                c.text(cam,"walkaroundVariantKey",p,0,512);
+                std::vector<core::Vec3> perimeter;
+                const auto& points=cam["walkaroundPerimeter"];
+                bool valid=points.is_array() && points.size()>=3 && points.size()<=256;
+                if(valid) for(const auto& point:points) {
+                    if(!point.is_array() || point.size()!=3 || !point[0].is_number() || !point[1].is_number() || !point[2].is_number()){valid=false;break;}
+                    perimeter.push_back({point[0].get<double>(),point[1].get<double>(),point[2].get<double>()});
+                }
+                if (!valid || !core::validPerimeter(perimeter) || js::str(cam,"mode")!="aircraftExterior")
+                    c.error(p+".walkaroundPerimeter","must be a simple, planar exterior route with 3-256 finite points");
+                if(cam.contains("walkaroundEntry")){
+                    const auto& entry=cam["walkaroundEntry"];
+                    if(!entry.is_array()||entry.size()!=3||!entry[0].is_number()||!entry[1].is_number()||!entry[2].is_number())
+                        c.error(p+".walkaroundEntry","must be a point on the inspection perimeter");
+                    else {const core::Vec3 v{entry[0].get<double>(),entry[1].get<double>(),entry[2].get<double>()};
+                        if(core::perimeterRoute(v,v,perimeter).empty())c.error(p+".walkaroundEntry","must be a point on the inspection perimeter");}
+                }
+            }
             if (cam.contains("color")) {
                 const auto color = js::str(cam, "color");
                 if (color.size() != 7 || color[0] != '#' || color.find_first_not_of("0123456789abcdefABCDEF", 1) != std::string::npos)
@@ -464,6 +512,10 @@ ValidationResult validateProfile(json& doc) {
         if (!categoryIds.count(cat)) c.error("$.cameras", "a camera names a missing category");
     }
     if (!cameraCategory.count(js::str(doc, "defaultCameraId"))) c.error("$.defaultCameraId", "must name one of the profile's cameras");
+    if(r.ok()&&!r.readOnly&&removeLegacyWalkaround(doc)){
+        r.migrated=true;
+        c.warn("$.categories","Removed the legacy Walkaround category superseded by aircraft inspection views.");
+    }
     return r;
 }
 
@@ -559,6 +611,11 @@ ProfileSnapshot toSnapshot(const json& doc) {
         e.followHorizon = core::clamp(js::num(cam, "followHorizon", 1.0), 0., 1.);
         e.gimbal = core::parseGimbal(js::str(cam, "gimbal", "locked")).value_or(core::Gimbal::Locked);
         e.mountVibration = core::clamp(js::num(cam, "mountVibration", core::kDefaultMountVibration), 0., 1.);
+        for(const auto& point:js::array(cam,"walkaroundPerimeter"))
+            e.walkaroundPerimeter.push_back({point[0].get<double>(),point[1].get<double>(),point[2].get<double>()});
+        e.walkaroundModelKey=js::str(cam,"walkaroundModelKey");
+        e.walkaroundVariantKey=js::str(cam,"walkaroundVariantKey");
+        if(cam.contains("walkaroundEntry")){const auto& p=cam["walkaroundEntry"];e.walkaroundEntry=core::Vec3{p[0].get<double>(),p[1].get<double>(),p[2].get<double>()};}
         e.seedDefinitionName = js::str(cam, "seedDefinitionName");
         e.glance = e.mode == CameraMode::AircraftCockpit && js::boolean(cam, "glance", defaultGlance(cam));
         e.cinematic = e.mode != CameraMode::Free && js::boolean(cam, "cinematic", defaultCinematic(cam, s.defaultCameraId));

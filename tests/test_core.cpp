@@ -17,6 +17,70 @@ constexpr double kEps = 1e-9;
 CameraPose pose(Vec3 p, Pbh a, double fov = 1.0) { return {p, Quat::fromPbh(a), fov}; }
 }  // namespace
 
+TEST_CASE("inspection route: rounded travel follows footprint instead of crossing aircraft") {
+    const std::vector<Vec3> p{{10,-5,1},{10,5,1},{-10,5,1},{-10,-5,1}};
+    CHECK(validPerimeter(p));
+    const auto route=perimeterRoute({10,0,1},{-10,0,1},p);
+    CHECK(route.size()>4);
+    CHECK(perimeterRoute({0,0,1},{-10,0,1},p).empty());
+    TransitionSpec spec;spec.route=route;spec.walking=true;spec.durationSeconds=30;
+    Transition t(pose({10,0,1},{0,0,180}),pose({-10,0,1},{0,0,0}),spec);
+    Vec3 prior{10,0,1};
+    for(int i=0;i<12000&&!t.finished();i++){
+        t.advance(.01);const auto q=t.sample();CHECK(q.withinLimits());
+        CHECK(std::abs(q.positionFRD.x)>=9.79||std::abs(q.positionFRD.y)>=4.79);
+        CHECK((q.positionFRD-prior).length()<.025);prior=q.positionFRD;
+    }
+    CHECK_NEAR((t.sample().positionFRD-Vec3{-10,0,1}).length(),0,1e-6);
+    CHECK(t.finished());
+    CHECK(!validPerimeter({{0,0,0},{1,1,0},{0,1,0},{1,0,0}}));
+    CHECK(!validPerimeter({{0,0,0},{1,0,0},{1,1,0},{0,1,1}}));
+}
+
+TEST_CASE("inspection smoothing: tight joins and tiny mesh edges never snap the head") {
+    std::vector<Vec3> route{{0,0,0},{5,0,0},{5,.00001,0},{5,4,0},{1,4,0},{1,8,0}};
+    TransitionSpec spec;spec.walking=true;spec.durationSeconds=14;spec.route=roundRouteCorners(route);
+    const auto from=pose(route.front(),{15,0,175}),to=pose(route.back(),{-30,0,-175});
+    Transition t(from,to,spec);auto previous=from;Vec3 velocity{};
+    double peakAngle=0,peakAcceleration=0;int frames=0;
+    while(!t.finished()&&frames++<12000){
+        t.advance(1./60);const auto current=t.sample();CHECK(current.withinLimits());
+        peakAngle=std::max(peakAngle,angleBetween(previous.orientation,current.orientation)*kRadToDeg);
+        const auto nextVelocity=(current.positionFRD-previous.positionFRD)*60;
+        peakAcceleration=std::max(peakAcceleration,(nextVelocity-velocity).length()*60);
+        CHECK((current.positionFRD-previous.positionFRD).length()<.04);
+        velocity=nextVelocity;previous=current;
+    }
+    if(peakAcceleration>=3.)std::printf("walking peak acceleration: %.6f m/s2\n",peakAcceleration);
+    CHECK(t.finished());CHECK(peakAngle<.76);CHECK(peakAcceleration<3.);
+    CHECK_NEAR(angleBetween(previous.orientation,to.orientation),0,1e-6);
+    CHECK_NEAR((previous.positionFRD-to.positionFRD).length(),0,1e-8);
+}
+
+TEST_CASE("inspection smoothing: coincident stops rotate smoothly without a walking tangent") {
+    const auto from=pose({2,3,1},{-10,0,0}),to=pose({2,3,1},{-40,0,160});
+    TransitionSpec spec;spec.walking=true;spec.durationSeconds=1;spec.route={from.positionFRD,from.positionFRD,to.positionFRD};
+    Transition t(from,to,spec);auto previous=from;
+    for(int i=0;i<2000&&!t.finished();++i){t.advance(1./60);const auto p=t.sample();CHECK(p.withinLimits());
+        CHECK((p.positionFRD-from.positionFRD).length()<1e-9);
+        CHECK(angleBetween(previous.orientation,p.orientation)*kRadToDeg<.51);previous=p;
+    }
+    CHECK(t.finished());CHECK_NEAR(angleBetween(previous.orientation,to.orientation),0,1e-6);
+}
+
+TEST_CASE("inspection smoothing: the pilot looks into a bend before their feet turn") {
+    TransitionSpec spec;spec.walking=true;spec.durationSeconds=10;
+    spec.route=roundRouteCorners({{0,0,0},{6,0,0},{6,6,0}});
+    Transition t(pose({0,0,0},{0,0,0}),pose({6,6,0},{0,0,90}),spec);
+    double anticipation=0;
+    for(int i=0;i<3000&&!t.finished();++i){
+        t.advance(1./60);const auto p=t.sample();
+        if(p.positionFRD.x>5&&p.positionFRD.x<5.7&&std::abs(p.positionFRD.y)<1e-8)
+            anticipation=std::max(anticipation,p.orientation.toPbh().headingDeg);
+    }
+    CHECK(anticipation>10);CHECK(t.finished());
+}
+
 TEST_CASE("horizon: counter-roll leaves the aircraft's bank times follow horizon at 0, 0.5 and 1") {
     // Aircraft attitude in the local level frame, FRD: banked 30 degrees right, nose up 10, heading 40.
     const Quat aircraft = Quat::fromPbh({10, 30, 40});

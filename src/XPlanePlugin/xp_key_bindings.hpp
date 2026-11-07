@@ -19,12 +19,14 @@ void applyPending(const fs::path& prefs, const std::function<bool()>& simulatorR
 
 class Service {
 public:
-    Service(fs::path prefs, fs::path helper) : prefs_(std::move(prefs)), helper_(std::move(helper)) {}
+    Service(fs::path prefs, fs::path helper, std::function<std::string()> aircraftName = {})
+        : prefs_(std::move(prefs)), helper_(std::move(helper)), aircraftName_(std::move(aircraftName)) {}
     ~Service();
     std::string request(const std::string& request);
 private:
     void ensureWorker();
     fs::path prefs_, helper_;
+    std::function<std::string()> aircraftName_;
     void* worker_ = nullptr;
 };
 } // namespace fscs::xplane::keys

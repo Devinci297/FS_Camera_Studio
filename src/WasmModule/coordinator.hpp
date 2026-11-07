@@ -207,6 +207,9 @@ public:
     // Whether tower and runway views can be shown at all: profile airport cameras (with control available) or
     // computed views from scenery data. SpottingChanged.views.
     json spotViewsJson() const;
+    void setSavedSpottingSpots(json spots) { savedSpottingSpots_ = std::move(spots); }
+    std::string spotCameraName() const { return spot_ && spot_->view==traffic::SpotView::Nearest ?
+        (spot_->place ? spot_->place->name : "Chase (no nearby camera)") : std::string(); }
     // Camera category heights for computed views (settings, else the generator's 3 m and 35 m).
     double runwayCameraHeight() const;
     double towerCameraHeight() const;
@@ -261,9 +264,13 @@ private:
     HeadTracking headTracking_{backend_};
     double targetLat_=0, targetLon_=0, targetAltitude_=0, targetHeading_=0, targetAt_=-100;
     double flybyLat_=0, flybyLon_=0, flybyAltitude_=0, flybyHeading_=0, motionTime_=0;
-    struct Walkaround { std::string categoryId; double interval=5, elapsed=0; bool loop=true; };
+    struct Walkaround { std::string categoryId; double interval=5, elapsed=0; bool loop=true; double speed=1.4, effects=.35, scan=25; bool inspection=false; };
     std::optional<Walkaround> walkaround_;
     bool walkaroundAdvancing_ = false, motionPaused_ = false;
+    double walkDistance_=0, walkBob_=0;
+    double inspectionTelemetryAt_=-100;
+    std::optional<core::Vec3> walkPreviousPosition_;
+    bool inspectionParked(double now) const { return now-inspectionTelemetryAt_<2 && flightMotion_.onGround>.5 && std::abs(flightMotion_.groundSpeed)<.2 && std::isfinite(flightMotion_.parkingBrake) && flightMotion_.parkingBrake>.5; }
     std::map<std::string, core::TemporaryLook> rememberedLooks_;
     std::string lookOwner_;
     EmitFn emit_;
@@ -422,11 +429,16 @@ private:
         core::TemporaryLook manualLook;
         core::ManualMover manualMover;
         bool manuallyAdjusted = false;
-        double runwayCheckAt = 0, cameraSince = 0;
+        double runwayCheckAt = 0, cameraSince = 0, orbitDegrees = 0;
+        std::string nearestKey;
         std::optional<traffic::RunwaySpot> runway;  // computed runway view: the runway spot shown
         bool pinned = false;                        // ... chosen by SpotTarget.spot: never re-picked
         std::optional<traffic::PositionSpot> place; // spot view: the position spot shown
     };
+    struct NearestSpot { std::string key, name; profiles::airport::Geo position; double distance; };
+    std::vector<NearestSpot> nearestSpots(const traffic::Pose& target) const;
+    void updateNearestSpot(Spot& spot, double now);
+    json savedSpottingSpots_ = json::array();
     std::optional<Spot> spot_;
     bool spotActivating_ = false, autoSpot_ = false;
     std::string spotReason_;
