@@ -13,12 +13,13 @@ import shutil
 import subprocess
 import time
 import uuid
+import winreg
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument('--version', default='0.5.1')
+parser.add_argument('--version', default='0.5.2')
 parser.add_argument('--live-receipt', default='build/review/hat-release/installed.json')
 parser.add_argument('--test-harness', action='store_true')
 args = parser.parse_args()
@@ -69,6 +70,12 @@ def run(label, executable=SETUP, location=community, success=True, extra=()):
 
 try:
     run('fresh-install')
+    updater = CONTROL / 'Updater' / VERSION / 'FSCSUpdater.exe'
+    assert hashlib.sha256(updater.read_bytes()).hexdigest() == INFO['updaterSha256']
+    scheme = INFO['updaterProtocol']
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Software\\Classes\\' + scheme + r'\shell\open\command') as key:
+        command = winreg.QueryValueEx(key, '')[0]
+    assert str(updater) in command and '"%1"' in command
     assert inventory(target) == INFO['packageFiles']
     uninstaller = CONTROL / 'Installer/unins000.exe'
     assert uninstaller.is_file()
@@ -197,6 +204,15 @@ try:
         fake.wait(timeout=10)
     if LIVE_CHECK:
         assert inventory(live_package) == baseline, 'Live package changed!'
+    # The protocol registration and versioned helper are removed by uninstall.
+    assert not updater.exists()
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Software\\Classes\\' + scheme)
+    except FileNotFoundError:
+        pass
+    else:
+        key.Close()
+        raise AssertionError('Updater protocol survived uninstall')
     # Preserve test evidence; relocate only the support directory created by this test.
     assert CONTROL.resolve() == (Path(os.environ['LOCALAPPDATA']) / CONTROL.name).resolve()
     assert not (CONTROL / 'Installer/unins000.exe').exists()

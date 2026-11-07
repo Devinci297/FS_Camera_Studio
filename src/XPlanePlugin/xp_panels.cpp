@@ -6,6 +6,12 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <regex>
+#include <filesystem>
+#if IBM
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 namespace fscs::xplane {
 
@@ -87,6 +93,8 @@ void PanelWindows::create(Surface s) {
     XPLMSetWindowTitle(w.id, s == Main ? "XP Camera Studio" : "XP Camera Studio Mini");
     if (s == Main) XPLMSetWindowResizingLimits(w.id, width * 58 / 100, height * 45 / 100, width, height);
     else XPLMSetWindowResizingLimits(w.id, 320, 120, width, height);
+    XPLMWindowAddBrowserFunction(w.id, "fscsUpdate", &PanelWindows::onUpdate, &w);
+    XPLMWindowAddBrowserFunction(w.id, "fscsOpenUrl", &PanelWindows::onOpenUrl, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsKeys", &PanelWindows::onKeys, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscs", &PanelWindows::onFrame, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanel", &PanelWindows::onPanel, &w);
@@ -254,6 +262,39 @@ const char* PanelWindows::onFrame(XPLMWindowID, const char* text, void* refcon) 
     }
     if (ok && w && w->owner && w->owner->inbound_) w->owner->inbound_(w->surface, arg.is_string() ? arg.get<std::string>() : raw);
     return XPLMReturnString(ok ? "true" : "false");
+}
+
+const char* PanelWindows::onUpdate(XPLMWindowID, const char* text, void*) {
+    const auto arg=json::parse(text?text:"",nullptr,false);
+    if(!arg.is_string())return XPLMReturnString("{\"ok\":false,\"error\":\"Invalid update version.\"}");
+    const auto version=arg.get<std::string>();
+    if(!std::regex_match(version,std::regex("[0-9]{1,5}\\.[0-9]{1,5}\\.[0-9]{1,5}")))
+        return XPLMReturnString("{\"ok\":false,\"error\":\"Invalid update version.\"}");
+#if IBM
+    wchar_t local[32768];const auto count=GetEnvironmentVariableW(L"LOCALAPPDATA",local,32768);
+    if(count>0 && count<32768) {
+        const auto path=std::filesystem::path(local)/L"FS Camera Studio"/L"Updater"/XPCS_VERSION/L"FSCSUpdater.exe";
+        std::error_code error;
+        if(std::filesystem::is_regular_file(path,error) && !error) {
+            const std::string uri="fscamerastudio://update/"+version;
+            const std::wstring args=L"\""+std::wstring(uri.begin(),uri.end())+L"\"";
+            if(reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,L"open",path.c_str(),args.c_str(),nullptr,SW_SHOWNORMAL))>32)
+                return XPLMReturnString("{\"ok\":true}");
+        }
+    }
+#endif
+    return XPLMReturnString("{\"ok\":false,\"error\":\"Install the complete Windows setup to enable the updater.\"}");
+}
+const char* PanelWindows::onOpenUrl(XPLMWindowID, const char* text, void*) {
+    const auto arg=json::parse(text?text:"",nullptr,false);if(!arg.is_string())return XPLMReturnString("false");
+    const auto url=arg.get<std::string>();
+    const std::string prefix="https://github.com/Devinci297/FS_Camera_Studio/releases/";
+    if(url.size()>512 || url.find(prefix)!=0 || !std::regex_match(url,std::regex("[a-zA-Z0-9:/_.-]+")))return XPLMReturnString("false");
+#if IBM
+    const std::wstring wide(url.begin(),url.end());
+    if(reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,L"open",wide.c_str(),nullptr,nullptr,SW_SHOWNORMAL))>32)return XPLMReturnString("true");
+#endif
+    return XPLMReturnString("false");
 }
 
 const char* PanelWindows::onKeys(XPLMWindowID, const char* text, void* refcon) {

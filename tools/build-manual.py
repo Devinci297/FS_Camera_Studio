@@ -23,7 +23,7 @@ def start(title,subtitle,sim='MSFS 2024'):
  c.setFillColor(colors.HexColor('#67dbc5'));c.setFont('Helvetica-Bold',10);c.drawString(38,H-29,'FS CAMERA STUDIO  /  '+sim)
  c.setFillColor(colors.white);c.setFont('Helvetica-Bold',24);c.drawString(38,H-62,title)
  c.setFont('Helvetica',10);c.drawString(38,H-83,subtitle)
- c.setFillColor(GRAY);c.setFont('Helvetica',8);c.drawString(38,23,'Version 0.5.1  |  November 2026');c.drawRightString(W-38,23,str(page))
+ c.setFillColor(GRAY);c.setFont('Helvetica',8);c.drawString(38,23,'Version 0.5.2  |  November 2026');c.drawRightString(W-38,23,str(page))
  c.bookmarkPage('page'+str(page));c.addOutlineEntry(title,'page'+str(page),0)
  y=H-126
 def text(value,caption=False):
@@ -142,8 +142,9 @@ end()
 
 start('Updates and troubleshooting','Version in the app bar - installer-assisted updates')
 image('updates.png',175)
-text('Click the version in the app bar to open <b>Version & updates</b>. Check for updates queries this project\'s public GitHub releases. Tester builds include newer tester releases. Automatic checks run once when the editor opens and can be disabled.')
-text('When an update is found, Download update opens the installer URL in your browser. A selectable link is also shown if browser opening is unavailable. Save your work, close MSFS, and run the installer. Files are never replaced by the running panel. This browser handoff still needs in-sim confirmation for your simulator build.')
+text('Click the version in the app bar to open <b>Version & updates</b>. Check for updates queries this project\'s public GitHub releases. Tester builds include newer tester releases. Checks run automatically every six hours while a panel is open. The editor shows an update notice and the mini panel shows an update button. Choose Later to dismiss a version, or disable automatic checks in Settings.')
+text('Click <b>Update now</b> to open the bundled Windows updater. It verifies the official installer download, waits for MSFS and X-Plane to close, then upgrades your existing installation. Save your views first. You can cancel before setup begins. Installation is never automatic without your click. Install version 0.5.2 manually once to enable this workflow.')
+text('If the updater does not open, use <b>Download installer</b>, or <b>Start > FS Camera Studio > Check for updates</b>. MSFS requests the registered Windows update link; this handoff still needs a live simulator check. XPCS launches the updater directly. No browser or simulator UI is automated.',True)
 heading('If something does not work')
 text('<b>No panel:</b> confirm the toolbar item is enabled and there is only one installed package. Restart MSFS after installation.<br/><b>No saved airport:</b> confirm Save selected views completed, the aircraft is within the radius, and the selected airport has saved cameras.<br/><b>No movement:</b> enable camera control, move focus out of text fields, and check bindings and conflicting MSFS assignments.<br/><b>No update result:</b> an HTTP error or timeout is not an up-to-date result. Retry later or open the release page.')
 text('<b>Jerky look / blocked clicks / crash:</b> report the exact build, aircraft, airport, scenery add-ons, MSFS version and steps. State whether it occurred during flight loading or after a specific action. Include whether it persists after Release camera and with panels hidden.')

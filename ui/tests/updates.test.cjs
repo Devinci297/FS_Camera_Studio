@@ -30,7 +30,7 @@ const {chromium}=require(process.env.FSCS_PLAYWRIGHT||'playwright'),path=require
  await page.locator('#mc-update-download').click();
  assert.equal(await page.evaluate(()=>openedUpdate),`${base}/releases/download/v${next}/FS-Camera-Studio-${next}-Setup.exe`);
  status=503;body='unavailable';await page.locator('#mc-update-check').click();await page.waitForFunction(()=>document.querySelector('#mc-update-status').textContent.includes('HTTP 503'));
- assert.equal(await page.locator('#mc-update-download').isVisible(),false);
+ assert.equal(await page.locator('#mc-update-download').isVisible(),true,'known update survives transient errors');
  status=200;body=JSON.stringify([release(current)]);await page.locator('#mc-update-check').click();await page.getByText('You have the latest available build for this channel.',{exact:true}).waitFor();
  assert.deepEqual(errors,[]);await browser.close();console.log('Update validation, version ordering, channel, errors, browser handoff and app bar passed.');
 })().catch(e=>{console.error(e);process.exit(1);});

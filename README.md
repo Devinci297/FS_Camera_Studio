@@ -6,17 +6,18 @@ toolbar or menu, with a mini control panel at the bottom of the screen. The X-Pl
 **XP Camera Studio**; it runs the same module logic and the same editor and mini panel (see
 [X-Plane 12](#x-plane-12-xp-camera-studio)).
 
-**Version 0.5.1:** one Windows installer for Microsoft Flight Simulator 2024, X-Plane 12, or both.
-Adds native X-Plane camera-key assignment, traffic-camera adjustment and a 2,000-camera profile limit.
+**Version 0.5.2:** one Windows installer for Microsoft Flight Simulator 2024, X-Plane 12, or both.
+Adds automatic update notifications and click-to-update for both simulators. Install this setup once to enable
+the bundled Windows updater; future updates are offered in the editor and mini panel.
 Automated validation is recorded below; live acceptance of these patch changes is pending.
 The MSFS build uses SDK 1.8.1; XP Camera Studio requires X-Plane 12.4.4 or newer on Windows x64.
 Both simulators share one version number and one update check.
 
-[Download 0.5.1](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.5.1)
+[Download 0.5.2](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.5.2)
 for the Windows installer, illustrated manual, example profile and checksums.
 
-See the [release notes](doc/releases/0.5.1.md) and
-[validation record](doc/test-evidence/2026-11-07-v0.5.1.md) for automated checks, live acceptance and known limits.
+See the [release notes](doc/releases/0.5.2.md) and
+[validation record](doc/test-evidence/2026-11-07-v0.5.2.md) for automated checks, live acceptance and known limits.
 Aircraft-specific camera poses and controller setups can still need adjustment; see
 [`doc/qualification.md`](doc/qualification.md).
 
@@ -39,7 +40,8 @@ FSCameraStudio.wasm — standalone module loaded by MSFS from the package
                   WASM Camera API (fsCamera*) — the only camera writer
 ```
 
-MSFS needs no desktop app, background service or external process. X-Plane includes a small helper
+Normal camera operation needs no desktop app or background service. The bundled Windows updater opens only
+when requested and waits for the simulators to close before installation. X-Plane also includes a small helper
 that applies queued native keyboard assignments after the simulator exits. Both panels are mirrors of one authoritative
 state held in the module, so the editor and the mini panel always agree.
 
@@ -133,11 +135,14 @@ are in [`src/XPlanePlugin/README.md`](src/XPlanePlugin/README.md).
 
 The tester release and illustrated manual are available from
 [GitHub Releases](https://github.com/Devinci297/FS_Camera_Studio/releases).
-The app bar displays the version; click it for update detection and the installer download.
+The app bar displays the version. Automatic checks notify you every six hours while a panel is open.
+**Update now** verifies and downloads the official installer, waits for MSFS and X-Plane to close, then upgrades
+your selected simulators. Save your views first. **Download installer** is always available as a fallback.
+See [updates](doc/automatic-updates.md).
 Close MSFS before installing an update. Saved airport cameras load automatically within the configured radius
 (25 NM by default); other airports get a temporary set until you save it. Auto switch is a separate viewpoint control.
 
-### Reproduce version 0.5.1
+### Reproduce version 0.5.2
 
 The reviewed simulator host is frozen in `package/validated-host`, with hashes in
 `package/validated-host.json`. It is refreshed from the compiled package of the release commit, the same
@@ -145,23 +150,23 @@ The reviewed simulator host is frozen in `package/validated-host`, with hashes i
 plugin is built at the same version and goes into the same setup.
 
 ```powershell
-python tools/diagnostics/stage-v0.5.1.py --freeze
+python tools/diagnostics/stage-v0.5.2.py --freeze
 cmake --preset tests; cmake --build --preset tests; ctest --preset tests
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.5.1
-tools\package.ps1 -Compile -Wasm build/wasm/release-0.5.1/FSCameraStudio.wasm -OutputDirectory build/release-0.5.1-compile
-python tools/diagnostics/stage-v0.5.1.py --host build/release-0.5.1-compile/Packages/fs-camera-studio
-python tools/diagnostics/stage-v0.5.1.py
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.5.2
+tools\package.ps1 -Compile -Wasm build/wasm/release-0.5.2/FSCameraStudio.wasm -OutputDirectory build/release-0.5.2-compile
+python tools/diagnostics/stage-v0.5.2.py --host build/release-0.5.2-compile/Packages/fs-camera-studio
+python tools/diagnostics/stage-v0.5.2.py
 cmake -S . -B build-xp -G "Visual Studio 17 2022" -A x64 -DFSCS_BUILD_XPLANE=ON
 cmake --build build-xp --config Release --target xpcs_plugin
 node tools/capture-manual.cjs
 python tools/build-manual.py
-python tools/build-installer.py --version 0.5.1 --package build/release/0.5.1/fs-camera-studio --receipt build/release/0.5.1/staged.json --xplane build-xp/XPCameraStudio
-python tools/build-installer.py --test-harness --version 0.5.1 --package build/release/0.5.1/fs-camera-studio --receipt build/release/0.5.1/staged.json --xplane build-xp/XPCameraStudio
-python tools/test-installer.py --test-harness --version 0.5.1
+python tools/build-installer.py --version 0.5.2 --package build/release/0.5.2/fs-camera-studio --receipt build/release/0.5.2/staged.json --xplane build-xp/XPCameraStudio
+python tools/build-installer.py --test-harness --version 0.5.2 --package build/release/0.5.2/fs-camera-studio --receipt build/release/0.5.2/staged.json --xplane build-xp/XPCameraStudio
+python tools/test-installer.py --test-harness --version 0.5.2
 ```
 
-See [release notes](doc/releases/0.5.1.md), [A320 starter guidance](doc/A320-starter-profile.md)
-and the bundled illustrated manual. [0.5.1 release evidence and live checks](doc/test-evidence/2026-11-07-v0.5.1.md)
+See [release notes](doc/releases/0.5.2.md), [A320 starter guidance](doc/A320-starter-profile.md)
+and the bundled illustrated manual. [0.5.2 release evidence and live checks](doc/test-evidence/2026-11-07-v0.5.2.md)
 separate automated verification from simulator acceptance. Earlier tester recipes remain available in their Git tags.
 
 Install ReportLab for manual generation and obtain Inno Setup with `tools/get-installer-compiler.ps1`.

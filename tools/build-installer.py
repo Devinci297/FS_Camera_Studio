@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The installer-test harness: test process names for the guards, and its own app ID, name and folder, so it can run
 # beside a real installation without touching its registration, backups or start-menu entries.
-HARNESS_DEFINES = ('#define SimulatorProcessName "FSCS-Installer-Test-Sim.exe"\n'
+HARNESS_DEFINES = ('#define UpdateProtocol "fscamerastudio-test"\n'
+                   '#define SimulatorProcessName "FSCS-Installer-Test-Sim.exe"\n'
                    '#define XPlaneProcessName "FSCS-Installer-Test-XPlane.exe"\n'
                    '#define SetupAppId "{{5E0B1C3A-7A51-4C8E-9E51-2F0C7B9A11D4}"\n'
                    '#define SetupName "FS Camera Studio (Installer test)"\n'
@@ -50,6 +51,10 @@ def xplane_plugin(args):
 def build(args):
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-test\.\d{8}\.\d+)?', args.version):
         raise ValueError('Use a release ID such as 0.2.0 or 0.2.0-test.20261011.1')
+    subprocess.run([shutil.which('pwsh') or 'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                    str(ROOT / 'tools/build-updater.ps1')], check=True)
+    updater = ROOT / 'build/updater/FSCSUpdater.exe'
+    updater_sha = hashlib.sha256(updater.read_bytes()).hexdigest()
     package = (ROOT / args.package).resolve()
     receipt = json.loads((ROOT / args.receipt).read_text(encoding='utf-8-sig'))
     actual = inventory(package)
@@ -79,6 +84,7 @@ def build(args):
     output = ROOT / ('build/installer-harness' if args.test_harness else 'dist') / args.version
     stage.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(updater, stage / 'FSCSUpdater.exe')
     payload = stage / 'payload'
     if payload.exists() and set(inventory(payload)) != set(actual):
         raise ValueError('Unexpected stale payload files. Use a new build ID.')
@@ -117,7 +123,7 @@ def build(args):
                 simulators=['MSFS 2024', 'X-Plane 12'], xplanePluginFiles=plugin_files,
                 xplanePluginFileCount=len(plugin_files),
                 liveSimulatorVerified=bool(receipt.get('liveVerified', False)),
-                installerSigned=False, testHarness=args.test_harness)
+                installerSigned=False, testHarness=args.test_harness, updaterSha256=updater_sha, updaterProtocol='fscamerastudio-test' if args.test_harness else 'fscamerastudio')
     (stage / 'BUILD-INFO.json').write_text(json.dumps(info, indent=2)+'\n', encoding='utf-8')
     numeric = args.version.split('-')[0] + '.' + (args.version.rsplit('.', 1)[1] if '-test.' in args.version else '0')
     (stage / 'release.iss').write_text(
@@ -140,7 +146,9 @@ def build(args):
     (stage / 'payload.iss').write_text('\n'.join(entries)+'\n', encoding='utf-8-sig')
     (stage / 'verify.iss').write_text(
         'procedure VerifyPayload;\nbegin\n  if MsfsSelected then begin\n' + '\n'.join(verifies) +
-        '\n  end;\n  if XPlaneSelected then begin\n' + '\n'.join(xverifies) + '\n  end;\nend;\n', encoding='utf-8-sig')
+        '\n  end;\n  if XPlaneSelected then begin\n' + '\n'.join(xverifies) + '\n  end;\n' +
+        f"  if GetSHA256OfFile(ExpandConstant('{{localappdata}}\\{{#ControlFolder}}\\Updater\\{{#ReleaseVersion}}\\FSCSUpdater.exe')) <> '{updater_sha}' then RaiseException('Updater verification failed.');\n" +
+        'end;\n', encoding='utf-8-sig')
     compiler = (ROOT / args.compiler).resolve()
     if not compiler.is_file():
         raise ValueError('Inno Setup compiler not found. Run tools/get-installer-compiler.ps1 or pass --compiler.')
@@ -165,9 +173,9 @@ def build(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='0.5.1')
-    parser.add_argument('--package', default='build/release/0.5.1/fs-camera-studio')
-    parser.add_argument('--receipt', default='build/release/0.5.1/staged.json')
+    parser.add_argument('--version', default='0.5.2')
+    parser.add_argument('--package', default='build/release/0.5.2/fs-camera-studio')
+    parser.add_argument('--receipt', default='build/release/0.5.2/staged.json')
     parser.add_argument('--xplane', default='build-xp/XPCameraStudio', help='The built X-Plane plugin folder (win_x64 and ui).')
     parser.add_argument('--compiler', default='build/installer-tools/inno/ISCC.exe')
     parser.add_argument('--test-harness', action='store_true', help='Internal lifecycle test build, always under build/, never dist/. Uses a named test process guard.')

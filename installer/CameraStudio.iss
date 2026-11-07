@@ -1,5 +1,8 @@
 ; Build with tools/build-installer.py. Payload includes come from a verified package receipt.
 #include "release.iss"
+#ifndef UpdateProtocol
+  #define UpdateProtocol "fscamerastudio"
+#endif
 #ifndef SimulatorProcessName
   #define SimulatorProcessName "FlightSimulator2024.exe"
 #endif
@@ -63,12 +66,20 @@ Type: filesandordirs; Name: "{code:XPlaneDir}"; Components: xplane
 
 [Files]
 #include "payload.iss"
+Source: "{#StageRoot}\FSCSUpdater.exe"; DestDir: "{localappdata}\{#ControlFolder}\Updater\{#ReleaseVersion}"; Flags: ignoreversion
 Source: "{#StageRoot}\TESTER-GUIDE.txt"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
 Source: "{#StageRoot}\THIRD-PARTY-NOTICES.txt"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
 Source: "{#StageRoot}\BUILD-INFO.json"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
 Source: "{#StageRoot}\FS-Camera-Studio-Manual.pdf"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
 
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\{#UpdateProtocol}"; ValueType: string; ValueData: "URL:Camera Studio update"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#UpdateProtocol}"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\{#UpdateProtocol}\shell\open\command"; ValueType: string; ValueData: """{localappdata}\{#ControlFolder}\Updater\{#ReleaseVersion}\FSCSUpdater.exe"" ""%1"""
+
 [Icons]
+Name: "{userprograms}\{#ControlFolder}\Check for updates"; Filename: "{localappdata}\{#ControlFolder}\Updater\{#ReleaseVersion}\FSCSUpdater.exe"
+
 Name: "{userprograms}\{#ControlFolder}\Tester guide"; Filename: "{localappdata}\{#ControlFolder}\TESTER-GUIDE.txt"
 Name: "{userprograms}\{#ControlFolder}\User manual"; Filename: "{localappdata}\{#ControlFolder}\FS-Camera-Studio-Manual.pdf"
 Name: "{userprograms}\{#ControlFolder}\Uninstall"; Filename: "{uninstallexe}"

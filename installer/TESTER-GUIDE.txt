@@ -1,4 +1,4 @@
-FS CAMERA STUDIO - VERSION 0.5.1
+FS CAMERA STUDIO - VERSION 0.5.2
 Microsoft Flight Simulator 2024 and X-Plane 12 | Windows 11 x64
 
 INSTALL
@@ -82,9 +82,13 @@ Physical hardware behavior still needs tester verification.
 
 UPGRADE / REPAIR
 The app bar shows the version. Click it for Version & updates in Settings.
-Check for updates queries official GitHub releases; Download update opens the
-installer in your browser. A selectable URL is provided if browser launch is
-unavailable. Close MSFS before running setup. Automatic checks can be disabled.
+Checks run every six hours while a panel is open. An editor notice and mini
+panel button announce new versions. Update now opens the Windows updater:
+it verifies the download and waits for MSFS and X-Plane to close before setup.
+Save your views first. Cancel is available until setup starts. Updates install
+only after your click. Use Download installer if the updater does not open,
+or Start > FS Camera Studio > Check for updates. Automatic checks can be disabled.
+Install 0.5.2 manually once to enable the updater for future versions.
 The illustrated User manual is included and available in Start > FS Camera Studio.
 
 Close MSFS and run the newer setup over the same Community location. Setup
@@ -144,6 +148,11 @@ INCLUDED FEATURES
   then Refresh, select a file and Import. Pasting profile code is also supported.
 - Successful saves request a native confirmation chime. Settings > Test sound
   checks the simulator UI sound route; spoken WAV is browser-only.
+
+NEW IN VERSION 0.5.2
+- Automatic official-release checks, update notices, Later and a mini update button.
+- Click Update now for verified download and installation after both sims close.
+- Existing installs retain their selected simulators, folders and saved profiles.
 
 NEW IN VERSION 0.5.1
 - Profiles hold up to 2,000 cameras; airport generation still stops at 500.

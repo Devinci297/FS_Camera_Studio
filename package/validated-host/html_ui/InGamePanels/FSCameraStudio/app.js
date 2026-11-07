@@ -2618,7 +2618,9 @@
     if(collapsed)legend.hidden=true;
     dock.style.gridTemplateColumns=categoryWidth+'px minmax(0,1fr)';
     const tools=dock.querySelector('.mc-dock-tools');tools.style.minHeight='28px';
-    const total=height+42;
+    const update=$('mc-mini-update'),hasUpdate=Boolean(update&&!update.hidden);
+    dock.dataset.updateAvailable=String(hasUpdate);
+    const total=height+42+(hasUpdate?32:0);
     dock.style.height=total+'px';dock.style.maxHeight=total+'px';
     placeMiniCategoryDivider(dock,pane,collapsed,icons);
     sizeMiniClearance();
@@ -5930,7 +5932,7 @@
     $('mc-mini-pin').addEventListener('click', () => setMiniPinned(!miniPinned, true));
   }
 
-  window.FSCApp = { state: S, bridge, parseAirportXml };
+  window.FSCApp = { state: S, bridge, parseAirportXml, announce, refreshMiniLayout: layoutMiniCategories };
   if (bridge.demo) window.FSCDemo = bridge.demo;
   window.FSCIcons.hydrateIcons(root);
   $$('button,summary,label').forEach(control => control.classList.add('cursor-interaction'));

@@ -28,7 +28,7 @@ target_compile_definitions(xpcs_plugin PRIVATE XPCS_VERSION="${XPCS_VERSION}"
 set(XPCS_PLUGIN_DIR "${CMAKE_BINARY_DIR}/XPCameraStudio")
 if(WIN32)
     target_compile_definitions(xpcs_plugin PRIVATE IBM=1)
-    target_link_libraries(xpcs_plugin PRIVATE "${FSCS_XPSDK_DIR}/Libraries/Win/XPLM_64.lib")
+    target_link_libraries(xpcs_plugin PRIVATE "${FSCS_XPSDK_DIR}/Libraries/Win/XPLM_64.lib" shell32)
     set(XPCS_PLATFORM_DIR win_x64)
 elseif(APPLE)
     message(FATAL_ERROR "Mac builds come later: add the SDK frameworks to third_party/XPSDK first")

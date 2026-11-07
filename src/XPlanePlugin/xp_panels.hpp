@@ -71,6 +71,8 @@ private:
     static const char* onPanelHover(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanelPopOut(XPLMWindowID window, const char* json, void* refcon);
     void create(Surface s);
+    static const char* onUpdate(XPLMWindowID window, const char* json, void* refcon);
+    static const char* onOpenUrl(XPLMWindowID window, const char* json, void* refcon);
     static const char* onKeys(XPLMWindowID window, const char* json, void* refcon);
     static const char* onFrame(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanel(XPLMWindowID window, const char* json, void* refcon);
