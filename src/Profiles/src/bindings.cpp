@@ -6,13 +6,15 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
+#include <tuple>
 #include <utility>
 
 namespace fscs::profiles {
 
 namespace {
 
-constexpr std::array<std::pair<Action, const char*>, 28> kActions{{
+constexpr std::array<std::pair<Action, const char*>, 37> kActions{{
     {Action::SaveViews, "saveViews"},
     {Action::ToggleHeadTracking, "toggleHeadTracking"}, {Action::ToggleAirportAuto, "toggleAirportAuto"},
     {Action::SelectView, "selectView"},       {Action::PeekView, "peekView"},
@@ -27,6 +29,11 @@ constexpr std::array<std::pair<Action, const char*>, 28> kActions{{
     {Action::MoveUp, "moveUp"},               {Action::MoveDown, "moveDown"},
     {Action::MoveFast, "moveFast"}, {Action::ZoomIn, "zoomIn"},               {Action::ZoomOut, "zoomOut"},
     {Action::PanicRelease, "panicRelease"},
+    {Action::Binoculars, "binoculars"},
+    {Action::GlanceHold, "glanceHold"}, {Action::GlanceNext, "glanceNext"}, {Action::GlanceReturn, "glanceReturn"},
+    {Action::ToggleCinematic, "toggleCinematic"},
+    {Action::SpotNext, "spotNext"}, {Action::SpotPrevious, "spotPrevious"}, {Action::SpotReturn, "spotReturn"},
+    {Action::ToggleAutoSpot, "toggleAutoSpot"},
 }};
 
 const char* povName(PovDirection d) {
@@ -258,16 +265,168 @@ json defaultBindingsDocument() {
         {"releaseCamera", {"R", "R"}},   {"toggleEditor", {"E", "E"}}, {"toggleMini", {"M", "M"}},
         {"recenterLook", {"C", "C"}},    {"lookLeft", {"VK_LEFT", "Left arrow"}}, {"lookRight", {"VK_RIGHT", "Right arrow"}},
         {"lookUp", {"VK_UP", "Up arrow"}}, {"lookDown", {"VK_DOWN", "Down arrow"}},
-        {"panicRelease", {"X", "X"}}};
+        {"panicRelease", {"X", "X"}},
+        {"binoculars", {"Z", "Z"}},
+        {"glanceHold", {"G", "G"}}, {"glanceNext", {"I", "I"}}, {"glanceReturn", {"U", "U"}},
+        {"toggleCinematic", {"K", "K"}},
+        {"spotNext", {"T", "T"}}, {"spotPrevious", {"Y", "Y"}}, {"spotReturn", {"O", "O"}}, {"toggleAutoSpot", {"J", "J"}}};
     for (const auto& [action, k] : rest) list.push_back({{"action", action}, {"input", key(k.first, k.second)}});
     return upgradeMovementBindings({{"schemaVersion", kBindingsSchemaVersion}, {"bindings", list}});
 }
 
 json defaultSettingsDocument() {
-    return {{"schemaVersion", kSettingsSchemaVersion},
+    json doc = {{"schemaVersion", kSettingsSchemaVersion},
             {"ui", {{"shortcuts", true}, {"contrast", false}, {"backups", true}, {"remember", true}, {"precision", "normal"},
                     {"theme", "dark"}, {"reducedMotion", false}, {"miniEnabled", true}, {"miniHover", true}, {"miniPinned", false}, {"miniOpacity", 0.65}, {"mainOpacity", 1.0}, {"nameDisplay", "both"}}},
-            {"host", {{"allowUnqualifiedAdapter", false}, {"lookSpeedDegPerSec", 60.0}, {"moveSpeedMetersPerSec", 0.5}, {"airportRadiusNm", 25.0}, {"mouseSensitivity", 1.0}, {"mouseSmoothingMs", 55.0}, {"mouseLookEnabled", true}, {"mouseInvertY", false}, {"globalHeadTrackingEnabled", false}, {"globalAircraftTracking", "both"}, {"airportTrackingHorizonGuard", true}, {"airportAutoZoomEnabled", false}, {"airportAutoZoomFrameMeters", 40.0}, {"airportAutoZoomMinFovDeg", 10.0}, {"airportAutoZoomMaxFovDeg", 90.0}, {"airportAutoZoomResponseSeconds", 1.0}, {"airportCategoryHeights", {{"runways",3.0},{"gates",3.0},{"apron",3.0},{"taxi",3.0},{"tower",35.0}}}}}};
+            {"host", {{"allowUnqualifiedAdapter", false}, {"lookSpeedDegPerSec", 60.0}, {"moveSpeedMetersPerSec", 0.5}, {"airportRadiusNm", 25.0}, {"mouseSensitivity", 1.0}, {"mouseSmoothingMs", 55.0}, {"mouseLookEnabled", true}, {"mouseInvertY", false}, {"globalHeadTrackingEnabled", false}, {"globalAircraftTracking", "both"}, {"airportTrackingHorizonGuard", true}, {"airportAutoZoomEnabled", false}, {"airportAutoZoomFrameMeters", 40.0}, {"airportAutoZoomMinFovDeg", 10.0}, {"airportAutoZoomMaxFovDeg", 90.0}, {"airportAutoZoomResponseSeconds", 1.0}, {"airportCategoryHeights", {{"runways",3.0},{"gates",3.0},{"apron",3.0},{"taxi",3.0},{"tower",35.0}}}, {"airportAutoGenerate", true}, {"binocularsFovDeg", 10.0}}}};
+    const HostSettings cinematic;
+    doc["host"].update({{"cinematicMinSeconds", cinematic.cinematicMinSeconds}, {"cinematicMaxSeconds", cinematic.cinematicMaxSeconds},
+                        {"cinematicCockpitWeight", cinematic.cinematicCockpitWeight}, {"cinematicCuts", cinematic.cinematicCuts},
+                        {"cinematicDrift", cinematic.cinematicDrift}});
+    doc["host"].update({{"spottingRadiusNm", cinematic.spottingRadiusNm}, {"autoSpotHoldSeconds", cinematic.autoSpotHoldSeconds}});
+    doc["host"]["spottingSpots"] = json::array();
+    doc["host"].update({{"gamepadSticksEnabled", cinematic.gamepadSticksEnabled}, {"gamepadBlocksAircraft", cinematic.gamepadBlocksAircraft},
+                        {"gamepadDeadzone", cinematic.gamepadDeadzone}, {"gamepadAxes", json::array()}});
+    return doc;
+}
+
+namespace {
+constexpr std::array<std::pair<GamepadFunction, const char*>, kGamepadFunctionCount> kGamepadFunctions{{
+    {GamepadFunction::Forward, "forward"}, {GamepadFunction::Right, "right"}, {GamepadFunction::Climb, "climb"},
+    {GamepadFunction::Descend, "descend"}, {GamepadFunction::Yaw, "yaw"}, {GamepadFunction::Pitch, "pitch"}}};
+}  // namespace
+
+const char* toString(GamepadFunction f) {
+    for (const auto& [v, name] : kGamepadFunctions) if (v == f) return name;
+    return "forward";
+}
+
+std::optional<GamepadFunction> parseGamepadFunction(const std::string& s) {
+    for (const auto& [v, name] : kGamepadFunctions) if (s == name) return v;
+    return std::nullopt;
+}
+
+bool validAxisDefinition(const std::string& d) {
+    static const char* const kAxes[] = {"XAxis", "YAxis", "ZAxis", "RxAxis", "RyAxis", "RzAxis", "Slider"};
+    if (d.compare(0, 9, "joystick:") != 0) return false;
+    std::size_t i = 9, digits = 0;
+    while (i < d.size() && std::isdigit(static_cast<unsigned char>(d[i]))) { ++i; ++digits; }
+    if (digits == 0 || digits > 3 || i >= d.size() || d[i] != ':') return false;
+    const std::string axis = d.substr(i + 1);
+    return std::any_of(std::begin(kAxes), std::end(kAxes), [&](const char* a) { return axis == a; });
+}
+
+std::vector<GamepadAxis> parseGamepadAxes(const json& axes) {
+    std::vector<GamepadAxis> out;
+    if (!axes.is_array()) return out;
+    for (const auto& v : axes) {
+        if (out.size() >= kGamepadFunctionCount) break;
+        if (!v.is_object()) continue;
+        const auto function = parseGamepadFunction(js::str(v, "function"));
+        const std::string definition = js::str(v, "definition");
+        if (!function || !validAxisDefinition(definition)) continue;
+        if (std::any_of(out.begin(), out.end(), [&](const GamepadAxis& a) { return a.function == *function; })) continue;
+        const auto& restValue = js::get(v, "rest");
+        const auto& fullValue = js::get(v, "full");
+        const double rest = restValue.is_number() ? restValue.get<double>() : 0.0;
+        const double full = fullValue.is_number() ? fullValue.get<double>() : NAN;
+        if (!std::isfinite(rest) || !std::isfinite(full)) continue;
+        GamepadAxis a;
+        a.function = *function;
+        a.definition = definition;
+        a.rest = std::clamp(rest, -kGamepadAxisLimit, kGamepadAxisLimit);
+        a.full = std::clamp(full, -kGamepadAxisLimit, kGamepadAxisLimit);
+        if (std::abs(a.full - a.rest) < kGamepadMinSpan) continue;
+        std::string label;
+        for (const char c : js::str(v, "label")) if (static_cast<unsigned char>(c) >= 32 && c != 127) label.push_back(c);
+        if (label.size() > 120) label.resize(120);
+        while (!label.empty() && !js::validUtf8(label)) label.pop_back();
+        a.label = label.empty() ? definition : label;
+        out.push_back(std::move(a));
+    }
+    return out;
+}
+
+json normalizeGamepadAxes(const json& axes) {
+    json out = json::array();
+    for (const auto& a : parseGamepadAxes(axes))
+        out.push_back({{"function", toString(a.function)}, {"definition", a.definition}, {"label", a.label}, {"rest", a.rest}, {"full", a.full}});
+    return out;
+}
+
+namespace {
+
+// Printable text, trimmed, at most `max` bytes without splitting a UTF-8 sequence.
+std::string cleanText(const std::string& text, std::size_t max) {
+    std::string out;
+    for (const char c : text)
+        if (static_cast<unsigned char>(c) >= 32 && c != 127) out.push_back(c);
+    const auto first = out.find_first_not_of(' ');
+    if (first == std::string::npos) return {};
+    out = out.substr(first, out.find_last_not_of(' ') - first + 1);
+    if (out.size() > max) {
+        std::size_t lead = max;
+        while (lead > 0 && (static_cast<unsigned char>(out[lead]) & 0xC0) == 0x80) --lead;
+        out.resize(lead);
+    }
+    return out;
+}
+
+bool spotIdValid(const std::string& id) {
+    return !id.empty() && id.size() <= 64 && std::all_of(id.begin(), id.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.' || c == ':';
+    });
+}
+
+}  // namespace
+
+json normalizeSpottingSpots(const json& spots) {
+    json out = json::array();
+    if (!spots.is_array()) return out;
+    std::vector<std::string> ids;
+    const auto taken = [&](const std::string& id) { return std::find(ids.begin(), ids.end(), id) != ids.end(); };
+    const auto number = [](const json& v, const char* key) {
+        const auto& x = js::get(v, key);
+        return x.is_number() ? x.get<double>() : NAN;
+    };
+    for (const auto& v : spots) {
+        if (out.size() >= kSpottingSpotsMax) break;
+        if (!v.is_object()) continue;
+        const std::string kind = js::str(v, "kind");
+        json spot{{"kind", kind}};
+        if (kind == "position") {
+            const double lat = number(v, "latitude"), lon = number(v, "longitude"), alt = number(v, "altitudeMeters");
+            if (!std::isfinite(lat) || !std::isfinite(lon) || !std::isfinite(alt) || std::abs(lat) > 90 || std::abs(lon) > 180) continue;
+            spot.update({{"latitude", lat}, {"longitude", lon}, {"altitudeMeters", std::clamp(alt, kSpottingSpotMinAltitude, kSpottingSpotMaxAltitude)}});
+        } else if (kind == "fence" || kind == "approach" || kind == "threshold" || kind == "custom") {
+            const std::string end = cleanText(js::str(v, "runwayEnd"), 8);
+            if (end.empty()) continue;
+            spot["runwayEnd"] = end;
+            for (const auto& [key, low, high] : {std::tuple<const char*, double, double>{"behindMeters", -kSpottingSpotOffsetMaxMeters, kSpottingSpotOffsetMaxMeters},
+                                                 {"sideMeters", -kSpottingSpotOffsetMaxMeters, kSpottingSpotOffsetMaxMeters},
+                                                 {"heightMeters", 0.0, kSpottingSpotHeightMaxMeters}}) {
+                const double x = number(v, key);
+                if (std::isfinite(x)) spot[key] = std::clamp(x, low, high);  // missing: the kind's default
+            }
+        } else {
+            continue;
+        }
+        std::string icao;
+        for (const char c : js::str(v, "icao"))
+            if (std::isalnum(static_cast<unsigned char>(c))) icao.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        spot["icao"] = icao.size() <= 8 ? icao : std::string();
+        const std::string name = cleanText(js::str(v, "name"), kSpottingSpotNameMax);
+        spot["name"] = name.empty() ? std::string("Spot") : name;
+        std::string id = js::str(v, "id");
+        if (!spotIdValid(id) || taken(id)) {
+            std::size_t n = out.size() + 1;
+            do id = "spot-" + std::to_string(n++); while (taken(id));
+        }
+        ids.push_back(id);
+        spot["id"] = id;
+        out.push_back(std::move(spot));
+    }
+    return out;
 }
 
 json normalizeSettings(const json& doc) {
@@ -291,7 +450,17 @@ json normalizeSettings(const json& doc) {
                    {"airportTrackingHorizonGuard", h.airportTrackingHorizonGuard},
                    {"airportAutoZoomEnabled", h.airportAutoZoomEnabled}, {"airportAutoZoomFrameMeters", h.airportAutoZoomFrameMeters},
                    {"airportAutoZoomMinFovDeg", h.airportAutoZoomMinFovDeg}, {"airportAutoZoomMaxFovDeg", h.airportAutoZoomMaxFovDeg},
-                   {"airportAutoZoomResponseSeconds", h.airportAutoZoomResponseSeconds}, {"airportCategoryHeights",h.airportCategoryHeights}};
+                   {"airportAutoZoomResponseSeconds", h.airportAutoZoomResponseSeconds}, {"airportCategoryHeights",h.airportCategoryHeights},
+                   {"binocularsFovDeg", h.binocularsFovDeg}};
+    out["host"].update({{"cinematicMinSeconds", h.cinematicMinSeconds}, {"cinematicMaxSeconds", h.cinematicMaxSeconds},
+                        {"cinematicCockpitWeight", h.cinematicCockpitWeight}, {"cinematicCuts", h.cinematicCuts},
+                        {"cinematicDrift", h.cinematicDrift}});
+    out["host"]["airportAutoGenerate"] = h.airportAutoGenerate;
+    out["host"].update({{"spottingRadiusNm", h.spottingRadiusNm}, {"autoSpotHoldSeconds", h.autoSpotHoldSeconds}});
+    out["host"]["spottingSpots"] = normalizeSpottingSpots(js::get(js::object(doc, "host"), "spottingSpots"));
+    out["host"].update({{"gamepadSticksEnabled", h.gamepadSticksEnabled}, {"gamepadBlocksAircraft", h.gamepadBlocksAircraft},
+                        {"gamepadDeadzone", h.gamepadDeadzone},
+                        {"gamepadAxes", normalizeGamepadAxes(js::get(js::object(doc, "host"), "gamepadAxes"))}});
     return out;
 }
 
@@ -314,11 +483,24 @@ HostSettings parseHostSettings(const json& doc) {
     s.airportAutoZoomResponseSeconds = std::clamp(js::num(host,"airportAutoZoomResponseSeconds",1),0.1,5.0);
     const auto& heights=js::object(host,"airportCategoryHeights");
     for (auto& entry : s.airportCategoryHeights) entry.second=std::clamp(js::num(heights,entry.first.c_str(),entry.second),0.,1000.);
+    s.airportAutoGenerate = js::boolean(host, "airportAutoGenerate", true);
     s.mouseInvertY = js::boolean(host, "mouseInvertY", false);
     s.lookSpeedDegPerSec = std::clamp(js::num(host, "lookSpeedDegPerSec", 60.0), 5.0, 360.0);
     s.moveSpeedMetersPerSec = std::clamp(js::num(host, "moveSpeedMetersPerSec", 0.5), 0.05, 20.0);
     const auto precision = js::str(js::object(doc, "ui"), "precision", "normal");
     s.movementPrecisionScale = precision == "fine" ? 0.1 : precision == "coarse" ? 10.0 : 1.0;
+    s.binocularsFovDeg = std::clamp(js::num(host, "binocularsFovDeg", 10.0), kBinocularsMinFovDeg, kBinocularsMaxFovDeg);
+    s.cinematicMinSeconds = std::clamp(js::num(host, "cinematicMinSeconds", 8.0), kCinematicMinDwellSeconds, kCinematicMaxDwellSeconds);
+    s.cinematicMaxSeconds = std::clamp(js::num(host, "cinematicMaxSeconds", 20.0), s.cinematicMinSeconds, kCinematicMaxDwellSeconds);
+    s.cinematicCockpitWeight = std::clamp(js::num(host, "cinematicCockpitWeight", .15), 0.0, 1.0);
+    s.cinematicCuts = js::boolean(host, "cinematicCuts", true);
+    s.cinematicDrift = js::boolean(host, "cinematicDrift", true);
+    s.spottingRadiusNm = std::clamp(js::num(host, "spottingRadiusNm", 20.0), kSpottingMinRadiusNm, kSpottingMaxRadiusNm);
+    s.autoSpotHoldSeconds = std::clamp(js::num(host, "autoSpotHoldSeconds", 30.0), kAutoSpotMinHoldSeconds, kAutoSpotMaxHoldSeconds);
+    s.gamepadSticksEnabled = js::boolean(host, "gamepadSticksEnabled", true);
+    s.gamepadBlocksAircraft = js::boolean(host, "gamepadBlocksAircraft", true);
+    s.gamepadDeadzone = std::clamp(js::num(host, "gamepadDeadzone", 0.15), 0.0, kGamepadMaxDeadzone);
+    s.gamepadAxes = parseGamepadAxes(js::get(host, "gamepadAxes"));
     return s;
 }
 

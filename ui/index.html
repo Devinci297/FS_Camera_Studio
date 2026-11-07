@@ -27,6 +27,7 @@
         <span class="mc-brand-icon"><i data-icon="aperture"></i></span>
         <div class="mc-brand"><h2>Camera Studio</h2><p>In-sim camera control</p></div>
         <button type="button" class="mc-profile-button" id="mc-profile-picker"><i data-icon="plane"></i><span id="mc-profile-label">Starting Camera Studio...</span><i data-icon="chevron-down"></i></button>
+        <button type="button" class="mc-compact-button mc-pop-out" id="mc-pop-out" aria-label="Pop out the editor into its own window" hidden><i data-icon="pop-out"></i><i data-icon="pop-in"></i><span id="mc-pop-out-label">Pop out</span></button>
         <button type="button" class="mc-compact-button" id="mc-compact"><i data-icon="panel-bottom"></i><span>Compact</span></button>
         <button type="button" class="mc-icon-button mc-quiet" id="mc-hide" aria-label="Hide editor and keep quick access"><i data-icon="x"></i></button>
       </header>
@@ -34,6 +35,7 @@
         <button type="button" role="tab" id="mc-nav-cameras" data-page="cameras" aria-selected="true" aria-controls="mc-page-cameras"><i data-icon="camera"></i>Cameras</button>
         <button type="button" role="tab" id="mc-nav-bindings" data-page="bindings" aria-selected="false" aria-controls="mc-page-bindings"><i data-icon="keyboard"></i>Bindings</button>
         <button type="button" role="tab" id="mc-nav-profiles" data-page="profiles" aria-selected="false" aria-controls="mc-page-profiles"><i data-icon="folder-open"></i>Profiles</button>
+        <button type="button" role="tab" id="mc-nav-traffic" data-page="traffic" aria-selected="false" aria-controls="mc-page-traffic"><i data-icon="radio"></i>Traffic</button>
         <button type="button" role="tab" id="mc-nav-settings" data-page="settings" aria-selected="false" aria-controls="mc-page-settings"><i data-icon="settings-2"></i>Settings</button>
         <span class="mc-status"><span class="mc-status-dot"></span><span id="mc-control-state" role="status">Starting Camera Studio...</span><button type="button" id="mc-fault-details" hidden>Details</button></span>
       </nav>
@@ -67,7 +69,7 @@
               <div class="mc-axis-grid" id="mc-position-fields"></div>
               <div class="mc-section-heading mc-pose-section"><h4>Orientation</h4><span>Rotate your view</span></div>
               <div class="mc-axis-grid" id="mc-angle-fields"></div>
-              <div class="mc-pose-toolbar"><button type="button" class="mc-secondary mc-save-current-view" id="mc-save-current-view"><i data-icon="camera"></i>Capture current view</button><button type="button" id="mc-restore-pose"><i data-icon="rotate-ccw"></i>Restore saved pose</button><button type="button" id="mc-center-look"><i data-icon="crosshair"></i>Reset rotation</button><small>Type a value · Drag a slider to adjust</small></div>
+              <div class="mc-pose-toolbar"><button type="button" class="mc-secondary mc-save-current-view" id="mc-save-current-view"><i data-icon="camera"></i>Capture current view</button><button type="button" id="mc-restore-pose"><i data-icon="rotate-ccw"></i>Restore saved pose</button><button type="button" id="mc-center-look"><i data-icon="crosshair"></i>Reset rotation</button><small>Type a value, or drag a slider to adjust</small></div>
               <div class="mc-divider"></div>
               <div class="mc-lens-controls"><div class="mc-lens-top"><h4 id="mc-fov-heading">Field of view - sim FOV</h4><label class="mc-value-input"><input type="number" id="mc-fov-number" min="30" max="110" step="1" value="62" aria-label="Field of view in degrees (sim FOV)"><span>deg</span></label></div>
               <input type="range" id="mc-fov-range" min="30" max="110" step="1" value="62" aria-label="Field of view">
@@ -87,7 +89,7 @@
               <div class="mc-form-grid"><label class="mc-field">Preset<select id="mc-effects-preset"><option value="off">Off</option><option value="subtle">Subtle</option><option value="realistic">Realistic</option><option value="action">Action</option><option value="custom" disabled>Custom</option></select></label></div>
               <p class="mc-note" id="mc-effects-status"></p>
               <div id="mc-effects-controls"></div>
-              <p class="mc-note">Cockpit, exterior and orbit views; exterior and orbit views move at half strength. Airport and fly-by views stay fixed. Effects are temporary: they never change your saved pose, mouse look or field of view. Start low if another add-on also adds camera motion.</p>
+              <p class="mc-note">Cockpit, exterior and orbit views; exterior and orbit views move at half strength without head movement. Airport and fly-by views stay fixed. Effects are temporary: they never change your saved pose, mouse look or field of view. Start low if another add-on also adds camera motion.</p>
             </section>
 
             </div>
@@ -96,6 +98,8 @@
               <div class="mc-divider"></div>
               <label class="mc-switch-row"><span class="mc-switch-copy"><span>Default view for this profile</span><small>Start here when the camera profile loads.</small></span><input type="checkbox" class="mc-switch" id="mc-default-view" aria-label="Default view for this profile"></label>
               <label class="mc-switch-row"><span class="mc-switch-copy"><span>Show in quick access</span><small>Keep this view in your compact favorites strip.</small></span><input type="checkbox" class="mc-switch" id="mc-quick-access" aria-label="Show in quick access"></label>
+              <label class="mc-switch-row"><span class="mc-switch-copy"><span>Glance view</span><small id="mc-glance-note">Hold Glance to look at the nearest instrument view, release to return.</small></span><input type="checkbox" class="mc-switch" id="mc-glance" aria-label="Glance view" aria-describedby="mc-glance-note"></label>
+              <label class="mc-switch-row"><span class="mc-switch-copy"><span>Include in Cinematic mode</span><small id="mc-cinematic-note">Cinematic mode can show this view in its automatic playlist.</small></span><input type="checkbox" class="mc-switch" id="mc-cinematic" aria-label="Include in Cinematic mode" aria-describedby="mc-cinematic-note"></label>
               <div class="mc-inline-field"><span class="mc-switch-copy"><span id="mc-mouse-release-label">After right-drag mouse look</span><small>Keep the new direction until you recall or save it, or return to the saved view when you release the button.</small></span><div class="mc-setting-choices" id="mc-mouse-release" role="group" aria-labelledby="mc-mouse-release-label"><button type="button" data-value="retain">Keep look</button><button type="button" data-value="reset">Return to saved</button></div></div>
               <label class="mc-switch-row"><span class="mc-switch-copy"><span>Remember temporary mouse look</span><small>Retain your look direction when revisiting.</small></span><input type="checkbox" class="mc-switch" id="mc-retain-look" aria-label="Remember temporary mouse look"></label>
               <div class="mc-inline-field mc-follow-horizon"><span class="mc-switch-copy"><span id="mc-follow-horizon-label">Follow horizon</span><small id="mc-follow-horizon-note">1 = banks with the aircraft, 0 = horizon stays level.</small></span><div class="mc-follow-horizon-input"><input type="range" id="mc-follow-horizon-range" min="0" max="1" step="0.05" value="1" aria-labelledby="mc-follow-horizon-label" aria-describedby="mc-follow-horizon-note"><label class="mc-value-input"><input type="number" id="mc-follow-horizon-number" min="0" max="1" step="0.05" value="1" aria-label="Follow horizon, from 0 (level) to 1 (banks with the aircraft)"></label></div></div>
@@ -119,6 +123,14 @@
         <div id="mc-airports-summary" class="mc-airports-summary"></div>
         <p class="mc-note">Profiles are stored with Camera Studio in the simulator. Import, export and restore use in-panel dialogs.</p>
       </section>
+      <section class="mc-page" id="mc-page-traffic" role="tabpanel" aria-labelledby="mc-nav-traffic" hidden>
+        <div class="mc-page-header"><div><div class="mc-eyebrow">SPOTTING</div><h3>Traffic</h3><p>Watch other aircraft from the tower, the runway, a chase or a fly-by camera.</p></div></div>
+        <div class="mc-spot-state" id="mc-spot-state" data-state="off"><i data-icon="radio"></i><span id="mc-spot-state-text" role="status">Not spotting</span><button type="button" id="mc-spot-auto" class="mc-secondary mc-airport-auto" aria-pressed="false"><i data-icon="auto-switch"></i><span>Auto-spot</span></button><button type="button" id="mc-spot-stop" class="mc-secondary" disabled><i data-icon="circle-stop"></i><span>Stop</span></button></div>
+        <div class="mc-binding-filters mc-traffic-filters"><div class="mc-setting-choices" id="mc-traffic-filter" role="group" aria-label="Show traffic"><button type="button" data-value="all" aria-pressed="true">All</button><button type="button" data-value="ground" aria-pressed="false">On ground</button><button type="button" data-value="arriving" aria-pressed="false">Arriving</button><button type="button" data-value="departing" aria-pressed="false">Departing</button><button type="button" data-value="cruise" aria-pressed="false">Cruise</button></div><label class="mc-search"><i data-icon="search"></i><input type="search" id="mc-traffic-search" placeholder="Airline, callsign or type" aria-label="Filter by airline, callsign or type"></label><select id="mc-traffic-distance" aria-label="Maximum distance"><option value="0">Any distance</option><option value="2">Within 2 NM</option><option value="5">Within 5 NM</option><option value="10">Within 10 NM</option><option value="20">Within 20 NM</option><option value="50">Within 50 NM</option></select></div>
+        <div id="mc-traffic-count" class="mc-note" role="status"></div>
+        <div class="mc-traffic-empty" id="mc-traffic-empty" hidden><h4>No traffic nearby</h4><p id="mc-traffic-empty-text"></p></div>
+        <div id="mc-traffic-list" class="mc-traffic-list" aria-label="Nearby aircraft"></div>
+      </section>
       <section class="mc-page" id="mc-page-settings" role="tabpanel" aria-labelledby="mc-nav-settings" hidden>
         <div class="mc-page-header"><div><div class="mc-eyebrow">MAKE THE PANEL YOURS</div><h3>Settings</h3><p>Preferences apply across your camera profiles.</p></div></div>
         <div class="mc-settings-section"><div class="mc-section-label">Navigation &amp; appearance</div>
@@ -137,18 +149,20 @@
           <div class="mc-inline-field"><span id="mc-name-display-label">Category and camera names</span><div class="mc-setting-choices" id="mc-setting-name-display" role="group" aria-labelledby="mc-name-display-label"><button type="button" data-value="icons" aria-pressed="false">Icons</button><button type="button" data-value="labels" aria-pressed="false">Labels</button><button type="button" data-value="both" aria-pressed="true">Both</button></div></div>
           <div class="mc-section-label mc-spaced" id="mc-mouse-settings">Right-drag mouse look</div>
           <label class="mc-switch-row"><span class="mc-switch-copy"><span>Enable right-drag mouse look</span><small>Hold the right mouse button over the scene and drag. Your custom camera stays active.</small></span><input type="checkbox" class="mc-switch" id="mc-setting-mouse-enabled" checked></label>
-          <label class="mc-inline-field"><span>Sensitivity<small>1.0 is the tested smooth default</small></span><span class="mc-unit"><input type="number" id="mc-setting-mouse-sensitivity" min="0.1" max="4" step="0.1">×</span></label>
+          <label class="mc-inline-field"><span>Sensitivity<small>1.0 is the tested smooth default</small></span><span class="mc-unit"><input type="number" id="mc-setting-mouse-sensitivity" min="0.1" max="4" step="0.1">x</span></label>
           <label class="mc-inline-field"><span>Smoothing<small>0 is immediate; higher values feel softer</small></span><span class="mc-unit"><input type="number" id="mc-setting-mouse-smoothing" min="0" max="250" step="5">ms</span></label>
           <label class="mc-switch-row"><span>Invert vertical mouse look</span><input type="checkbox" class="mc-switch" id="mc-setting-mouse-invert"></label>
-          <p class="mc-note">Move: W forward · S back · A left · D right · Q raise · E lower. Hold Shift for 4× speed. Movement pauses while typing.</p>
+          <p class="mc-note">Move: W forward, S back, A left, D right, Q raise, E lower. Hold Shift for 4x speed. Movement pauses while typing.</p>
           <button type="button" class="mc-secondary" id="mc-mouse-defaults">Restore mouse-look defaults</button>
           <p class="mc-note">Choose Keep look or Return to saved separately for each camera in Behavior.</p>
           <label class="mc-inline-field"><span>Nearby airport radius<small>Load one saved airport within this distance</small></span><span class="mc-unit"><input type="number" id="mc-setting-airport-radius" min="5" max="100" step="5">NM</span></label>
+          <label class="mc-switch-row"><span class="mc-switch-copy"><span>Temporary airport cameras</span><small>Near an airport without saved cameras, add tower, runway and spotting views automatically. Save them to keep them.</small></span><input type="checkbox" class="mc-switch" id="mc-setting-airport-auto-generate" checked></label>
           <div class="mc-section-label mc-spaced">Simulator</div>
           <label class="mc-switch-row"><span class="mc-switch-copy"><span>Allow live control before axis qualification</span><small class="mc-warn">Only for testing. Run the conformance check to qualify your simulator build.</small></span><input type="checkbox" class="mc-switch" id="mc-setting-unqualified"></label>
           <div class="mc-switch-row"><span class="mc-switch-copy"><span>Simulator axis check</span><small id="mc-qual-state">Axis mapping for this simulator build: not checked yet</small></span><button type="button" class="mc-secondary" id="mc-qual-run">Run axis check</button></div>
           <label class="mc-inline-field"><span>Look speed<small>Manual look bindings</small></span><span class="mc-unit"><input type="number" id="mc-setting-look-speed" min="5" max="360" step="5">deg/s</span></label>
           <label class="mc-inline-field"><span>Move speed<small>Manual move bindings</small></span><span class="mc-unit"><input type="number" id="mc-setting-move-speed" min="0.05" max="10" step="0.05">m/s</span></label>
+          <label class="mc-inline-field"><span>Binoculars zoom<small>Field of view while Binoculars is held (2-60)</small></span><span class="mc-unit"><input type="number" id="mc-setting-binoculars-fov" min="2" max="60" step="1">deg</span></label>
           <div class="mc-profile-actions"><button type="button" class="mc-secondary" id="mc-diagnostics"><i data-icon="info"></i>Diagnostics</button></div>
         </div>
       </section>
@@ -158,6 +172,7 @@
     <div class="mc-mini-off" id="mc-mini-off" role="note"><span>Mini control panel is turned off in Settings</span></div>
     <div class="mc-mini-region" id="mc-mini-region">
     <button type="button" id="mc-mini-trigger" class="mc-mini-trigger" aria-label="Show mini control panel" aria-controls="mc-mini-panel" aria-expanded="false"><span class="mc-mini-handle"><i data-icon="chevron-up"></i>Mini control panel</span></button>
+    <span class="mc-binoculars-badge" id="mc-binoculars-badge" role="status" hidden>Binoculars</span>
     <section class="mc-dock" id="mc-mini-panel" aria-label="Mini camera control panel" aria-hidden="true">
       <div class="mc-dock-categories" id="mc-dock-categories" aria-label="Camera categories"></div>
       <div class="mc-dock-body">

@@ -51,14 +51,14 @@
   let candidate=null, busy=false, attempted=false;
   function checkUpdates() {
     if(busy)return;busy=true;attempted=true;check.disabled=true;download.hidden=true;link.hidden=true;candidate=null;
-    status.textContent='Checking GitHub…';
+    status.textContent='Checking GitHub...';
     const xhr=new XMLHttpRequest();xhr.open('GET',API,true);xhr.timeout=15000;xhr.setRequestHeader('Accept','application/vnd.github+json');
     function finish(error){busy=false;check.disabled=false;if(error)status.textContent=error+' Try again, or visit the GitHub releases page.';}
     xhr.onload=()=>{try {
       if(xhr.status!==200)throw new Error('Update check failed (HTTP '+xhr.status+').');
       if(xhr.responseText.length>2*1024*1024)throw new Error('Update response was too large.');
       candidate=latest(JSON.parse(xhr.responseText),current);
-      if(candidate){status.textContent='Update available: '+candidate.version;download.hidden=false;link.value=candidate.url;badge.textContent='v'+current.split('-')[0]+' · Update';}
+      if(candidate){status.textContent='Update available: '+candidate.version;download.hidden=false;link.value=candidate.url;badge.textContent='v'+current.split('-')[0]+' - Update';}
       else status.textContent='You have the latest available build for this channel.';
       finish();
     }catch(error){finish(error.message);}};

@@ -22,6 +22,7 @@ Camera directions are configured automatically; there is no user axis-calibratio
 | Open assignment, tracking, walkaround and confirmation dialogs | Content scrolls above visible action buttons; no unwanted full-screen opaque panel |
 | Test opacity, reopen and resize | Main and mini alpha settings are independent; scene is visible without native blur |
 | Click cockpit controls around visible and hidden panels | No invisible hit regions block simulator controls |
+| **Pop out** the editor, drag it to a second monitor, edit and save a camera, then **Dock** it; repeat with Right Alt + click | Editor opens in its own opaque desktop window and stays fully usable; Dock returns it to the sim window; no CoherentUIGT crash; mini panel unaffected |
 
 ## Input and camera behavior
 
@@ -39,6 +40,7 @@ Camera directions are configured automatically; there is no user axis-calibratio
 | Wheel zoom, pause, active pause, menus and Release camera | No latched translation or zoom; simulator can recover camera control |
 | Capture current view, review, save and recall | Reviewed pose matches the scene and remains after restart |
 | Orbit and animated fly-by while parked; timed walkaround | Correct mode controls, animation, pause/stop and sequence looping |
+| Settings > Gamepad: Listen for each drone motion on a gamepad, then show a drone and use the sticks and triggers | Left stick moves, right stick turns, triggers climb and descend; releasing stops the drone; the aircraft does not respond to the assigned sticks while the drone is shown and does again on other views |
 
 ## Airport cameras
 

@@ -1,9 +1,10 @@
 #pragma once
-// Profile schema v3 (doc/protocol.md §2.1, design 2.0 §8): validation, migration and an immutable typed snapshot
+// Profile schema v4 (doc/protocol.md §2.1, design 2.0 §8): validation, migration and an immutable typed snapshot
 // for the coordinator. Portable: no Windows API, no exceptions.
 
 #include "fscs/core/engine.hpp"
 #include "fscs/core/effects.hpp"
+#include "fscs/core/mount.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -16,13 +17,13 @@ namespace fscs::profiles {
 
 using json = nlohmann::json;
 
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 constexpr std::size_t kMaxProfileBytes = 10u << 20;
 constexpr std::size_t kMaxCameras = 500;
 constexpr std::size_t kMaxCategories = 100;
 constexpr int kMaxViewId = 2147483647;
 
-enum class CameraMode { AircraftCockpit, AircraftExterior, Orbit, Flyby, Airport, Free };
+enum class CameraMode { AircraftCockpit, AircraftExterior, Orbit, Flyby, Airport, Free, Mounted };
 const char* toString(CameraMode m);
 std::optional<CameraMode> parseMode(const std::string& s);
 // Modes this build can drive live. Others stay visible but cannot activate (design 2.0 §4.8).
@@ -75,7 +76,13 @@ struct CameraEntry {
     bool resetMouseLookOnRelease = false;
     core::EffectsSettings effects;
     double followHorizon = 1;  // 1 = banks with the aircraft, 0 = horizon stays level (presentation only)
+    core::Gimbal gimbal = core::Gimbal::Locked;            // mounted cameras only
+    double mountVibration = core::kDefaultMountVibration;  // mounted cameras only, 0..1
     std::string seedDefinitionName;
+    bool glance = false;  // offered by the Glance bindings (instrument close-up); cockpit views only
+    bool cinematic = true;  // offered by Cinematic mode (automatic view playlist)
+    bool followAircraft = false;    // free cameras only: keep the offset from the aircraft in world axes
+    bool worldOriginValid = false;  // worldOrigin is present and a valid geodetic point
 };
 
 struct CategoryEntry {
@@ -101,6 +108,13 @@ struct ProfileSnapshot {
     const CameraEntry* cameraByViewId(int viewId) const;
     const CategoryEntry* categoryOf(const std::string& cameraId) const;
 };
+
+// Default for a camera without a `glance` flag: cockpit cameras whose icon, or for an automatic icon whose name,
+// marks them as an instrument view (the editor's "view-instrument" icon).
+bool defaultGlance(const json& camera);
+// Default for a camera without a `cinematic` flag: every exterior, orbit, fly-by, airport and mounted view; of the
+// cockpit views only the profile's default (pilot) view. Free cameras are flown by the user and never included.
+bool defaultCinematic(const json& camera, const std::string& defaultCameraId);
 
 // Requires a document that passed validateProfile.
 ProfileSnapshot toSnapshot(const json& doc);

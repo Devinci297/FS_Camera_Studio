@@ -4,6 +4,8 @@
 // (doc/protocol.md). Pure logic over interfaces; the WASM entry points in wasm/ feed it events and frames.
 
 #include "backend.hpp"
+#include "cinematic.hpp"
+#include "gamepad.hpp"
 #include "coordinator.hpp"
 #include "input_router.hpp"
 #include "fscs/profiles/airport.hpp"
@@ -41,6 +43,19 @@ public:
     std::int64_t draftRevision() const { return working_.draftRevision; }
     bool dirty() const { return working_.dirtyProfile || working_.dirtySettings || working_.dirtyBindings; }
     const std::string& bootId() const { return bootId_; }
+    // Cinematic mode: whether the playlist runs, its director (tests), and the director's random source (tests inject
+    // a seeded one for determinism).
+    bool cinematicEnabled() const { return cinematicOn_; }
+    const cinematic::Director& cinematicDirector() const { return cinematic_; }
+    cinematic::Phase cinematicPhase() const { return cinematicPhase_.phase(); }
+    void setCinematicRandom(cinematic::Director::Random random) { cinematic_.setRandom(std::move(random)); }
+    // Spotting (spotting.cpp): the traffic feed, SpotTarget / StopSpotting / SetAutoSpot and session-wide auto-spot.
+    static constexpr double kTrafficPollSeconds = 1.5;      // SimConnect answers each type request once: re-issued
+    static constexpr double kTrafficEmitSeconds = 1.0;      // TrafficChanged at most once a second
+    static constexpr double kTrafficMaxRadiusMeters = 200000;  // SimConnect's limit for a type request
+    static constexpr double kAutoSpotCheckSeconds = .5;
+    static constexpr double kAutoSpotViewSeconds = 5;       // a status-driven view change at most this often
+    bool autoSpotEnabled() const { return autoSpot_; }
 
 private:
     struct Working {
@@ -126,6 +141,65 @@ private:
     std::string loadedAirport_, pinnedAirport_;
     double lastAirportRefresh_=-100;
     bool airportDirty() const;
+    // Cinematic mode (cinematic.cpp): a session-wide automatic view playlist, like airport Auto switch.
+    bool setCinematic(bool enabled, double now, std::string* why = nullptr);
+    void stopCinematic(const std::string& reason, double now);
+    void updateCinematic(double now, bool manual);
+    bool cinematicSwitch(double now, bool acquire);
+    void cinematicEvent(const BackendEvent& ev, double now);
+    bool handleCinematic(const protocol::Command& c, double now);
+    void cinematicPanic(json& payload, double now);
+    // Spotting (spotting.cpp). Like Cinematic mode and airport Auto switch, auto-spot is module state, never saved.
+    bool handleSpotting(const protocol::Command& c, double now);
+    bool spottingEvent(const std::string& name, json& payload);
+    void updateSpotting(double now);
+    std::string spot(std::uint32_t objectId, traffic::SpotView view, double now,
+                     const std::optional<traffic::RunwaySpot>& runway = std::nullopt,
+                     const std::optional<traffic::PositionSpot>& place = std::nullopt);
+    // SpotTarget / AdjustSpot `spot`: a runway spot (kinds fence, approach, threshold, custom) or a position spot.
+    std::string parseSpot(const json& value, std::optional<traffic::RunwaySpot>& runway, std::optional<traffic::PositionSpot>& place) const;
+    void updateSpotAirports(double now);
+    static constexpr double kSpotAirportsSeconds = 2;
+    bool setAutoSpot(bool enabled, double now, std::string* why = nullptr);
+    void stopAutoSpot(const std::string& reason);
+    void yieldSpotting(const std::string& reason);  // another automatic mode was turned on
+    void spotCycle(int delta, double now);
+    void updateAutoSpot(double now);
+    std::optional<std::uint32_t> autoSpotPick(std::uint32_t exclude, double now) const;
+    traffic::SpotView autoSpotView(std::uint32_t objectId, traffic::SpotView fallback, double now) const;
+    bool autoSpotShow(std::uint32_t objectId, double now);
+    profiles::airport::Geo trafficAirport() const;
+    json trafficState() const;
+    json spottingState() const;
+    void emitSpotting(bool force = false);
+    bool autoSpot_ = false, pendingSpotReturn_ = false, pendingAutoSpotToggle_ = false;
+    int pendingSpotCycle_ = 0;
+    std::string spotReason_, spottingEmitted_;
+    double nextTrafficPoll_ = 0, lastTrafficEmit_ = -100, lastAutoSpotCheck_ = -100, autoSpotSince_ = 0, autoSpotViewAt_ = 0;
+    std::uint64_t trafficEmitted_ = 0;
+    std::uint32_t watchedTarget_ = 0;  // the aircraft with per-frame data (watchTrafficTarget)
+    std::string spotAirportsKey_;
+    double nextSpotAirports_ = 0;
+    json cinematicState() const;
+    void emitCinematic(bool force = false);
+    cinematic::Director cinematic_;
+    cinematic::PhaseTracker cinematicPhase_;
+    bool cinematicOn_ = false, cinematicSuspended_ = false;
+    std::uint64_t cinematicRecalls_ = 0;
+    std::string cinematicReason_, cinematicEmitted_;
+    // Temporary airport sets (airports.cpp): generated in memory, never stored until saved.
+    bool airportAutoGenerate() const;
+    json transientAirportList(json savedNearby, double now);
+    void requestAutoAirport(const std::string& code, double now);
+    bool autoAirportFacility(const backend_event::AirportFacility& e, double now);
+    bool saveTemporaryAirport(const protocol::Command& c, double now);
+    struct AutoAirportJob { std::string icao; double deadline=0; };
+    std::set<std::string> transientAirports_;
+    std::map<std::string,json> airportFacilityCache_;  // per-session, by ICAO; null = no usable scenery data
+    std::map<std::uint32_t,AutoAirportJob> autoAirportJobs_;
+    std::map<std::string,double> autoAirportRetry_;
+    double lastAutoDiscovery_=-1000;
+    profiles::airport::Geo autoDiscoveryAt_{NAN,NAN,NAN};
     IModuleServices& services_;
     profiles::IStorageDriver& storage_;
     profiles::Repository repo_;
@@ -163,6 +237,25 @@ private:
     void stopControllerCapture(const std::string& state);
     void completeControllerCapture(const std::string& suffix, const std::string& label, const std::string& pov = {});
     std::vector<std::pair<int, std::string>> controllers_;
+    // Gamepad sticks for drones (gamepad.hpp): mapped when the settings change, enabled only while a drone is shown.
+    GamepadSticks gamepad_;
+    std::string gamepadMapping_, gamepadWanted_;  // definitions + mask mapped / wanted, so unrelated edits do not remap
+    bool gamepadSticksEnabled_ = true, gamepadBlocksAircraft_ = true, gamepadOn_ = false;
+    int gamepadStandardDevice_ = -1;   // the standard layout's controller (-1: none found yet)
+    double gamepadNextEnumerate_ = 0;
+    json gamepadStateSent_;
+    json gamepadState() const;
+    int gamepadSamples_ = 0;      // diagnostics: the first samples after enabling
+    void configureGamepad(const profiles::HostSettings& settings);
+    void updateGamepad(core::ManualInput& manual);
+    // Settings > Gamepad > Listen (one axis for one drone motion).
+    AxisListener axisListener_;
+    int axisCaptureDevice_ = -1;
+    std::uint64_t axisCaptureGeneration_ = 0;
+    std::string axisCaptureRequester_, axisCaptureId_, axisCaptureFunction_;
+    double axisCaptureUntil_ = 0;
+    static constexpr double kAxisCaptureSeconds = 15;
+    void stopAxisCapture(const std::string& state);
     std::deque<std::string> diagnostics_;
     bool diagDirty_ = false, diagWriting_ = false;
     double lastDiagWrite_ = -10;

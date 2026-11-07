@@ -24,17 +24,19 @@ There is no desktop application, tray app or external process.
 * **Authoring (screen) axes:** X = right, Y = up, Z = forward, meters. FRD = `[Z, X, −Y]` (design §4.2).
   The UI converts authoring ⇄ FRD; only the module converts FRD ⇄ SDK (two different conversions, two test sets).
 * **Projection:** stored as simulator FOV radians (`simulatorFovRadians`); the UI shows degrees 30–110
-  (presets 40/62/85), intersected with the qualified range from `CapabilitiesChanged`.
+  (presets 40/62/85), intersected with the qualified range from `CapabilitiesChanged`. The 30° floor is an editor
+  choice, not a camera API limit: validation allows 0.1–2.8 rad, and submission-only zooms (airport auto zoom down
+  to 2°, Binoculars 2–60°) go below it.
 * **IDs:** lower-case RFC 4122 UUID strings. `viewId` 1–2,147,483,647 is an optional recall slot (0 or null = none), unique per profile,
   not a camera-count limit.
 
 ## 2. Documents (module-owned, stored in `\work`)
 
-### 2.1 Profile — schemaVersion 3
+### 2.1 Profile — schemaVersion 4
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "profileId": "b8cfa6d9-2fe2-48d1-8bd2-f4e3df83722a",
   "name": "My cameras",
   "aircraftMatch": { "strategy": "aircraftPath", "modelKey": "asobo-c172sp-classic", "variantKey": null,
@@ -57,7 +59,7 @@ There is no desktop application, tray app or external process.
     "projection": { "kind": "simulatorFovRadians", "value": 1.0821, "axis": "adapterDefined" },
     "transition": { "kind": "smoothstep3", "durationSeconds": 0.65, "delaySeconds": 0 },
     "interaction": true, "trackingPolicy": "nativeIfQualified", "effects": { "enabled": false },
-    "temporaryLookPolicy": "resetOnRecall", "followHorizon": 1, "seedDefinitionName": null
+    "temporaryLookPolicy": "resetOnRecall", "followHorizon": 1, "glance": false, "seedDefinitionName": null
   } ],
   "sequences": []
 }
@@ -66,7 +68,38 @@ There is no desktop application, tray app or external process.
 * `aircraftMatch.strategy`: `aircraftPath` | `userConfirmedModelVariant` | `none`.
 * `mode`: `aircraftCockpit` (MVP); `aircraftExterior` (Preview — cockpit audio limitation);
   `airport` (Preview — world-fixed coordinates, pending live qualification), `orbit` and `flyby`
-  (animated exterior modes, including a fly-by pass while parked). `free` cannot activate.
+  (animated exterior modes, including a fly-by pass while parked); `mounted` (Preview — an action cam rigidly fixed
+  to the airframe, see below); `free` (Preview — a world-fixed drone, see below).
+* `mounted` cameras use the SimObject anchor like `aircraftExterior`: the position is a point on the airframe (wing
+  tip, tail, gear, belly) and never moves relative to it. Aircraft tracking never applies (the global preference is
+  ignored) and neither do `followHorizon` and `effects`. Two optional fields, defaulted for mounted cameras and
+  retained (validated, ignored) on other modes so a mode change does not lose them:
+  * `gimbal`: `locked` (default; the view moves with the aircraft) | `horizon` (keeps the world heading and pitch the
+    mount gives the lens but removes the bank, so the horizon stays level for any lens direction; a forward lens
+    equals `followHorizon` 0) | `yaw` (level in pitch and bank, follows the aircraft's heading only).
+  * `mountVibration`: number 0–1, default 0.3. Small, fast airframe vibration driven by engine 1 RPM and ground roll
+    (at most 6 mm per axis and 0.3° per angle at 1).
+  Both are presentation only, like follow horizon: never written into saved poses, captures or the temporary look.
+  The gimbal eases in and out with the follow-horizon 0.15 s time constant, uses the aircraft's pitch and bank, and
+  eases back to `locked` when attitude telemetry is older than 0.5 s; it is held through a simulator pause.
+* `free` cameras (drones) live in aircraft profiles and are world-referential like `airport`: `worldOrigin`
+  {`lat`, `lon`, `altitude`} plus a local FRD pose about it (north, east, down). A free camera without a
+  `worldOrigin` is kept but cannot activate ("Use Drop drone here"); an invalid one is a validation error. Optional
+  `followAircraft` (bool, default false): when true the origin moves with the aircraft position (world axes; the
+  aircraft's attitude is not followed) so the drone keeps its offset; when false it stays fixed in the world.
+  Aircraft tracking (global setting) aims the camera. `effects`, `followHorizon` and the mounted gimbal do not
+  apply; binoculars works; glance cannot be used from a free camera.
+  * Flying: the move/look/zoom bindings and `moveFast` (×4) move the drone in its own frame (forward/right along
+    the view, up is world up), smoothed, at the move speed × precision × (1 + 0.5 per meter above ground, at most
+    ×400). Height is above terrain when known, otherwise above the lower of the origin and aircraft altitudes.
+  * Bounds (stop movement only, never move a saved pose): 20 km horizontally from the origin, 10 km above it, and
+    not below terrain + 2 m when terrain is known (SimConnect `GROUND ALTITUDE` under the user aircraft, fresh
+    within 5 s, used while the drone is within 2 km of the aircraft), otherwise not below the origin altitude
+    − 300 m. The simulator's above-ground camera flag is set. A following drone is also shown at least 2 m above
+    known terrain.
+  * The flight is a temporary adjustment (`TemporaryLookChanged` reports it); recentering or a recall returns to
+    the saved place. `BakeTemporaryLook` ("Save adjusted view") stores a new `worldOrigin` (the aircraft position
+    when within 9 km) and pose; saved poses never change otherwise.
 * Airport profiles have `scope: "airport"`, `requiredSchemaFeatures: ["airport-world-v1"]`, and
   `airport: {icao, name, origin: {lat, lon, altitude}}`. Cameras retain a `worldOrigin`, `airportIcao`,
   and stable `generatedKey`. Position is local FRD about that geodetic origin; the SDK adapter converts
@@ -76,15 +109,29 @@ There is no desktop application, tray app or external process.
   `durationSeconds` 0.1–15 (ignored for `cut`); `delaySeconds` 0–30 = **start delay** before movement.
 * `effects`: `enabled` plus `intensity`, `turbulence`, `groundRoll`, `touchdown`, `acceleration`, `engine` (0–1;
   defaults .35/.5/.35/.5/.35/.2). Applied to `aircraftCockpit` at full strength and to `aircraftExterior` / `orbit`
-  at half strength; `airport`, `flyby` and `free` ignore them. The editor's Off/Subtle/Realistic/Action presets are
+  at half strength; `airport`, `flyby`, `free` and `mounted` (which has `mountVibration` instead) ignore them. The editor's Off/Subtle/Realistic/Action presets are
   derived from these values (no stored preset name).
+  Optional head-model strengths (0–1, `aircraftCockpit` only, scaled by `intensity`): `headLag` (neck spring-damper:
+  the head trails G and acceleration and settles in about a second), `turnLean` (a few degrees of lean with sustained
+  lateral acceleration), `taxiBob` (low-frequency bob with ground speed on the ground) and `idleSway` (very slight
+  sway while parked); defaults .5/.5/.5/0. Profiles written before these existed load with the defaults.
 * `mouseLookOnRelease`: optional `retain` (default) | `reset`. Per camera: keep temporary native right-drag look, or recenter it on button release. Does not overwrite the saved pose.
 * `temporaryLookPolicy`: `resetOnRecall` | `retain`.
+* `glance`: optional bool, no schema bump. Marks a cockpit view as a glance view for the smart-view bindings
+  (`glanceHold`, `glanceNext`, `glanceReturn`). When absent (older profiles, new cameras) validation stores the default:
+  true for `aircraftCockpit` cameras whose `icon` is `view-instrument`, or, without an icon, whose name gives the
+  editor's automatic instrument icon (pfd, mfd, instrument, g1000, radio, avionics, autopilot; airport words such as
+  tower or runway take precedence); false otherwise. A non-boolean is rejected. Other modes may store it but are never
+  offered. See [smart views](dual-bindings.md#smart-views-glance).
+* `cinematic`: optional bool, no schema bump. Whether Cinematic mode (the automatic view playlist) may show the view.
+  When absent validation stores the default: true for `aircraftExterior`, `orbit`, `flyby`, `airport` and `mounted`;
+  for `aircraftCockpit` only on the profile's `defaultCameraId` (the pilot view); false for `free` (free cameras are
+  never offered). A non-boolean is rejected. See [Cinematic mode](dual-bindings.md#cinematic-mode).
 * `followHorizon`: number 0–1, default 1 (finite; outside the range is rejected). How much of the aircraft's bank the
   view inherits: 1 banks fully with the aircraft (previous behaviour), 0 keeps the horizon level, 0.5 shows half the
   bank. Applies to `aircraftCockpit` (rolls about the aircraft's longitudinal axis, eye position unchanged),
   `aircraftExterior` and `orbit` (position and orientation swing about the aircraft's longitudinal axis, so the
-  aircraft stays framed). `airport` and `flyby` are world-fixed and ignore it. Presentation only: never written into
+  aircraft stays framed). `airport` and `flyby` are world-fixed and ignore it; `mounted` uses `gimbal` instead. Presentation only: never written into
   saved poses, captures or the temporary look; eased with a 0.15 s time constant; when bank telemetry is older than
   0.5 s the correction eases back to 0 (camera banks with the aircraft). Held through a simulator pause.
 * Validation: ≤ 10 MiB, finite numbers, |position| ≤ 10 000 m, FOV 0.1–2.8 rad, quaternion norm within 1e-3
@@ -94,6 +141,10 @@ There is no desktop application, tray app or external process.
   `viewId`, `smoothstep5` → `smoothstep3`, `smoothstep7` → `smoothstep5`) into a new revision; the input is retained.
   Schema 2 documents (and migrated schema 1) migrate to 3: `levelHorizon: true` → `followHorizon: 0`, `false` or
   absent → `1`, and `levelHorizon` is removed. Builds before schema 3 cannot open schema 3 documents.
+  Schema 3 documents (and migrated 1 and 2) migrate to 4 without field changes. Version 4 exists because a schema 3
+  reader rejects the whole document on an unknown `mode` (there is no read-only fallback for modes), so a profile
+  with a `mounted` camera must be refused by version rather than by a confusing validation error. Builds before
+  schema 4 cannot open schema 4 documents.
 
 ### 2.2 Bindings — schemaVersion 2
 
@@ -108,9 +159,21 @@ There is no desktop application, tray app or external process.
 Actions: `selectView` (+`viewId`), `peekView` (+`viewId`), `nextCamera`, `previousCamera`, `nextCategory`,
 `returnToPilot`, `releaseCamera`, `recenterLook`, `toggleEditor`, `toggleMini`, `lookLeft`, `lookRight`, `lookUp`,
 `lookDown`, `moveForward`, `moveBack`, `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveFast`, `zoomIn`, `zoomOut`,
-`panicRelease`.
+`panicRelease`, `binoculars`, `glanceHold`, `glanceNext`, `glanceReturn`, `toggleCinematic`, `spotNext`,
+`spotPrevious`, `spotReturn`, `toggleAutoSpot`.
 `panicRelease` ("Panic: release camera and restore simulator", default Ctrl + Alt + X) is a stronger `releaseCamera`;
 see [Panic release](dual-bindings.md#panic-release).
+`binoculars` ("Binoculars (hold)", default Ctrl + Alt + Z) zooms the active camera to `host.binocularsFovDeg` while held;
+see [Binoculars](dual-bindings.md#binoculars).
+`glanceHold` (held, default Ctrl + Alt + G), `glanceNext` (Ctrl + Alt + I) and `glanceReturn` (Ctrl + Alt + U) are the
+smart-view bindings; see [smart views](dual-bindings.md#smart-views-glance). `TestBinding` presses `glanceHold`
+without a release, so the glance stays until `glanceReturn`.
+`toggleCinematic` ("Toggle Cinematic mode", default Ctrl + Alt + K) turns the session-wide Cinematic mode on or off,
+like `SetCinematic`; see [Cinematic mode](dual-bindings.md#cinematic-mode).
+`spotNext` / `spotPrevious` (defaults Ctrl + Alt + T / Y) spot the next / previous aircraft by distance, keeping the
+current spotting view (chase when not spotting, or when that view is not available for the new target);
+`spotReturn` (Ctrl + Alt + O) acts as `StopSpotting`; `toggleAutoSpot` (Ctrl + Alt + J) acts as `SetAutoSpot`. See
+[Spotting](dual-bindings.md#spotting).
 An input definition and, for POVs, direction maps to at most one action. Bindings can carry
 `slot: "primary" | "secondary"`; each action has two independent UI slots. Legacy extra bindings are retained.
 Joystick `pov` is `up`, `right`, `down` or `left`; definitions use zero-based button and POV indices.
@@ -144,23 +207,83 @@ camera takeover suppress these pulses.
 `remember` keeps the last selected view per profile as navigation metadata (never dirties camera content).
 `ui.precision` also scales held-key translation: Fine 0.1x, Normal 1x, Coarse 10x of
 `host.moveSpeedMetersPerSec`; `moveFast` multiplies that by four while held. Mouse-look sensitivity is independent.
+`host.binocularsFovDeg` (default 10, clamped 2–60; missing in older files = 10) is the Binoculars field of view.
+Cinematic mode: `host.cinematicMinSeconds` and `host.cinematicMaxSeconds` (defaults 8 and 20, clamped 3–300, max at
+least min) bound each view's random dwell; `host.cinematicCockpitWeight` (default 0.15, 0–1) is the share of picks
+that are cockpit views; `host.cinematicCuts` (default true) cuts to world-referential (airport, fly-by) views and moves
+smoothly otherwise; `host.cinematicDrift` (default true) turns the Commercial drift on. Missing in older files = defaults.
+Spotting: `host.spottingRadiusNm` (default 20, clamped 1–100; polled within at most 200 km) is the traffic radius;
+`host.autoSpotHoldSeconds` (default 30, clamped 10–300) is how long auto-spot stays on one target. Missing = defaults.
+`host.spottingSpots` (default `[]`) are the user's saved spotting spots, kept without a camera profile: at most 200 of
+{`id` (1–64 letters, digits, `-_.:`; a missing or repeated id gets a new one), `name` (at most 60 bytes, empty =
+`Spot`), `icao` (the airport, uppercase, may be empty), `kind` (`fence`, `approach`, `threshold`, `custom`: with
+`runwayEnd` and optional `behindMeters` / `sideMeters` (clamped −5000–5000) and `heightMeters` (0–1000), missing =
+the kind's default; or `position`: with `latitude`, `longitude` and `altitudeMeters` (meters MSL, clamped
+−500–10000))}. Entries of another kind, runway spots without an end and position spots without a usable position are
+dropped. Like `ui.miniPinned`, the list is a preference: an `UpdateDraft` that changes it saves it at once (only it,
+never the other unsaved edits) and it never marks the settings dirty. The panel shows saved spots on the Traffic page
+and watches from them with `SpotTarget.spot`.
+Gamepad sticks (drones): `host.gamepadSticksEnabled` (default true) lets assigned controller axes fly a free camera
+while it is shown, like the simulator's own drone camera; `host.gamepadBlocksAircraft` (default true) maps them masked
+(`SIMCONNECT_GROUP_PRIORITY_HIGHEST_MASKABLE`) so the aircraft does not see them meanwhile; `host.gamepadDeadzone`
+(default 0.15, clamped 0–0.5). `host.gamepadAxes` (default `[]`) holds at most one entry per motion of {`function`
+(`forward`, `right`, `climb`, `descend`, `yaw`, `pitch`), `definition` (`joystick:<device>:<XAxis|YAxis|ZAxis|RxAxis|RyAxis|RzAxis|Slider>`),
+`label`, `rest` and `full` (raw SimConnect axis values, clamped ±32768, at least 4096 apart)}; the motion's value is
+`(raw − rest) / (full − rest)` clamped to ±1, so a centred stick is bipolar and a trigger resting at one end gives
+0..1; climb less descend is the vertical rate (one combined trigger axis may serve both). With `host.gamepadAxes`
+empty (the default) the module uses the standard layout, like the simulator's drone camera, with no setup: on the first
+controller that names itself a gamepad (Xbox, XInput, gamepad, DualSense/DualShock, else a generic controller or pad;
+never a yoke, stick, throttle or pedals; looked up every 5 s while a drone is shown and none is known) X/Y axes move,
+X/Y rotation turns and looks (pushed up looks up), and the triggers climb and descend. Each axis is calibrated from its
+first sample after the sticks turn on: within 30000 of an end it is a trigger resting there (Z the left trigger, Z
+rotation the right), otherwise a centred stick (Z then carries both triggers: negative climbs). Any assigned motion
+replaces the whole standard layout. `GamepadChanged` / `Snapshot.gamepad` report {`mode` (`standard`, `custom`),
+`deviceId`, `deviceName`} (the standard layout's controller, null when none is found). After the dead zone the
+response is mostly cubic and full deflection equals the held movement and look keys. The axes are mapped lazily, the
+first time a drone view is shown after a change (never during startup or flight loading), and turned on only while a free camera is on screen, not spotting or glancing, and nothing is listening for
+inputs; turning them off forgets the samples. Invalid entries, a second entry for a motion and spans under 4096 are
+dropped. Missing in older files = defaults.
+Spotting needs no camera profile: chase, fly-by, Next target, auto-spot and the computed runway and tower views work
+with no profile, one for another aircraft or a read-only one (`CapabilitiesChanged.spottingAvailable`). Without a
+usable profile Camera Studio takes control with no view underneath (`ActiveCameraChanged.cameraId` null) and
+`StopSpotting` gives the camera back to the simulator; opening, closing or switching profiles never ends such a spot.
+Track over a profile camera still needs `canActivate`. While spotting, simulator head tracking is turned off (it adds
+its offsets to the add-on camera) and the global preference returns afterwards.
+The spotting target also gets SimConnect data every simulator frame (position, attitude, `VELOCITY WORLD`, ground
+altitude): chase and fly-by follow the pose the simulator draws, and blend back into the 1.5 s poll prediction when
+it stops. Reported speeds that are zero or far off (injected traffic such as FSLTL reports 0) are replaced by a
+least-squares fit to the positions, in the model and in `TrafficChanged` speeds and status.
 `ui.miniPinned` is a global preference: changing it through `UpdateDraft` saves it immediately on its own and never
 marks settings as unsaved.
 
 ### 2.4 Global tracking and airport defaults
 
 `host.globalHeadTrackingEnabled` defaults false; `host.globalAircraftTracking` defaults `both`
-(`off`/`heading`/`both`). Cockpit views are excluded from aircraft tracking. Global automatic airport
+(`off`/`heading`/`both`). Cockpit and mounted views are excluded from aircraft tracking. Global automatic airport
 switching remains independent of each camera. Airport defaults include `airportTrackingHorizonGuard` (true),
 `airportAutoZoomEnabled` (false), `airportAutoZoomFrameMeters` (40), `airportAutoZoomMinFovDeg` (10),
 `airportAutoZoomMaxFovDeg` (90), `airportAutoZoomResponseSeconds` (1), and `airportCategoryHeights`
-(`runways`, `gates`, `apron`, `taxi`: 3; `tower`: 35 meters).
+(`runways`, `gates`, `apron`, `taxi`: 3; `tower`: 35 meters), and `airportAutoGenerate` (true): temporary airport
+sets, below.
 
 Airport cameras may store `airportHeight: {category, baseAltitudeMeters, minimumMeters}` and sparse
 `airportOverrides` with `heightMeters`, `aircraftTracking`, `trackingHorizonGuard`, `autoZoomEnabled`,
 `autoZoomFrameMeters`, `autoZoomMinFovDeg`, `autoZoomMaxFovDeg`, `autoZoomResponseSeconds`.
 Missing properties inherit global defaults. Overrides are removed from non-airport cameras. See
 [airport settings](airport-camera-settings.md) for terrain readback, horizon behavior and height migration.
+
+**Temporary airport sets.** While `airportAutoGenerate` is on and no saved airport set is within
+`airportRadiusNm`, the module generates the nearest scenery airport's views in memory (the same generator as
+`PreviewAirports`, with automatic options: every runway end with spotting views, at most 4 gates/stands chosen
+by spread, the tower or a virtual tower, no taxi intersections) and loads them under Airport exactly like a
+saved set: same profile shape, stable generated IDs, the same radius, 2 NM hysteresis and pinning. They are never
+written to storage, never count as unsaved changes and are not included by `CommitChanges`; edits stay in memory
+for the session. A saved set always wins: for the same airport it replaces the temporary one, and any saved set
+in range suppresses temporary generation. Scenery is listed at most every 30 s and only after 3 NM of movement;
+each airport's facility data is requested once (airport, runways and parking only) and cached for the session,
+including "no scenery data" (a timed-out request is retried after 60 s). `Snapshot.airports` and
+`AirportsChanged` carry `transient` (the loaded set is temporary), `autoGenerate` and `loadedName`; nearby
+entries for a temporary set have `transient: true`. `SaveTemporaryAirport` stores it.
 
 ## 3. Transport
 
@@ -228,17 +351,25 @@ Rules:
 | `BakeTemporaryLook` | — | Composes look into the active camera's draft (`DraftChanged`) and clears the look |
 | `ListControllers` | — | `ControllersListed` |
 | `StartControllerCapture` / `StopControllerCapture` | `deviceId`, `captureId` / — | Selected controller buttons 1–32 and first POV; capture completes on release/center, times out after 20 s; ordinary actions suppressed while listening |
+| `StartAxisCapture` / `StopAxisCapture` | `deviceId`, `function` (a `host.gamepadAxes` motion), `captureId` / — | Settings > Gamepad: listens to every axis of the selected controller; each axis's first sample is its rest, and the first axis moved at least 16384 from it completes with `full` at the end of travel in that direction (the far end for a trigger resting near one end). Times out after 15 s; the gamepad sticks are off meanwhile |
 | `ListImportFiles` / `ImportProfileFile` | — / `filename` | Enumerates the module imports folder / imports a selected file as a copy |
 | `TestInput` | `input` | Temporarily maps the input; reports `InputTest` down/up events for 15 s |
 | `TestBinding` | `binding` | Dispatches the action once; reply distinguishes dispatch from visible recall |
 | `RelaySurface` | `target` (`main`\|`mini`), `op` (`expand`\|`compact`\|`show`) | Broadcast `SurfaceRequest`; e.g. mini "Edit" → main expands on Cameras |
 | `GetDiagnostics` | — | `result.text` preview for in-panel export |
+| `SetCinematic` | `enabled` (bool) | Turns the session-wide Cinematic mode on or off (not saved). On: takes control if needed and shows the first view; Completed, or Rejected with a plain reason. `result.cinematic` is the new state (as `CinematicChanged`) |
+| `SpotTarget` | `objectId` (from `TrafficChanged`), `view` (`tower`, `runway`, `chase`, `flyby`, `track`, `spot`), optional `spot`: for `runway` a runway spot {`icao`, `runwayEnd` (as `SpottingChanged.runways[].end`), `kind` (`fence` default, `approach`, `threshold`, `custom`), optional `behindMeters` (behind the threshold against the landing direction, −5000–5000; negative: past the threshold over the runway), `sideMeters` (right of the landing direction, −5000–5000), `heightMeters` (above the threshold elevation, 0–1000), optional `name` (shown in `SpottingChanged.spot`)}; for `spot` (required) a position spot {`kind`: `position`, `latitude`, `longitude`, `altitudeMeters` (meters MSL, −500–10000), optional `name`} | Spots that aircraft with that view (not saved): takes control if needed, with no camera profile for chase, fly-by and the computed views. `tower` and `runway` use the loaded airport set's views near the target when the profile is usable, else a computed view from scenery data: the tower (or the generator's virtual tower) at the tower camera height, or a runway-end spot (fence line: 150 m behind the threshold, 80 m right, runway camera height) aimed at the target with auto zoom. The runway end: an arrival's landing end (lined up within 30°), a departure's far end, else the nearest; re-picked like runway views (1 s check, 6 s dwell, 15 % margin for the nearest end). `spot` pins one end and its offsets (never re-picked); kinds fill in defaults (`approach`: 1 NM out, about 90 m below a 3° glidepath; `threshold`: beside the threshold). `spot` view: the camera stands at the position spot (no lower than the terrain under the target plus 2 m, checked when it is placed or adjusted) and aims at the target with auto zoom, like the computed runway views; the spot must be within 20 km of the target. With no camera profile it works like chase. `spotNext` / `spotPrevious` keep a pinned runway spot or the position spot for the next aircraft. Completed, or Rejected with a plain reason (target out of range, no runway or tower data known near the target, an unknown runway end, a runway spot with another view than `runway`, a position spot with another view than `spot`, `spot` without a position spot or more than 20 km away, `track` without an airport or free camera on screen or without a usable profile). Turns auto-spot off. `result.spotting` is the new state (as `SpottingChanged`) |
+| `AdjustSpot` | `spot` (as `SpotTarget.spot`: a runway spot while a pinned runway spot is shown, a position spot while the `spot` view is shown) | Live edit of the pinned spot being shown: moves the camera there at once and keeps the target, the view, auto-spot state and the zoom (which eases to the new distance; another runway end is a cut). The panel sends it at most about 10 times a second while the user edits. Completed, or Rejected with a plain reason when not spotting from a pinned spot (`SpottingChanged.spot.pinned`), for the other kind of spot, an unknown runway end, values out of range or a position spot more than 20 km from the target. `result.spotting` |
+| `StopSpotting` | — | Ends spotting and auto-spot and returns to the view shown before spotting began (or gives the camera back to the simulator when there was none). Completed; `result.spotting` |
+| `SetAutoSpot` | `enabled` (bool) | Session-wide auto-spot (not saved): picks landing, then departing / arriving traffic near the airport, holds each target `host.autoSpotHoldSeconds`, waits when there is none. Arrivals, landings and takeoffs in the runway view (computed from scenery data when there are no airport cameras), taxiing in the tower view, departures in chase. Needs `spottingAvailable`, not a profile. Stops Cinematic mode and Airport Auto switch. Completed or Rejected; `result.spotting` |
 | `TextFocus` | `focused` (bool) | A panel text field has focus: bindings other than Release Camera and Panic release are suppressed |
 | `QualificationStart` | — | Begins the in-panel axis check; live control is allowed on an unqualified build while it runs. `result`: `simVersion`, `contract`, `axes` |
 | `QualificationProbe` | `axis` (`forward\|right\|up\|pitch\|heading\|bank`) | Offsets the active view by 30 cm / 15°; `result.expect` describes what should be seen |
 | `QualificationRestore` | — | Returns the active view to its draft pose |
 | `QualificationRecord` | `answers` {axis: `correct\|reversed\|wrong`}, `recall` (`pass\|fail`), `notes` | Flips reversed signs, records G01/G03 for this simulator build (Pending → `CommitCompleted` kind `qualification`) |
 | `QualificationEnd` | — | Ends the session; releases if the build is still unqualified and testing is not allowed |
+| `DroneHere` | — | `result`: `worldOrigin`, `positionMetersFRD`, `orientationCameraToAnchorXYZW`, `fovRad`, `source` (`view`: the Camera Studio view on screen; `spot`: the spotting view on screen (chase, fly-by, a computed or position spot view), also without a camera profile; `behindAircraft`: 40 m behind and 12 m above the aircraft), `world` {`latitude`, `longitude`, `altitudeMeters`}: that camera position in the world (the panel saves it as a position spot), `message`. Read only: the panel creates or moves the free camera with `UpdateDraft`. Rejected without an aircraft position |
+| `SaveTemporaryAirport` | `icao` | Stores the loaded temporary airport set (with any edits) as a normal airport profile, same IDs. Ack `Pending`, then `CommitCompleted` kind `airport` with `report.temporary: true`. Rejected when that airport has no temporary set |
 
 ### 5.1 Draft operations
 
@@ -260,12 +391,12 @@ being edited.
 
 | Name | Payload |
 | --- | --- |
-| `Snapshot` | everything below in one object: `moduleBootId`, `sessionEpoch`, `session`, `aircraft`, `ownership`, `capabilities`, `activeCamera`, `selection`, `profiles`, `working` {`profile`, `settings`, `bindings`, `draftRevision`, `dirty` {`profile`,`settings`,`bindings`}, `committedRevision`, `hasCommittedVersion` {cameraId: bool}}, `pendingCommit`, `look` |
+| `Snapshot` | everything below in one object: `moduleBootId`, `sessionEpoch`, `session`, `aircraft`, `ownership`, `capabilities`, `activeCamera`, `selection`, `profiles`, `working` {`profile`, `settings`, `bindings`, `draftRevision`, `dirty` {`profile`,`settings`,`bindings`}, `committedRevision`, `hasCommittedVersion` {cameraId: bool}}, `pendingCommit`, `look`, `traffic` (as `TrafficChanged`), `spotting` (as `SpottingChanged`) |
 | `SessionChanged` | `moduleBootId`, `sessionEpoch`, `session` (`Initializing\|Discovering\|Ready\|Suspended\|Faulted`), `reason` |
 | `AircraftChanged` | `title`, `modelKey`, `matchProfileId`, `matchReason` (plain text, e.g. "Matched by aircraft package") |
 | `OwnershipChanged` | `state` (`Observing, Acquiring, Active, SimulatorSuspended, OtherClient, UserDisabled, Releasing, Faulted`), `gameControlled`, `reason` |
-| `CapabilitiesChanged` | `adapterQualified`, `adapterContract`, `captureQualified`, `allowUnqualifiedAdapter`, `canActivate`, `blockReason`, `simVersion`, `fovRangeDeg` [min,max], `levelHorizon` (bool, legacy name) and `followHorizon` (bool): per-camera follow horizon is applied, `modes` {mode: {available, preview, reason}} |
-| `ActiveCameraChanged` | `profileId`, `cameraId`, `peeking`, `transitioning`, `fromDraft` |
+| `CapabilitiesChanged` | `adapterQualified`, `adapterContract`, `captureQualified`, `allowUnqualifiedAdapter`, `canActivate`, `blockReason`, `spottingAvailable` (bool) and `spottingBlockReason` (string or null): whether spotting (chase, fly-by, the computed views, auto-spot) can take control, with only the simulator, flight, axis-check and simulator-permission conditions of `blockReason` (no profile needed), `simVersion`, `fovRangeDeg` [min,max], `levelHorizon` (bool, legacy name) and `followHorizon` (bool): per-camera follow horizon is applied, `modes` {mode: {available, preview, reason}} |
+| `ActiveCameraChanged` | `profileId`, `cameraId`, `peeking`, `transitioning`, `fromDraft`, `glance` (null, or `cameraId`, `returnCameraId`, `held` while a glance view is shown; also in `Snapshot.activeCamera`). While spotting, `cameraId` is null for chase, fly-by and the computed runway and tower views (and for track held where one of those left the camera, and whenever control was taken without a profile), the airport view for tower and runway from the loaded airport set, and the camera on screen for track |
 | `SelectionChanged` | `profileId`, `cameraId` |
 | `DraftChanged` | `draftRevision`, `dirty`, `ops` (as applied, so mirrors update without a snapshot), `origin` (uiInstanceId) |
 | `CommitCompleted` | `requestId`, `kind`, `status` (`Committed\|Failed`), `revisions`, `message`, `report`; kind `qualification` adds `g01`, `g03` (bool) |
@@ -276,9 +407,15 @@ being edited.
 | `ControllersListed` | `controllers` [{`deviceId`,`name`}] |
 | `ControllerCaptureStatus` | `state` (`listening`, `stopped`, `timeout`, `disconnected`, `error`), `deviceId`, `captureId`; directed to requester |
 | `ControllerInputCaptured` | `input`, `captureId`; directed to requester, followed by stopped status |
+| `AxisCaptureStatus` | `state` (`listening`, `stopped`, `timeout`, `disconnected`), `deviceId`, `captureId`; directed to requester |
+| `ControllerAxisCaptured` | `axis` {`function`, `definition`, `label`, `rest`, `full`, `deviceId`, `deviceName`}, `captureId`; directed to requester, followed by stopped status. The panel stores it in `host.gamepadAxes` (replacing that motion) |
 | `InputTest` | `definition`, `phase` (`down`\|`up`) |
 | `BindingTriggered` | `action`, `viewId`, `result` |
-| `PanicReleased` | `state` (ownership after the panic), `reason`, `airportAutoStopped` (bool). Sent for every panic press, including a no-op while Observing |
+| `BinocularsChanged` | `active` (a Binoculars hold is down on an active camera), `fovDeg` (the setting). Sent on press, release and cancellation; display only |
+| `PanicReleased` | `state` (ownership after the panic), `reason`, `airportAutoStopped` (bool), `cinematicStopped` (bool), `spottingStopped` (bool: spotting or auto-spot was on). Sent for every panic press, including a no-op while Observing |
+| `CinematicChanged` | `enabled`, `state` (`off`, `starting`, `running`, `paused` after manual input, `suspended` by glance, binoculars or a simulator pause), `phase` (`parked`, `taxi`, `takeoffClimb`, `cruise`, `approach`, `landingRoll`), `cameraId` (the view it chose, or null), `dwellSeconds`, `reason` (why it last stopped, or null). Coalesced latest state; also `Snapshot.cinematic` |
+| `TrafficChanged` | `aircraft` [{`objectId`, `title`, `atcId`, `airline`, `flightNumber`, `model`, `latitude`, `longitude`, `altitudeFt`, `groundSpeedKt`, `verticalSpeedFpm`, `headingDeg`, `onGround`, `distanceNm` and `bearingDeg` (from the user aircraft, null when unknown), `status` (`parked`, `taxi`, `takeoff`, `departing`, `arriving`, `landing`, `cruise`)}], nearest first, at most 64, the user aircraft excluded; `at` (session time, integer milliseconds). AI and multiplayer aircraft within `host.spottingRadiusNm`, polled about every 1.5 s while a panel is visible or spotting is on; sent at most once a second while a panel is visible; also `Snapshot.traffic` |
+| `SpottingChanged` | `targetId` (null when off), `view` (null when off), `autoSpot` (bool), `state` (`off`, `waiting` for auto-spot traffic, `tracking`, `lost`: the target is out of range and the view holds 5 s), `targetLabel` (e.g. `DLH4AB - A320`, plain ASCII; null when off), `reason` (why spotting last stopped, or null), `views` {`tower`, `runway`: bool}: whether such views can be shown at all (airport cameras with a usable profile, or scenery data for computed views), `runways` [{`icao`, `end` (e.g. `27L`), `headingDeg` (landing direction, true), `lengthMeters`, `widthMeters`}]: the runway ends known for computed runway views (the loaded or nearest airport first, then the one nearest the target), `spot` (the computed runway view shown, as `SpotTarget.spot` with every offset filled in, or the position spot of the `spot` view, with `pinned` (bool: chosen with `SpotTarget.spot`, so `AdjustSpot` applies), or null). `view` is `spot` while a position spot is shown. Coalesced latest state; also `Snapshot.spotting` |
 | `SurfaceRequest` | `target`, `op` |
 | `FaultRaised` | `code`, `message` |
 

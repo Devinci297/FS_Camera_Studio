@@ -16,7 +16,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   await page.locator('#mc-tab-behavior').click();await page.locator('#mc-camera-airport-settings').click();
   const body=page.locator('#mc-dialog-body'),tracking=body.getByRole('combobox',{name:'Aircraft tracking',exact:true}),zoom=body.getByRole('combobox',{name:'Auto zoom',exact:true});
   const horizon=body.getByRole('combobox',{name:'Keep distant views near the horizon',exact:true});
-  assert.equal(await horizon.inputValue(),'global');assert.equal(await horizon.locator('option:checked').textContent(),'Global · On');
+  assert.equal(await horizon.inputValue(),'global');assert.equal(await horizon.locator('option:checked').textContent(),'Global - On');
   assert.equal(await tracking.inputValue(),'global');assert.equal(await zoom.inputValue(),'global');
   const numeric=[['heightMeters','Height above feature',7,18],['autoZoomFrameMeters','Framing size',48,62],['autoZoomMinFovDeg','Closest zoom (minimum FOV)',15,20],['autoZoomMaxFovDeg','Widest zoom (maximum FOV)',80,75],['autoZoomResponseSeconds','Smoothing time',1.4,2.2]];
   for(const [,label,expected] of numeric){

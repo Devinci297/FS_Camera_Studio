@@ -47,19 +47,35 @@ state held in the module, so the editor and the mini panel always agree.
 * **Bindings** provide independent Primary and Secondary slots for keyboard and controller inputs. Choose a
   controller from the visible list, select **Listen for button or hat**, press and release a button or return the hat
   to center, then **Assign**. Inputs work with the editor closed. See [binding guidance](doc/dual-bindings.md).
+* **Smart views:** mark instrument close-ups as **Glance view** (instrument views are by default). Hold
+  **Ctrl + Alt + G** to glance at the one nearest to where you are looking and release to return to the exact view and
+  look; **Ctrl + Alt + I** steps through them and **Ctrl + Alt + U** returns. See [smart views](doc/dual-bindings.md#smart-views-glance).
+* **Cinematic mode:** **Cinematic** next to Auto switch, or **Ctrl + Alt + K**, plays an automatic playlist of views
+  chosen for the flight phase, with smooth moves, cuts and an optional slow Commercial drift. Manual movement pauses
+  it; Release, Panic or selecting a view stops it. See [Cinematic mode](doc/dual-bindings.md#cinematic-mode).
+* **Spotting:** a live list of AI and multiplayer traffic (VATSIM / IVAO aircraft included) with tower, runway,
+  chase, fly-by and track views of any aircraft, **Ctrl + Alt + T / Y** for the next / previous aircraft, **Ctrl + Alt
+  + O** to return and **Ctrl + Alt + J** for auto-spot, which follows landings and departures at the airport. See
+  [Spotting](doc/dual-bindings.md#spotting).
 * **Library layout:** category headers contain indented, single-line camera rows, with inline shortcuts and a
   distinct active-view indicator. The main editor shows every camera with its icon and name; the wide bottom mini
   panel shows starred cameras. Its Icons/Labels/Both preference applies only to categories.
 * **Reuse profiles:** **Copy for current aircraft** creates a separately matched copy for any loaded aircraft,
   retaining the source. Positions may need adjustment for the destination cockpit; see
   [copying profiles](doc/copy-profile-for-aircraft.md).
+* **Second monitor:** **Pop out** in the editor header moves the editor into its own desktop window, which you can
+  drag to another screen; **Dock** puts it back. This is the simulator's own pop-out (Right Alt + click on the editor
+  does the same). A popped-out editor is always opaque. It is not offered in VR, and the mini panel stays docked.
 * **Camera directions:** configured automatically; users do not need to run an axis calibration.
 * **Tracking:** head tracking defaults off. Aircraft tracking defaults to heading and pitch for exterior and airport
   views. Both preferences are global and survive camera/profile changes; cockpit views never track the aircraft.
 * **Airport cameras:** open **Camera library + → Create airport cameras**, choose a nearby airport or enter ICAOs,
   preview generated views and save the selected ones. Runway, gate/apron, tower and offset taxiway-intersection
   views use available scenery facility data. Optional airport XML supplies actual taxi-sign positions.
-  Airport views are stored globally, independently of aircraft profiles. One nearby saved airport loads at a time. See
+  Airport views are stored globally, independently of aircraft profiles. One nearby saved airport loads at a time.
+  Near an airport without saved views, a **temporary** set (tower or virtual tower, runway ends, fence-line and
+  1 NM approach spotting views, a few gates) loads automatically; choose **Save** in the library to keep it, or turn
+  it off in Settings > Airport defaults. In the browser demo, open `ui/index.html?demoAirport=1`. See
   [airport defaults and overrides](doc/airport-camera-settings.md) for global tracking, category heights, auto zoom
   and distant-target horizon protection. Each airport camera can override these defaults independently.
 
@@ -68,8 +84,8 @@ state held in the module, so the editor and the mini panel always agree.
 The tester release and illustrated manual are available from
 [GitHub Releases](https://github.com/Devinci297/FS_Camera_Studio/releases).
 The app bar displays the version; click it for update detection and the installer download.
-Close MSFS before installing an update. Airport cameras that have been generated **and saved**
-load automatically within the configured radius (25 NM by default); Auto switch is a separate viewpoint control.
+Close MSFS before installing an update. Saved airport cameras load automatically within the configured radius
+(25 NM by default); other airports get a temporary set until you save it. Auto switch is a separate viewpoint control.
 
 ### Reproduce version 0.3.0
 
@@ -125,7 +141,7 @@ UI tests and browser preview: `node ui/tests/math.test.mjs`, `node ui/tests/brid
 | Path | Contents |
 | --- | --- |
 | `src/CameraCore` | Pure math: frames, quaternions, transitions, manual movement |
-| `src/Profiles` | Profile schema v3, validation, bindings/settings, the two-slot repository, profile codes |
+| `src/Profiles` | Profile schema v4, validation, bindings/settings, the two-slot repository, profile codes |
 | `src/Protocol` | Panel ⇄ module envelopes and CommBus chunking |
 | `src/WasmModule` | Coordinator, input router and module app (pure); `wasm/` holds the SDK adapters and entry points |
 | `ui/` | The in-sim panels (one codebase, `main` and `mini` surfaces) |

@@ -101,7 +101,7 @@ std::vector<ActionEvent> InputRouter::press(std::size_t b, const std::string& ph
     if (held_.count(physical)) return {};
     // Alternate bindings share one logical hold (particularly Peek). Releasing either
     // physical input must not restore the view while the other is still pressed.
-    if (profiles::actionIsContinuous(binding.action) || binding.action == Action::PeekView) {
+    if (profiles::actionIsContinuous(binding.action) || binding.action == Action::PeekView || binding.action == Action::GlanceHold) {
         for (const auto& [key, active] : held_) {
             const auto& other = bindings_[active.binding];
             if (other.action == binding.action && other.viewId == binding.viewId) {
