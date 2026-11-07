@@ -27,6 +27,7 @@ const release=v=>({tag_name:'v'+v,draft:false,prerelease:false,assets:[{name:`FS
     await page.waitForFunction(()=>!document.getElementById('mc-update-check').disabled);
     assert.equal(await page.locator('#mc-update-notice').isVisible(),true,'explicit check restores notification');
     await page.evaluate(()=>{window.OpenBrowser=url=>window.updateRequested=url;});
+    assert.equal(await page.locator('#mc-update-download').isVisible(),false,'manual download is hidden under troubleshooting');
     await page.locator('#mc-update-install').click();assert.equal(await page.evaluate(()=>updateRequested),'fscamerastudio://update/'+next);
     await page.locator('#mc-update-auto').uncheck();const before=requests;
     await page.evaluate(()=>{FSCApp.bridge.demo=null;FSCSUpdates.maybeCheck();});assert.equal(requests,before,'opt out');
@@ -53,6 +54,7 @@ const release=v=>({tag_name:'v'+v,draft:false,prerelease:false,assets:[{name:`FS
    await page.evaluate(()=>{xplane.fscsUpdate=()=>Promise.resolve({ok:false,error:'Updater missing'});});
    await page.locator(surface==='main'?'#mc-update-notice-install':'#mc-mini-update').click();
    assert.match(await page.locator('#mc-update-status').textContent(),/Updater missing.*Download/);
+   assert.equal(await page.locator('.mc-update-fallback').getAttribute('open')!==null,true,'failure exposes recovery controls');
    // Time passage exercises repeat scheduling without another six-hour wait.
    const before=requests;
    await page.evaluate(()=>{window.realNow=Date.now;Date.now=()=>realNow()+7*60*60*1000;document.getElementById('mc-update-auto').checked=true;localStorage.removeItem('fscs.updateLease');FSCSUpdates.maybeCheck();});

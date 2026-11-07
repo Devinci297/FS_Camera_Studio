@@ -1,1 +1,1 @@
-window.FSCS_BUILD_VERSION = '0.5.2';
+window.FSCS_BUILD_VERSION = '0.5.3';

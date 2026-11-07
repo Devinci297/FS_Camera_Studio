@@ -36,7 +36,7 @@ const assert = require('node:assert/strict'), path = require('node:path');
     await page.locator('.mc-binding-xp button', {hasText: 'Copy'}).click();
     assert.match(await page.locator('#mc-binding-result').innerText(), /xpcs\/toggle_cinematic/);
 
-    assert.match(await page.locator('#mc-update-settings').innerText(), /waits for MSFS and X-Plane to close before upgrading/);
+    assert.match(await page.locator('#mc-update-settings').innerText(), /Restart and install after saving your flight/);
     assert.deepEqual(errors, []);
     console.log('X-Plane bindings: xpcs/ commands with Copy, command search, hidden MSFS filters and X-Plane update wording passed.');
   } finally { await browser.close(); }

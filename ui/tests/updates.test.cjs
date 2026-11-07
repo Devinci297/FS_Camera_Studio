@@ -27,6 +27,7 @@ const {chromium}=require(process.env.FSCS_PLAYWRIGHT||'playwright'),path=require
  await page.locator('#mc-app-version').click();await page.locator('#mc-update-check').click();
  await page.getByText('Update available: '+next,{exact:true}).waitFor();
  await page.evaluate(()=>{window.OpenBrowser=url=>window.openedUpdate=url;});
+ await page.locator('.mc-update-fallback summary').click();
  await page.locator('#mc-update-download').click();
  assert.equal(await page.evaluate(()=>openedUpdate),`${base}/releases/download/v${next}/FS-Camera-Studio-${next}-Setup.exe`);
  status=503;body='unavailable';await page.locator('#mc-update-check').click();await page.waitForFunction(()=>document.querySelector('#mc-update-status').textContent.includes('HTTP 503'));

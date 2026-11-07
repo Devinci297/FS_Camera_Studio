@@ -149,6 +149,15 @@ INCLUDED FEATURES
 - Successful saves request a native confirmation chime. Settings > Test sound
   checks the simulator UI sound route; spoken WAV is browser-only.
 
+NEW IN VERSION 0.5.3
+- Update now downloads, verifies and installs the update silently, retaining
+  your simulator choices, install folders and saved profiles.
+- If a simulator is running, choose Restart and install after saving your
+  flight, or When I close the sims. Restart requests a normal close and
+  reopens the simulator after successful installation. No process is killed.
+- Download installer is only a recovery option under Update troubleshooting.
+- Install this setup once to enable the complete workflow on older versions.
+
 NEW IN VERSION 0.5.2
 - Automatic official-release checks, update notices, Later and a mini update button.
 - Click Update now for verified download and installation after both sims close.

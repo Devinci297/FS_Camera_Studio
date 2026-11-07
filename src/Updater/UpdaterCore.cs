@@ -72,11 +72,46 @@ public static class Core {
         var current=new DirectoryInfo(Path.GetFullPath(path));
         while(current!=null){if(current.Exists && (current.Attributes&FileAttributes.ReparsePoint)!=0)throw new IOException("Updater paths cannot be junctions or symbolic links.");current=current.Parent;}
     }
+    public static string SetupArguments(string manifest) {
+        var data=new Dictionary<string,string>(StringComparer.Ordinal);
+        foreach(string raw in manifest.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries)) {
+            string line=raw.TrimStart('\uFEFF');int equals=line.IndexOf('=');
+            if(equals<=0)throw new InvalidDataException("Invalid installation record.");
+            string key=line.Substring(0,equals);if(data.ContainsKey(key))throw new InvalidDataException("Duplicate installation setting.");data.Add(key,line.Substring(equals+1));
+        }
+        string components,community,xplane;
+        if(!data.TryGetValue("Simulators",out components)||!(components=="msfs"||components=="xplane"||components=="msfs,xplane"))throw new InvalidDataException("Installed simulators are unknown.");
+        string arguments="/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /COMPONENTS="+components;
+        if(components.Contains("msfs")) {
+            if(!data.TryGetValue("Community",out community))throw new InvalidDataException("MSFS installation folder is missing.");
+            arguments+=" "+QuoteArgument("/COMMUNITY="+InstallPath(community));
+        }
+        if(components.Contains("xplane")) {
+            if(!data.TryGetValue("XPlane",out xplane))throw new InvalidDataException("X-Plane installation folder is missing.");
+            arguments+=" "+QuoteArgument("/XPLANE="+InstallPath(xplane));
+        }
+        return arguments;
+    }
+    static string InstallPath(string path) {
+        if(String.IsNullOrWhiteSpace(path)||path.IndexOfAny(new[]{'\"','\r','\n','\0'})>=0||!Regex.IsMatch(path,@"^[A-Za-z]:[\\/]"))
+            throw new InvalidDataException("Invalid installation folder.");
+        return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
+    }
+    public static string QuoteArgument(string arg) {
+        // Windows CreateProcess argument quoting, including backslashes before quotes and at the end.
+        return "\""+Regex.Replace(arg,@"(\\*)\""",m=>m.Groups[1].Value+m.Groups[1].Value+"\\\"")+
+            new string('\\',arg.Length-arg.TrimEnd('\\').Length)+"\"";
+    }
+    public static async Task<bool> RequestRestart(Func<bool> running,Func<Task<bool>> choose,Action close,CancellationToken token) {
+        token.ThrowIfCancellationRequested();if(!running())return false;
+        bool approved=await choose();token.ThrowIfCancellationRequested();
+        if(approved && running()){close();return true;}return false;
+    }
     public static async Task WaitForExit(Func<bool> simulatorsRunning,Func<CancellationToken,Task> delay,Action<string> report,CancellationToken token) {
         bool announced=false;
         while(simulatorsRunning()) {
             token.ThrowIfCancellationRequested();
-            if(!announced){report("Ready. Save your views and close MSFS and X-Plane. The update will then install automatically.");announced=true;}
+            if(!announced){report("Waiting for the simulators to close. Respond to any simulator save/exit prompt; setup will start automatically.");announced=true;}
             await delay(token);
         }
         token.ThrowIfCancellationRequested();

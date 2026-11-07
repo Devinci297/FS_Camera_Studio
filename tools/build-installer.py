@@ -173,9 +173,9 @@ def build(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='0.5.2')
-    parser.add_argument('--package', default='build/release/0.5.2/fs-camera-studio')
-    parser.add_argument('--receipt', default='build/release/0.5.2/staged.json')
+    parser.add_argument('--version', default='0.5.3')
+    parser.add_argument('--package', default='build/release/0.5.3/fs-camera-studio')
+    parser.add_argument('--receipt', default='build/release/0.5.3/staged.json')
     parser.add_argument('--xplane', default='build-xp/XPCameraStudio', help='The built X-Plane plugin folder (win_x64 and ui).')
     parser.add_argument('--compiler', default='build/installer-tools/inno/ISCC.exe')
     parser.add_argument('--test-harness', action='store_true', help='Internal lifecycle test build, always under build/, never dist/. Uses a named test process guard.')

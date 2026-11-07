@@ -72,6 +72,9 @@ Source: "{#StageRoot}\THIRD-PARTY-NOTICES.txt"; DestDir: "{localappdata}\{#Contr
 Source: "{#StageRoot}\BUILD-INFO.json"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
 Source: "{#StageRoot}\FS-Camera-Studio-Manual.pdf"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
 
+[UninstallDelete]
+Type: files; Name: "{localappdata}\{#ControlFolder}\installation.ini"
+
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\{#UpdateProtocol}"; ValueType: string; ValueData: "URL:Camera Studio update"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\{#UpdateProtocol}"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
@@ -462,6 +465,7 @@ end;
 #include "verify.iss"
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var InstallRecord: TArrayOfString; Sims: String;
 begin
   if CurStep = ssInstall then begin
     if MsfsSelected and not SimulatorStopped then RaiseException('MSFS started during setup. Close it and run setup again.');
@@ -471,6 +475,18 @@ begin
   end;
   if CurStep = ssPostInstall then begin
     VerifyPayload;
+    Sims := '';
+    if MsfsSelected then Sims := 'msfs';
+    if XPlaneSelected then begin
+      if Sims <> '' then Sims := Sims + ',';
+      Sims := Sims + 'xplane';
+    end;
+    SetArrayLength(InstallRecord, 3);
+    InstallRecord[0] := 'Simulators=' + Sims;
+    InstallRecord[1] := 'Community=' + CommunityPage.Values[0];
+    InstallRecord[2] := 'XPlane=' + XPlaneRootValue;
+    if not SaveStringsToUTF8File(ExpandConstant('{localappdata}\{#ControlFolder}\installation.ini'), InstallRecord, False) then
+      RaiseException('Could not record installation folders for automatic updates.');
     if BackupDir <> '' then
       SaveStringToFile(ExpandConstant('{localappdata}\{#ControlFolder}\LAST-BACKUP.txt'),BackupDir+#13#10,False);
   end;

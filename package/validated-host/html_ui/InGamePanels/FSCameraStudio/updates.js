@@ -48,11 +48,12 @@
   const download=button('Download installer','mc-update-download');download.hidden=true;
   const notes=button('Release notes','mc-update-notes');notes.hidden=true;
   const link=el('input');link.type='text';link.readOnly=true;link.hidden=true;link.setAttribute('aria-label','Update installer link');
-  const actions=el('div','','mc-update-actions');[check,update,download,notes].forEach(e=>actions.appendChild(e));
+  const actions=el('div','','mc-update-actions');[check,update,notes].forEach(e=>actions.appendChild(e));
+  const fallback=el('details','','mc-update-fallback');fallback.appendChild(el('summary','Update troubleshooting'));fallback.appendChild(download);fallback.appendChild(link);
   const auto=el('input','','mc-switch');auto.id='mc-update-auto';auto.type='checkbox';auto.checked=read('fscs.checkUpdates',true)!==false;
   const label=el('label','','mc-switch-row');label.appendChild(el('span','Automatically check and notify me','mc-switch-copy'));label.appendChild(auto);
-  const hint=el('p','Update now opens the Windows updater. It verifies the download and waits for MSFS and X-Plane to close before upgrading. Save your views first. Profiles are preserved. If the updater does not open, choose Download installer.','mc-note');
-  [el('h4','Version & updates'),el('p','Installed build: '+current,'mc-note'),status,checked,actions,link,hint,label].forEach(e=>box.appendChild(e));settings.appendChild(box);
+  const hint=el('p','Update now opens the Windows updater. It downloads, verifies and installs the update for you. If a simulator is running, choose Restart and install after saving your flight, or update when you close it later. Profiles are preserved.','mc-note');
+  [el('h4','Version & updates'),el('p','Installed build: '+current,'mc-note'),status,checked,actions,hint,label,fallback].forEach(e=>box.appendChild(e));settings.appendChild(box);
   const badge=button('v'+current.split('-')[0],'mc-app-version','mc-version cursor-interaction');badge.title='Version '+current+' and updates';badge.setAttribute('aria-label',badge.title);
   const brand=doc.querySelector('.mc-brand');if(brand)brand.appendChild(badge);
   badge.addEventListener('click',()=>{doc.getElementById('mc-nav-settings').click();global.setTimeout(()=>{const nav=doc.getElementById('mc-settings-link-updates');if(nav)nav.click();box.scrollIntoView({block:'nearest'});},0);});
@@ -68,7 +69,7 @@
     notice.hidden=!candidate || dismissed===candidate.version;
     mini.hidden=!candidate;
     badge.textContent='v'+current.split('-')[0]+(candidate?' - Update':'');badge.classList.toggle('mc-has-update',!!candidate);
-    if(candidate){message.textContent='Camera Studio '+candidate.version+' is available.';link.value=candidate.url;mini.textContent=miniFallback?'Download installer':'Update available - Update now';mini.title=miniFallback?'Download the official installer':'Update to '+candidate.version+' after closing the simulators';}
+    if(candidate){message.textContent='Camera Studio '+candidate.version+' is available.';link.value=candidate.url;mini.textContent=miniFallback?'Download installer':'Update available - Update now';mini.title=miniFallback?'Download the official installer':'Download and install '+candidate.version+' automatically';}
     checked.textContent=lastSuccess?'Last checked: '+new Date(lastSuccess).toLocaleString():'';
     if(global.FSCApp && global.FSCApp.refreshMiniLayout)global.FSCApp.refreshMiniLayout();
     if(global.fscsUpdateMiniRect)global.fscsUpdateMiniRect();
@@ -112,12 +113,12 @@
       if(isXP && global.xplane && typeof global.xplane.fscsUpdate==='function'){
         const result=await global.xplane.fscsUpdate(candidate.version);
         if(!result || result.ok!==true)throw new Error(result&&result.error||'The Windows updater is not installed.');
-        feedback('Updater opened. Save your views and close MSFS and X-Plane when ready; the verified update will install afterward.');
+        feedback('Update started. The updater will install it for you and ask before restarting a running simulator.');
       }else if(typeof global.OpenBrowser==='function'){
         global.OpenBrowser('fscamerastudio://update/'+candidate.version);
-        feedback('Windows updater requested. Save your views and close both simulators when ready. If no updater opens, choose Download installer.');
+        feedback('Update requested. The updater handles download and installation and asks before restarting a running simulator.');
       }else throw new Error('Install the current Windows setup to enable click-to-update.');
-    }catch(e){miniFallback=true;feedback(e.message+(root.dataset.surface==='mini'?' Click Download for the installer.':' Use Download installer below.'),'error');}
+    }catch(e){miniFallback=true;fallback.open=true;feedback(e.message+(root.dataset.surface==='mini'?' Click Download for the installer.':' Use Download installer below.'),'error');}
     finally{launching=false;render();}
   }
   [update,noticeUpdate].forEach(e=>e.addEventListener('click',install));

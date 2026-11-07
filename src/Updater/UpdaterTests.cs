@@ -40,6 +40,24 @@ class Tests {
         await Fails(()=>Core.InstallWhenReady(path,release,()=>false,t=>Task.FromResult(0),p=>Task.FromResult(7),s=>{},CancellationToken.None),"setup failure is not success");
         File.WriteAllText(path,"corrupted");
         await Fails(()=>Core.InstallWhenReady(path,release,()=>false,t=>Task.FromResult(0),p=>{installs++;return Task.FromResult(0);},s=>{},CancellationToken.None),"reverify before launch");Check(installs==1,"corruption never launches");
+        int choices=0,closes=0;
+        Check(!await Core.RequestRestart(()=>false,()=>{choices++;return Task.FromResult(true);},()=>closes++,CancellationToken.None),"no restart prompt when closed");
+        Check(choices==0&&closes==0,"closed simulator is untouched");
+        Check(!await Core.RequestRestart(()=>true,()=>{choices++;return Task.FromResult(false);},()=>closes++,CancellationToken.None),"defer restart");
+        Check(closes==0,"later never closes simulator");
+        Check(await Core.RequestRestart(()=>true,()=>Task.FromResult(true),()=>closes++,CancellationToken.None),"explicit restart consent");
+        Check(closes==1,"one approved close request");
+        bool alive=true;
+        Check(!await Core.RequestRestart(()=>alive,()=>{alive=false;return Task.FromResult(true);},()=>closes++,CancellationToken.None),"natural exit while prompt open");
+        var cancelled=new CancellationTokenSource();cancelled.Cancel();
+        await Fails(()=>Core.RequestRestart(()=>true,()=>Task.FromResult(true),()=>closes++,cancelled.Token),"cancel prevents close");Check(closes==1,"no unapproved close");
+        string manifest="Simulators=msfs,xplane\nCommunity=C:\\Sim Packages\\Community\nXPlane=D:\\X-Plane 12\n";
+        string args=Core.SetupArguments(manifest);
+        Check(args.Contains("/VERYSILENT")&&args.Contains("/COMPONENTS=msfs,xplane"),"automatic setup with remembered components");
+        Check(args.Contains("\"/COMMUNITY=C:\\Sim Packages\\Community\"")&&args.Contains("\"/XPLANE=D:\\X-Plane 12\""),"remembered folders quoted");
+        Check(Core.SetupArguments("Simulators=xplane\nXPlane=D:\\Vols é\\X-Plane 12\n").Contains("Vols é"),"Unicode folder preserved");
+        foreach(string bad in new[]{manifest.Replace("msfs,xplane","all"),manifest.Replace("C:\\Sim Packages\\Community","relative"),manifest.Replace("C:\\Sim Packages\\Community","C:relative"),manifest.Replace("C:\\Sim Packages\\Community",@"\root-relative"),manifest.Replace("D:\\X-Plane 12","D:\\bad\" /SILENT"),manifest+"Simulators=msfs\n"})
+            await Fails(()=>Task.Run(()=>Core.SetupArguments(bad)),"reject unsafe installation record");
         int scenario=0;
         foreach(var bytes in new[]{Encoding.UTF8.GetBytes("bad"),new byte[payload.Length],new byte[payload.Length+1]}) {
             string broken=Path.Combine(root,"bad"+(scenario++)+".exe");
@@ -58,5 +76,5 @@ class Tests {
         }
         Console.WriteLine("PASS: "+checks+" updater checks (metadata, URLs, hashes, download failures, cancellation, file lock, deferred launch, installer failure"+(live?", real GitHub download":"")+").");
     }
-    static int Main(string[] args){try{Run(args[0],args.Length>1&&args[1]=="--live-download").GetAwaiter().GetResult();return 0;}catch(Exception e){Console.Error.WriteLine(e);return 1;}}
+    static int Main(string[] args){try{if(args.Length==2&&args[0]=="--setup-args"){Console.WriteLine(Core.SetupArguments(File.ReadAllText(args[1])));return 0;}Run(args[0],args.Length>1&&args[1]=="--live-download").GetAwaiter().GetResult();return 0;}catch(Exception e){Console.Error.WriteLine(e);return 1;}}
 }
