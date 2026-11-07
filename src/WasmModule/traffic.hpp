@@ -155,7 +155,8 @@ private:
 // ---------------------------------------------------------------------------------------------------------------
 // Spotting views
 
-enum class SpotView { Tower, Runway, Chase, Flyby, Track };
+// Spot: a fixed position spot (SpotTarget.spot kind "position"), aimed at the target with auto zoom.
+enum class SpotView { Tower, Runway, Chase, Flyby, Track, Spot };
 const char* toString(SpotView v);
 std::optional<SpotView> parseSpotView(const std::string& s);
 
@@ -217,7 +218,11 @@ SpotAirport spotAirport(const json& facility);
 struct RunwaySpot {
     std::string icao, runwayEnd, kind = "fence";
     double behindMeters = 0, sideMeters = 0, heightMeters = 0;
+    std::string name;  // the user's name for a saved spot (shown in the status line), may be empty
 };
+inline constexpr std::size_t kSpotNameMax = 60;
+// A spot's optional `name`: trimmed, control characters dropped, at most kSpotNameMax bytes.
+std::string spotName(const json& value);
 const std::vector<std::string>& runwaySpotKinds();
 // The kind's default offsets at `end`; runwayHeight is the runway camera category height (fence and threshold).
 RunwaySpot runwaySpot(const RunwayEnd& end, const std::string& kind, double runwayHeight);
@@ -228,6 +233,17 @@ const RunwayEnd* findRunwayEnd(const std::vector<SpotAirport>& airports, const s
 // within +-5 km, height 0-1000 m). nullopt with `error` set when it cannot be used.
 std::optional<RunwaySpot> parseRunwaySpot(const json& value, const std::vector<SpotAirport>& airports, double runwayHeight,
                                           std::string& error);
+// A position spot (SpotTarget.spot kind "position", view "spot"): a fixed world position (altitude meters MSL) the
+// camera stands at, aimed at the target with auto zoom. Placed no lower than the terrain under the target (its ground
+// altitude when the spot is placed or adjusted) plus kTerrainClearanceMeters.
+struct PositionSpot {
+    std::string name;
+    Geo position{NAN, NAN, NAN};
+};
+inline constexpr double kPositionSpotMinAltitude = -500, kPositionSpotMaxAltitude = 10000;
+// latitude -90..90, longitude -180..180, altitudeMeters -500..10000 and an optional name; nullopt with `error` set.
+std::optional<PositionSpot> parsePositionSpot(const json& value, std::string& error);
+json toJson(const PositionSpot& spot);
 // The runway end for a runway view of `target`: arriving / landing aircraft: the end it is lined up to land on
 // (landing direction within kRunwayAlignDeg of its track, threshold ahead or under it); takeoff / departing: the far
 // end it lifts off over (the reciprocal end, whose approach side it climbs out over); otherwise, or when nothing lines

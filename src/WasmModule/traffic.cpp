@@ -463,12 +463,13 @@ const char* toString(SpotView v) {
         case SpotView::Chase: return "chase";
         case SpotView::Flyby: return "flyby";
         case SpotView::Track: return "track";
+        case SpotView::Spot: return "spot";
     }
     return "chase";
 }
 
 std::optional<SpotView> parseSpotView(const std::string& s) {
-    for (auto v : {SpotView::Tower, SpotView::Runway, SpotView::Chase, SpotView::Flyby, SpotView::Track})
+    for (auto v : {SpotView::Tower, SpotView::Runway, SpotView::Chase, SpotView::Flyby, SpotView::Track, SpotView::Spot})
         if (s == toString(v)) return v;
     return std::nullopt;
 }
@@ -634,8 +635,53 @@ Geo spotPosition(const RunwayEnd& end, const RunwaySpot& spot) {
 }
 
 json toJson(const RunwaySpot& s) {
-    return {{"icao", s.icao}, {"runwayEnd", s.runwayEnd}, {"kind", s.kind},
-            {"behindMeters", s.behindMeters}, {"sideMeters", s.sideMeters}, {"heightMeters", s.heightMeters}};
+    json j{{"icao", s.icao}, {"runwayEnd", s.runwayEnd}, {"kind", s.kind},
+           {"behindMeters", s.behindMeters}, {"sideMeters", s.sideMeters}, {"heightMeters", s.heightMeters}};
+    if (!s.name.empty()) j["name"] = s.name;
+    return j;
+}
+
+std::string spotName(const json& v) {
+    std::string name;
+    for (const char c : js::str(v, "name"))
+        if (static_cast<unsigned char>(c) >= 32 && c != 127) name.push_back(c);
+    const auto first = name.find_first_not_of(' ');
+    if (first == std::string::npos) return {};
+    name = name.substr(first, name.find_last_not_of(' ') - first + 1);
+    if (name.size() > kSpotNameMax) {
+        // Never split a UTF-8 sequence: cut before the last character when it does not fit whole.
+        std::size_t lead = kSpotNameMax;
+        while (lead > 0 && (static_cast<unsigned char>(name[lead]) & 0xC0) == 0x80) --lead;
+        name.resize(lead);
+    }
+    return name;
+}
+
+std::optional<PositionSpot> parsePositionSpot(const json& v, std::string& error) {
+    if (!v.is_object()) { error = "A position spot needs a latitude, a longitude and an altitude."; return std::nullopt; }
+    const auto number = [&](const char* key, double low, double high, double& out) {
+        const auto& x = js::get(v, key);
+        if (!x.is_number() || !std::isfinite(x.get<double>()) || x.get<double>() < low || x.get<double>() > high) return false;
+        out = x.get<double>();
+        return true;
+    };
+    PositionSpot spot;
+    if (!number("latitude", -90, 90, spot.position.lat) || !number("longitude", -180, 180, spot.position.lon)) {
+        error = "The spot's position is not valid.";
+        return std::nullopt;
+    }
+    if (!number("altitudeMeters", kPositionSpotMinAltitude, kPositionSpotMaxAltitude, spot.position.altitude)) {
+        error = "The spot's altitudeMeters is out of range.";
+        return std::nullopt;
+    }
+    spot.name = spotName(v);
+    return spot;
+}
+
+json toJson(const PositionSpot& s) {
+    json j{{"kind", "position"}, {"latitude", s.position.lat}, {"longitude", s.position.lon}, {"altitudeMeters", s.position.altitude}};
+    if (!s.name.empty()) j["name"] = s.name;
+    return j;
 }
 
 const RunwayEnd* findRunwayEnd(const std::vector<SpotAirport>& airports, const std::string& icao, const std::string& end) {
@@ -667,6 +713,7 @@ std::optional<RunwaySpot> parseRunwaySpot(const json& v, const std::vector<SpotA
     if (!offset("behindMeters", spot.behindMeters, -5000, 5000) || !offset("sideMeters", spot.sideMeters, -5000, 5000) ||
         !offset("heightMeters", spot.heightMeters, 0, 1000))
         return std::nullopt;
+    spot.name = spotName(v);
     return spot;
 }
 

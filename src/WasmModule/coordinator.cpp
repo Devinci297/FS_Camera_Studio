@@ -2022,7 +2022,19 @@ json Coordinator::droneHere(double now, std::string& error) const {
     core::Quat orientation;
     double fov = kDroneDefaultFovRad;
     std::string source, message;
-    if (eligibleToSubmit() && cam && lastSubmitted_ && engine_.hasPose()) {
+    if (spot_ && spot_->overlay && state_ == Ownership::Active && lastSubmitted_ && lastSubmitted_->referential == Referential::World) {
+        // A chase, fly-by, computed or position spot view on screen (with or without a profile view underneath).
+        const SdkPose& sdk = *lastSubmitted_;
+        drone = {sdk.x, sdk.y, sdk.z};
+        orientation = core::Quat::fromPbh({-sdk.pitchDeg, sdk.bankDeg, sdk.headingDeg});
+        fov = sdk.fovRad;
+        if (const auto actual = backend_.worldCameraPosition()) {
+            const profiles::airport::Geo seen{actual->x, actual->y, actual->z};
+            if (seen.valid() && drone.valid() && profiles::airport::local(drone, seen).length() < 50) drone = seen;
+        }
+        source = "spot";
+        message = "Drone placed at the spotting view.";
+    } else if (eligibleToSubmit() && cam && lastSubmitted_ && engine_.hasPose()) {
         // The view on screen, as last submitted (aircraft tracking, follow horizon and gimbal included).
         const SdkPose& sdk = *lastSubmitted_;
         fov = engine_.sample().pose.fovRad;
@@ -2065,6 +2077,7 @@ json Coordinator::droneHere(double now, std::string& error) const {
         return nullptr;
     }
     json out = dronePlacement(drone, orientation, fov);
+    out["world"] = {{"latitude", drone.lat}, {"longitude", drone.lon}, {"altitudeMeters", drone.altitude}};
     out["source"] = source;
     out["message"] = message;
     return out;
@@ -2106,6 +2119,18 @@ namespace {
 profiles::airport::Geo airportCameraWorld(const CameraEntry& cam, const core::CameraPose& pose) {
     return profiles::airport::world({cam.originLat, cam.originLon, cam.originAltitude}, pose.positionFRD);
 }
+// Where a position spot puts the camera: its position, never below the terrain under the target plus clearance.
+profiles::airport::Geo positionSpotAt(const traffic::PositionSpot& place, const traffic::Pose& target) {
+    auto at = place.position;
+    const double floor = traffic::terrainFloor(target.groundAltitude, NAN);
+    if (std::isfinite(floor) && at.valid()) at.altitude = std::max(at.altitude, floor);
+    return at;
+}
+bool positionSpotInRange(const traffic::PositionSpot& place, const traffic::Pose& target) {
+    const auto d = profiles::airport::local(place.position, target.position);
+    return std::hypot(d.x, d.y) <= traffic::kSpotAirportRangeMeters;
+}
+constexpr const char* kSpotTooFar = "That spot is more than 20 km from this aircraft. Choose a spot near it.";
 }  // namespace
 
 bool Coordinator::spotAims(const CameraEntry& cam) const {
@@ -2171,6 +2196,7 @@ bool Coordinator::spotViewAvailable(traffic::SpotView view, std::uint32_t object
         }
         case traffic::SpotView::Chase:
         case traffic::SpotView::Flyby: return true;
+        case traffic::SpotView::Spot: return false;  // needs a position spot (SpotTarget.spot)
         case traffic::SpotView::Track: {
             if (state_ != Ownership::Active) return false;
             if (spot_ && spot_->overlay) return spot_->position.valid();
@@ -2231,7 +2257,8 @@ void Coordinator::detachSpotBase() {
     emitActiveCamera();
 }
 
-std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView view, double now, const std::optional<traffic::RunwaySpot>& runway) {
+std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView view, double now, const std::optional<traffic::RunwaySpot>& runway,
+                                    const std::optional<traffic::PositionSpot>& place) {
     if (const auto block = spottingBlockReason(); !block.empty()) return block;
     if (state_ == Ownership::Releasing || cleanupPending_) return "Camera Studio is changing camera control. Try again in a moment.";
     if (!seedName_.empty()) return "Camera Studio is busy; try again in a moment.";
@@ -2301,6 +2328,15 @@ std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView vi
             }
             break;
         }
+        case traffic::SpotView::Spot: {
+            // A saved position: stands there and zooms on the target, like the computed runway views.
+            if (!place || !place->position.valid()) return "The spot view needs a position spot. Save the current view as a spot first.";
+            if (!positionSpotInRange(*place, target)) return kSpotTooFar;
+            next.place = place;
+            next.pinned = true;
+            computed(positionSpotAt(*place, target));
+            break;
+        }
         case traffic::SpotView::Chase:
         case traffic::SpotView::Flyby: next.overlay = true; break;
     }
@@ -2335,6 +2371,33 @@ std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView vi
     if (spot_->overlay && !spot_->fixed) placeSpotOverlay(0, now);
     emitActiveCamera();
     return {};
+}
+
+std::string Coordinator::adjustSpot(const std::optional<traffic::RunwaySpot>& runway, const std::optional<traffic::PositionSpot>& place, double now) {
+    const char* notPinned = "Not watching from a pinned spot. Choose Watch from here first.";
+    if (!spot_ || !spot_->pinned || !spot_->overlay) return notPinned;
+    if (spot_->view == traffic::SpotView::Runway && spot_->runway) {
+        if (!runway) return "This view shows a runway spot. Adjust it with a runway spot.";
+        const auto* end = traffic::findRunwayEnd(spotAirports_, runway->icao, runway->runwayEnd);
+        if (!end) return "That runway end is not known. Wait for the airport's scenery data, or choose another end.";
+        // The same end moves the camera and keeps the zoom easing; another end is a cut.
+        const bool cut = runway->icao != spot_->runway->icao || runway->runwayEnd != spot_->runway->runwayEnd;
+        spot_->runway = *runway;
+        spot_->position = traffic::spotPosition(*end, *runway);
+        if (cut) {
+            spot_->fovRad = NAN;
+            spot_->cameraSince = now;
+        }
+        return {};
+    }
+    if (spot_->view == traffic::SpotView::Spot && spot_->place) {
+        if (!place || !place->position.valid()) return "This view shows a position spot. Adjust it with a position spot.";
+        if (!positionSpotInRange(*place, spot_->target)) return kSpotTooFar;
+        spot_->place = place;
+        spot_->position = positionSpotAt(*place, spot_->target);
+        return {};
+    }
+    return notPinned;
 }
 
 void Coordinator::stopSpotting(const std::string& reason, double now) {

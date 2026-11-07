@@ -107,6 +107,18 @@ constexpr double kSpottingMaxRadiusNm = 100;
 constexpr double kAutoSpotMinHoldSeconds = 10;
 constexpr double kAutoSpotMaxHoldSeconds = 300;
 
+// host.spottingSpots: the user's saved spotting spots (runway spots and position spots), kept without a camera
+// profile. At most kSpottingSpotsMax; names at most kSpottingSpotNameMax bytes.
+constexpr std::size_t kSpottingSpotsMax = 200;
+constexpr std::size_t kSpottingSpotNameMax = 60;
+constexpr double kSpottingSpotOffsetMaxMeters = 5000, kSpottingSpotHeightMaxMeters = 1000;
+constexpr double kSpottingSpotMinAltitude = -500, kSpottingSpotMaxAltitude = 10000;
+// Each entry {id, name, icao, kind (fence, approach, threshold, custom, position), runwayEnd + behindMeters /
+// sideMeters / heightMeters (runway kinds) or latitude / longitude / altitudeMeters (position)}: unknown kinds,
+// runway spots without an end and position spots without a usable position are dropped; offsets and the altitude are
+// clamped; a missing or repeated id gets a new one; an empty name becomes "Spot".
+json normalizeSpottingSpots(const json& spots);
+
 constexpr int kSettingsSchemaVersion = 2;
 HostSettings parseHostSettings(const json& settingsDoc);
 // Fills missing keys with defaults and clamps values. Unknown keys are dropped.

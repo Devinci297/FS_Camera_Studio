@@ -91,8 +91,14 @@ json ModuleApp::spottingState() const {
     const char* state = on ? (coord_.spotLost() ? "lost" : "tracking") : autoSpot_ ? "waiting" : "off";
     json runways = json::array();
     for (const auto& a : coord_.spotAirports())
-        for (const auto& e : a.ends) runways.push_back({{"icao", e.icao}, {"end", e.name}, {"headingDeg", std::round(e.headingDeg * 10) / 10}});
-    const auto spot = coord_.spotRunway();
+        for (const auto& e : a.ends)
+            runways.push_back({{"icao", e.icao}, {"end", e.name}, {"headingDeg", std::round(e.headingDeg * 10) / 10},
+                               {"lengthMeters", std::round(e.lengthMeters)}, {"widthMeters", std::round(e.widthMeters * 10) / 10}});
+    // The runway spot of a computed runway view, or the position spot of the spot view; `pinned`: chosen by the panel.
+    json spot = nullptr;
+    if (const auto place = coord_.spotPlace()) spot = traffic::toJson(*place);
+    else if (const auto runway = coord_.spotRunway()) spot = traffic::toJson(*runway);
+    if (spot.is_object()) spot["pinned"] = coord_.spotPinned();
     return {{"targetId", on ? json(coord_.spotTargetId()) : json(nullptr)},
             {"view", on && coord_.spotView() ? json(traffic::toString(*coord_.spotView())) : json(nullptr)},
             {"autoSpot", autoSpot_},
@@ -101,7 +107,7 @@ json ModuleApp::spottingState() const {
             {"reason", spotReason_.empty() ? json(nullptr) : json(spotReason_)},
             {"views", coord_.spotViewsJson()},
             {"runways", runways},
-            {"spot", spot ? traffic::toJson(*spot) : json(nullptr)}};
+            {"spot", spot}};
 }
 
 void ModuleApp::emitSpotting(bool force) {
@@ -112,9 +118,10 @@ void ModuleApp::emitSpotting(bool force) {
     emitState("SpottingChanged", std::move(state));
 }
 
-std::string ModuleApp::spot(std::uint32_t objectId, SpotView view, double now, const std::optional<traffic::RunwaySpot>& runway) {
+std::string ModuleApp::spot(std::uint32_t objectId, SpotView view, double now, const std::optional<traffic::RunwaySpot>& runway,
+                            const std::optional<traffic::PositionSpot>& place) {
     if (!simRunning_) return "Load a flight before spotting traffic.";
-    const auto error = coord_.spotTarget(objectId, view, now, runway);
+    const auto error = coord_.spotTarget(objectId, view, now, runway, place);
     if (!error.empty()) return error;
     // One automatic mode at a time: spotting stops Cinematic mode and airport Auto switch.
     if (cinematicOn_) stopCinematic("Spotting started.", now);
@@ -183,8 +190,11 @@ void ModuleApp::spotCycle(int delta, double now) {
                                                               : (((current - ids.begin()) + delta) % n + n) % n;
     const auto id = ids[static_cast<std::size_t>(i)];
     const SpotView view = coord_.spotView().value_or(SpotView::Chase);
+    // A pinned runway spot or a position spot stays where it is for the next aircraft.
+    const auto runway = coord_.spotPinned() && view == SpotView::Runway ? coord_.spotRunway() : std::nullopt;
+    const auto place = view == SpotView::Spot ? coord_.spotPlace() : std::nullopt;
     stopAutoSpot("A target was chosen manually.");
-    auto error = spot(id, view, now);
+    auto error = spot(id, view, now, runway, place);
     if (!error.empty() && view != SpotView::Chase) error = spot(id, SpotView::Chase, now);
     if (!error.empty()) spotReason_ = error;
     emitSpotting();
@@ -338,20 +348,42 @@ bool ModuleApp::spottingEvent(const std::string& name, json& payload) {
     return false;
 }
 
+std::string ModuleApp::parseSpot(const json& value, std::optional<traffic::RunwaySpot>& runway, std::optional<traffic::PositionSpot>& place) const {
+    std::string error;
+    if (js::str(value, "kind") == "position") place = traffic::parsePositionSpot(value, error);
+    else runway = traffic::parseRunwaySpot(value, coord_.spotAirports(), coord_.runwayCameraHeight(), error);
+    return error;
+}
+
 bool ModuleApp::handleSpotting(const protocol::Command& c, double now) {
     const auto& a = c.action;
     const auto& p = c.payload;
     if (a == "SpotTarget") {
         const auto id = js::integer(p, "objectId", 0);
         const auto view = traffic::parseSpotView(js::str(p, "view"));
+        const auto& value = js::get(p, "spot");
+        const bool position = js::str(value, "kind") == "position";
         std::string error;
         std::optional<traffic::RunwaySpot> runway;
+        std::optional<traffic::PositionSpot> place;
         if (id <= 0 || id > 0xffffffffLL) error = "Choose an aircraft from the traffic list.";
-        else if (!view) error = "Choose a spotting view: tower, runway, chase, flyby or track.";
-        else if (!js::get(p, "spot").is_null() && *view != SpotView::Runway) error = "A runway spot can only be used with the runway view.";
-        else if (!js::get(p, "spot").is_null() && !(runway = traffic::parseRunwaySpot(js::get(p, "spot"), coord_.spotAirports(), coord_.runwayCameraHeight(), error))) {}
-        else error = spot(static_cast<std::uint32_t>(id), *view, now, runway);
+        else if (!view) error = "Choose a spotting view: tower, runway, chase, flyby, track or spot.";
+        else if (*view == SpotView::Spot && !position) error = "The spot view needs a position spot.";
+        else if (!value.is_null() && position && *view != SpotView::Spot) error = "A position spot can only be used with the spot view.";
+        else if (!value.is_null() && !position && *view != SpotView::Runway) error = "A runway spot can only be used with the runway view.";
+        else if (!value.is_null() && !(error = parseSpot(value, runway, place)).empty()) {}
+        else error = spot(static_cast<std::uint32_t>(id), *view, now, runway, place);
         if (error.empty()) stopAutoSpot("A target was chosen manually.");  // a manual choice ends auto-spot
+        emitSpotting();
+        reply(c, error.empty() ? AckStatus::Completed : AckStatus::Rejected, error, {{"spotting", spottingState()}});
+        return true;
+    }
+    if (a == "AdjustSpot") {
+        // Live edits of the pinned spot being shown: same target, same view, no restart.
+        std::optional<traffic::RunwaySpot> runway;
+        std::optional<traffic::PositionSpot> place;
+        std::string error = js::get(p, "spot").is_object() ? parseSpot(js::get(p, "spot"), runway, place) : "Send the spot to adjust.";
+        if (error.empty()) error = coord_.adjustSpot(runway, place, now);
         emitSpotting();
         reply(c, error.empty() ? AckStatus::Completed : AckStatus::Rejected, error, {{"spotting", spottingState()}});
         return true;

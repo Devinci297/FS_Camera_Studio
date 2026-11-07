@@ -154,8 +154,9 @@ public:
     double freeTerrainAltitude(const profiles::airport::Geo& drone, double now) const;
 
     // Spotting (traffic cameras). The traffic picture comes from SimConnect polls (Traffic events). spotTarget() shows
-    // one aircraft in a tower, runway, chase, fly-by or track view, presented every frame from its predicted pose, and
-    // takes control if needed; it returns why it cannot ("" when shown, or shown once the simulator hands over).
+    // one aircraft in a tower, runway, chase, fly-by, track or position spot view, presented every frame from its
+    // predicted pose, and takes control if needed; it returns why it cannot ("" when shown, or shown once the
+    // simulator hands over).
     // Tower and runway views recall the loaded airport's own views and aim them at the target; track aims the world
     // view on screen; chase and fly-by are computed world poses over the view that was on screen. Any other recall,
     // Release, Panic and a loss of control end spotting.
@@ -163,8 +164,13 @@ public:
     static constexpr double kSpotRunwayRecheckSeconds = 1;  // runway view: the nearest runway view is re-checked
     static constexpr double kSpotRunwayDwellSeconds = 6;    // ... no more often than this, with a 15 % margin
     // `runway` pins a runway view to that runway spot (SpotTarget.spot); without it the end is picked automatically.
+    // `place` is the position spot of the spot view (required for it, ignored by the others).
     std::string spotTarget(std::uint32_t objectId, traffic::SpotView view, double now,
-                           const std::optional<traffic::RunwaySpot>& runway = std::nullopt);
+                           const std::optional<traffic::RunwaySpot>& runway = std::nullopt,
+                           const std::optional<traffic::PositionSpot>& place = std::nullopt);
+    // AdjustSpot: moves the pinned runway spot or the position spot being shown, keeping the target, the view and the
+    // zoom (another runway end is a cut). Returns why it cannot: not spotting from a pinned spot, or the other kind.
+    std::string adjustSpot(const std::optional<traffic::RunwaySpot>& runway, const std::optional<traffic::PositionSpot>& place, double now);
     // StopSpotting: back to the view shown before spotting began, or release when there was none.
     void stopSpotting(const std::string& reason, double now);
     // Ends spotting and keeps whatever world or aircraft view is underneath (another automatic mode takes over).
@@ -193,6 +199,9 @@ public:
     const std::vector<traffic::SpotAirport>& spotAirports() const { return spotAirports_; }
     // The runway spot a computed runway view shows (nullopt otherwise), and whether it was pinned by SpotTarget.spot.
     std::optional<traffic::RunwaySpot> spotRunway() const { return spot_ ? spot_->runway : std::nullopt; }
+    bool spotPinned() const { return spot_ && spot_->pinned; }
+    // The position spot the spot view shows (nullopt otherwise).
+    std::optional<traffic::PositionSpot> spotPlace() const { return spot_ ? spot_->place : std::nullopt; }
     // Whether tower and runway views can be shown at all: profile airport cameras (with control available) or
     // computed views from scenery data. SpottingChanged.views.
     json spotViewsJson() const;
@@ -410,6 +419,7 @@ private:
         double runwayCheckAt = 0, cameraSince = 0;
         std::optional<traffic::RunwaySpot> runway;  // computed runway view: the runway spot shown
         bool pinned = false;                        // ... chosen by SpotTarget.spot: never re-picked
+        std::optional<traffic::PositionSpot> place; // spot view: the position spot shown
     };
     std::optional<Spot> spot_;
     bool spotActivating_ = false, autoSpot_ = false;

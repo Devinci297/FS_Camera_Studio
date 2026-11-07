@@ -28,8 +28,10 @@ bool isStateEvent(const std::string& n) {
 }
 
 // Pinning the mini panel is a global UI preference, saved on its own and never an unsaved edit (design 2.0 §4.3).
+// Saved at once by UpdateDraft (never left as an unsaved edit): the mini pin and the saved spotting spots.
 json withoutPreferences(json settings) {
     if (settings.is_object() && settings.contains("ui") && settings["ui"].is_object()) settings["ui"].erase("miniPinned");
+    if (settings.is_object() && settings.contains("host") && settings["host"].is_object()) settings["host"].erase("spottingSpots");
     return settings;
 }
 
@@ -595,10 +597,14 @@ void ModuleApp::handle(const Command& c, double now) {
         publishWorking(now, before != working_.bindings);
         reply(c, AckStatus::Completed, {}, {{"draftRevision", working_.draftRevision}});
         const bool pinned = js::boolean(js::object(working_.settings, "ui"), "miniPinned", false);
-        if (pinned != js::boolean(js::object(repo_.committed().settings, "ui"), "miniPinned", false)) {
+        const json& spots = js::get(js::object(working_.settings, "host"), "spottingSpots");
+        // Preferences are saved at once, with or without a camera profile, and never with the other unsaved edits.
+        if (pinned != js::boolean(js::object(repo_.committed().settings, "ui"), "miniPinned", false) ||
+            spots != js::get(js::object(repo_.committed().settings, "host"), "spottingSpots")) {
             CommitRequest pref;
             json s = repo_.committed().settings;
             s["ui"]["miniPinned"] = pinned;
+            s["host"]["spottingSpots"] = spots.is_array() ? spots : json::array();
             pref.settings = s;
             pref.navigation = navigation();
             commit(std::move(pref), {c.requestId, "preference", working_.draftRevision, nullptr, {}}, now);

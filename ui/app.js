@@ -382,6 +382,7 @@
     snapshotWaiters: [], pendingCapture: null, dismissedAircraftKey: null, miniPicking: false, editTimer: 0,
     assign: null, manualOpen: false, peekToken: null,
     traffic: { aircraft: [], at: null }, spotting: null, trafficFilter: { status: 'all', query: '', maxNm: 0 },
+    spotEditor: null, spotSelectedId: null, spotAdjust: { timer: 0, inflight: false, wanted: null, last: 0 }, spotRenaming: null, spotNote: '', spotsOpen: true,
   };
   const W = () => S.working;
   const P = () => (S.working ? S.working.profile : null);
@@ -420,8 +421,9 @@
     });
   }
   /** Queue ops already applied to the mirror; only the latest state of each target is kept. */
-  function queueOps(ops) {
-    if (!S.working || readOnly()) return;
+  /** force: also with a read-only profile (settings that are not part of the profile, such as saved spots). */
+  function queueOps(ops, force) {
+    if (!S.working || (readOnly() && !force)) return;
     ops.forEach(op => {
       const key = op.op === 'setCamera' ? 'cam:' + op.camera.id : op.op === 'removeCamera' ? 'cam:' + op.cameraId : op.op;
       if (op.op === 'setProfileFields') {
@@ -2816,7 +2818,7 @@
 
   /* ------------- Spotting (other aircraft; the module picks the view and flies the camera) ------------- */
   const SPOT_VIEWS = [['tower', 'Tower', 'view-tower'], ['runway', 'Runway', 'view-runway'], ['chase', 'Chase', 'view-tail'], ['flyby', 'Fly-by', 'view-orbit'], ['track', 'Track', 'crosshair']];
-  const SPOT_VIEW_NAMES = { tower: 'Tower', runway: 'Runway', chase: 'Chase', flyby: 'Fly-by', track: 'Track' };
+  const SPOT_VIEW_NAMES = { tower: 'Tower', runway: 'Runway', chase: 'Chase', flyby: 'Fly-by', track: 'Track', spot: 'Saved view' };
   const TRAFFIC_STATUS = { parked: 'Parked', taxi: 'Taxiing', takeoff: 'Takeoff', departing: 'Departing', arriving: 'Arriving', landing: 'Landing', cruise: 'Cruise' };
   const TRAFFIC_FILTERS = {
     all: () => true, ground: a => Boolean(a.onGround),
@@ -2854,7 +2856,7 @@
   // Track keeps a world-referential view (airport or free camera) and only aims it at the aircraft.
   function spotTrackable() {
     const sp = spotting();
-    if (sp.state !== 'off' && sp.view) return sp.view === 'tower' || sp.view === 'runway' || sp.view === 'track';
+    if (sp.state !== 'off' && sp.view) return sp.view === 'tower' || sp.view === 'runway' || sp.view === 'track' || sp.view === 'spot';
     const view = S.ownership.state === 'Active' ? camIn(S.active.cameraId) : null;
     return Boolean(view && (view.mode === 'airport' || view.mode === 'free'));
   }
@@ -2876,7 +2878,7 @@
       if (!airportViewsLoaded()) return 'Tower and runway views need airport cameras. Load or generate cameras for a nearby airport first.';
     }
     if (view === 'track') {
-      const overlay = sp.state !== 'off' && (sp.view === 'tower' || sp.view === 'runway' || sp.view === 'track');
+      const overlay = sp.state !== 'off' && (sp.view === 'tower' || sp.view === 'runway' || sp.view === 'track' || sp.view === 'spot');
       if (!S.caps.canActivate && !overlay) return 'Track aims an airport or free camera from your camera profile. Without one, use Chase, Fly-by, Tower or Runway.';
       if (!spotTrackable()) return 'Track aims the current airport or free camera at the aircraft. Show one of those views first.';
     }
@@ -2886,7 +2888,19 @@
     if (ack && ack.result && ack.result.spotting) { S.spotting = ack.result.spotting; renderSpotting(); }
     return ack;
   }
-  const spotTarget = (objectId, view) => command('SpotTarget', { objectId, view }).then(applySpottingAck);
+  /** The pinned spot shown in `view` (a chosen runway spot or a position spot), so another aircraft is watched from the same place. */
+  function keptSpot(view) {
+    const sp = spotting();
+    if (sp.state === 'off' || sp.view !== view || !sp.spot || !sp.spot.pinned) return null;
+    const spot = clone(sp.spot);
+    delete spot.pinned;
+    return spot;
+  }
+  /** spot: SpotTarget.spot; undefined keeps the pinned spot of that view, null asks for the automatic one. */
+  function spotTarget(objectId, view, spot) {
+    const pinned = spot === undefined ? keptSpot(view) : spot;
+    return command('SpotTarget', pinned ? { objectId, view, spot: pinned } : { objectId, view }).then(applySpottingAck);
+  }
   const setAutoSpot = enabled => command('SetAutoSpot', { enabled: Boolean(enabled) }).then(applySpottingAck);
   const stopSpotting = () => command('StopSpotting', {}).then(applySpottingAck);
   /** The aircraft after the current target by distance (the nearest one when nothing is followed yet). */
@@ -2898,7 +2912,9 @@
   }
   function spotStateText() {
     const sp = spotting(), label = sp.targetLabel || 'the aircraft';
-    if (sp.state === 'tracking') return 'Spotting ' + label + (sp.view ? ' - ' + (SPOT_VIEW_NAMES[sp.view] || sp.view) : '') + (sp.autoSpot ? ' - Auto-spot' : '');
+    // "Spotting DLH4AB - A320 - Runway - KDEM 09 fence line": the pinned spot's name, or the end chosen automatically.
+    const place = !sp.spot ? '' : sp.spot.pinned ? ' - ' + spotPlaceName(sp.spot) : sp.spot.icao ? ' - Auto ' + sp.spot.icao + ' ' + sp.spot.runwayEnd : '';
+    if (sp.state === 'tracking') return 'Spotting ' + label + (sp.view ? ' - ' + (SPOT_VIEW_NAMES[sp.view] || sp.view) : '') + place + (sp.autoSpot ? ' - Auto-spot' : '');
     if (sp.state === 'lost') return 'Lost ' + label + (sp.reason ? ': ' + sp.reason : '');
     if (sp.state === 'waiting') return 'Auto-spot is waiting for arriving or departing traffic' + (sp.reason ? ': ' + sp.reason : '.');
     const blocked = S.snapshot ? spottingBlock() : null;
@@ -3054,11 +3070,14 @@
     note.hidden = !text;
     setText(note, text);
   }
+  // One aircraft: callsign and type, status chip, distance, altitude, ground speed and the view buttons in aligned
+  // columns (app.css stacks them on narrow panels). The name picks the aircraft for Spots > Watch from here.
   function trafficRow(id) {
     const row = make('div', undefined, 'mc-traffic-row');
     row.dataset.objectId = id;
     row.setAttribute('role', 'group');
-    const name = make('div', undefined, 'mc-traffic-name'), views = make('div', undefined, 'mc-traffic-views');
+    const name = button(null, () => { S.spotSelectedId = row.objectId; renderTraffic(); }, 'mc-traffic-name'), views = make('div', undefined, 'mc-traffic-views');
+    name.setAttribute('data-focus-key', 'spot-pick:' + id);
     add(name, make('strong'), make('small'));
     SPOT_VIEWS.forEach(([view, label, iconName]) => {
       const choose = button(label, () => spotTarget(row.objectId, view), 'mc-secondary', iconName);
@@ -3066,7 +3085,9 @@
       choose.setAttribute('data-focus-key', 'spot:' + id + ':' + view);
       views.appendChild(choose);
     });
-    add(row, name, make('span', undefined, 'mc-pill mc-traffic-status'), make('span', undefined, 'mc-traffic-figures'), views);
+    const figures = make('span', undefined, 'mc-traffic-figures');
+    add(figures, make('span', undefined, 'mc-traffic-distance'), make('span', undefined, 'mc-traffic-altitude'), make('span', undefined, 'mc-traffic-speed'));
+    add(row, name, make('span', undefined, 'mc-pill mc-traffic-status'), figures, views);
     return row;
   }
   function updateTrafficRow(row, a, sp, reasons) {
@@ -3076,13 +3097,19 @@
     row.dataset.status = a.status || '';
     row.dataset.onGround = String(Boolean(a.onGround));
     row.dataset.tracking = String(tracked);
+    const picked = S.spotSelectedId === a.objectId, name = row.querySelector('.mc-traffic-name');
+    row.dataset.selected = String(picked);
+    name.setAttribute('aria-pressed', String(picked));
+    name.title = 'Use ' + label + ' for Watch from here in Spots';
     setText(row.querySelector('.mc-traffic-name strong'), label);
     setText(row.querySelector('.mc-traffic-name small'), trafficDetail(a));
     const chip = row.querySelector('.mc-traffic-status');
     setText(chip, TRAFFIC_STATUS[a.status] || a.status || '');
     chip.dataset.status = a.status || '';
     const numbers = row.querySelector('.mc-traffic-figures');
-    setText(numbers, figures.join(', '));  // plain comma: the figures' tabular-number font has no middle dot in the sim
+    setText(numbers.querySelector('.mc-traffic-distance'), figures[0]);
+    setText(numbers.querySelector('.mc-traffic-altitude'), figures[1]);
+    setText(numbers.querySelector('.mc-traffic-speed'), figures[2]);
     numbers.title = 'Distance ' + figures[0] + ', altitude ' + figures[1] + ', ground speed ' + figures[2];
     $$('button[data-view]', row).forEach(choose => {
       const view = choose.dataset.view, reason = reasons[view];
@@ -3112,6 +3139,9 @@
     setText($('mc-traffic-count'), all.length ? (shown.length === all.length ? all.length : shown.length + ' of ' + all.length) + ' aircraft within ' + radius + ' NM, nearest first' : '');
     const reasons = {};
     SPOT_VIEWS.forEach(([view]) => { reasons[view] = spotViewReason(view); });
+    if (S.spotSelectedId != null && !all.some(a => a.objectId === S.spotSelectedId)) S.spotSelectedId = null;
+    renderTrafficReasons(reasons, shown.length > 0);
+    renderTrafficHead(shown.length > 0);
     // Rows are kept and updated in place, so a click or keyboard focus survives the once-a-second refresh.
     const focused = list.contains(document.activeElement) ? document.activeElement : null, wanted = {};
     shown.forEach((a, index) => {
@@ -3126,7 +3156,522 @@
     if (!none) { none = make('p', 'No aircraft match these filters.', 'mc-empty'); none.id = 'mc-traffic-none'; list.parentNode.insertBefore(none, list.nextSibling); }
     none.hidden = !all.length || shown.length > 0;
     if (focused && focused.isConnected && document.activeElement !== focused) focused.focus();
+    // The column labels share the rows' grid: the views column is as wide as a row's buttons.
+    const views = list.querySelector('.mc-traffic-row .mc-traffic-views'), label = $('mc-traffic-head').querySelector('.mc-traffic-views');
+    const width = views ? views.offsetWidth + 'px' : '';
+    if (label.style.width !== width) label.style.width = width;
+    renderSpots();
   }
+  const joinNames = names => (names.length === SPOT_VIEWS.length ? 'All views' : names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0]);
+  // Why view buttons are unavailable, visibly: one line per reason (the reasons are the same for every row).
+  function renderTrafficReasons(reasons, rows) {
+    let box = $('mc-traffic-reasons');
+    if (!box) {
+      box = make('div', undefined, 'mc-traffic-reasons'); box.id = 'mc-traffic-reasons'; box.setAttribute('role', 'note');
+      const list = $('mc-traffic-list');
+      list.parentNode.insertBefore(box, list);
+    }
+    const groups = [];
+    SPOT_VIEWS.forEach(([view, label]) => {
+      const reason = reasons[view];
+      if (!reason) return;
+      const group = groups.filter(g => g.reason === reason)[0];
+      if (group) group.views.push(label); else groups.push({ reason, views: [label] });
+    });
+    const key = JSON.stringify(groups);
+    if (box.dataset.key !== key) {
+      box.dataset.key = key;
+      empty(box);
+      groups.forEach(g => { const line = make('p', undefined, 'mc-traffic-reason'); add(line, make('strong', joinNames(g.views) + ':'), ' ' + g.reason); box.appendChild(line); });
+    }
+    // A block on spotting as a whole is already explained in the status line above.
+    box.hidden = !rows || !groups.length || Boolean(S.snapshot && spottingBlock());
+  }
+  function renderTrafficHead(rows) {
+    let head = $('mc-traffic-head');
+    if (!head) {
+      head = make('div', undefined, 'mc-traffic-row mc-traffic-head'); head.id = 'mc-traffic-head'; head.setAttribute('aria-hidden', 'true');
+      const figures = make('span', undefined, 'mc-traffic-figures');
+      add(figures, make('span', 'Distance'), make('span', 'Altitude'), make('span', 'Speed'));
+      add(head, make('span', 'Aircraft', 'mc-traffic-name'), make('span', 'Status', 'mc-traffic-status'), figures, make('span', 'Views', 'mc-traffic-views'));
+      const list = $('mc-traffic-list');
+      list.parentNode.insertBefore(head, list);
+    }
+    head.hidden = !rows;
+  }
+  /* ------------- Spots: watch from a chosen place ------------- */
+  /* A runway spot (fence line, 1 NM approach, threshold side or custom offsets at one runway end) or a position spot
+     (a saved camera position) shown with SpotTarget.spot. While the view comes from such a pinned spot, edits apply
+     live with AdjustSpot (at most every 100 ms). Saved spots live in the settings (host.spottingSpots), which the
+     module saves at once like a preference: no camera profile and no Save needed. Sends to the module only happen
+     from clicks, input events and timers (never from pagehide, unload or a blur handler). */
+  const SPOT_KINDS = [['fence', 'Fence line'], ['approach', 'Approach (1 NM)'], ['threshold', 'Threshold side'], ['custom', 'Custom']];
+  const SPOT_KIND_NAMES = { fence: 'fence line', approach: 'approach 1 NM', threshold: 'threshold side', custom: 'custom spot', position: 'saved view' };
+  const SPOTS_MAX = 200, SPOT_ADJUST_MS = 100, SPOT_NAME_MAX = 60, METERS_PER_DEGREE = 111320;
+  // Editor fields: runway offsets (meters) or the nudge of a position spot (meters from where it was saved).
+  const SPOT_FIELDS = {
+    runway: [['behind', 'Behind', -5000, 5000, 'm before the threshold; negative: past it, over the runway'], ['side', 'Side', -5000, 5000, 'm right of the landing direction; negative: left'], ['height', 'Height', 0, 1000, 'm above the runway']],
+    position: [['north', 'North', -2000, 2000, 'm north of the saved point; negative: south'], ['east', 'East', -2000, 2000, 'm east; negative: west'], ['up', 'Up', -2000, 2000, 'm up; negative: down']],
+  };
+  const spotRunways = () => (Array.isArray(spotting().runways) ? spotting().runways : []);
+  // The loaded (or nearest) airport first, as the module lists them.
+  const spotAirportCodes = () => spotRunways().map(r => r.icao).filter((code, i, list) => code && list.indexOf(code) === i);
+  const spotEnds = icao => spotRunways().filter(r => r.icao === icao);
+  const spotEnd = (icao, end) => spotEnds(icao).filter(r => r.end === end)[0] || null;
+  const savedSpots = () => (S.working && S.working.settings.host && Array.isArray(S.working.settings.host.spottingSpots) ? S.working.settings.host.spottingSpots : []);
+  const savedSpot = id => savedSpots().filter(s => s.id === id)[0] || null;
+  const runwayCameraHeight = () => { const h = S.working && S.working.settings.host.airportCategoryHeights; return h && isFinite(h.runways) ? M.clamp(Number(h.runways), 0, 1000) : 3; };
+  const tenth = n => Math.round(n * 10) / 10;
+  const finite = (value, fallback) => (typeof value === 'number' && isFinite(value) ? value : fallback);
+  /** The module's default offsets for a runway spot kind (custom starts from the fence line). */
+  function spotDefaults(kind, end) {
+    const height = runwayCameraHeight(), width = end && finite(end.widthMeters, 0) > 0 ? end.widthMeters : 30;
+    if (kind === 'approach') return { behind: 1852, side: 0, height: tenth(Math.max(0, 1852 * Math.tan(3 * Math.PI / 180) - 90)) };
+    if (kind === 'threshold') return { behind: 0, side: tenth(width / 2 + 12), height };
+    return { behind: 150, side: 80, height };
+  }
+  function spotEditor() {
+    if (!S.spotEditor) S.spotEditor = { icao: '', end: '', kind: 'fence', behind: 150, side: 80, height: runwayCameraHeight(), base: null, north: 0, east: 0, up: 0, name: '', savedId: null, syncedKey: '', editedAt: 0 };
+    return S.spotEditor;
+  }
+  const spotKey = spot => (!spot ? '' : spot.kind === 'position' ? 'position:' + (spot.name || '') : 'runway:' + spot.icao + ':' + spot.runwayEnd);
+  function spotPlaceName(spot) {
+    if (!spot) return '';
+    if (spot.name) return spot.name;
+    return spot.kind === 'position' ? 'saved view' : spot.icao + ' ' + spot.runwayEnd + ' ' + (SPOT_KIND_NAMES[spot.kind] || spot.kind);
+  }
+  /** The position spot with the editor's North / East / Up nudge applied. */
+  function nudgedPosition(ed) {
+    const b = ed.base;
+    if (!b) return null;
+    const lat = M.clamp(b.latitude + ed.north / METERS_PER_DEGREE, -90, 90);
+    let lon = b.longitude + ed.east / (METERS_PER_DEGREE * Math.max(0.01, Math.cos(b.latitude * Math.PI / 180)));
+    if (lon > 180) lon -= 360; else if (lon < -180) lon += 360;
+    return { latitude: Math.round(lat * 1e7) / 1e7, longitude: Math.round(lon * 1e7) / 1e7, altitudeMeters: tenth(M.clamp(b.altitudeMeters + ed.up, -500, 10000)) };
+  }
+  /** SpotTarget / AdjustSpot `spot` from the editor; null for Auto (the module picks the end). */
+  function editorSpot() {
+    const ed = spotEditor();
+    if (ed.kind === 'position') { const at = nudgedPosition(ed); return at ? Object.assign({ kind: 'position', name: ed.name || 'Saved view' }, at) : null; }
+    if (!ed.icao || !ed.end) return null;
+    const spot = { icao: ed.icao, runwayEnd: ed.end, kind: ed.kind, behindMeters: ed.behind, sideMeters: ed.side, heightMeters: ed.height };
+    if (ed.name) spot.name = ed.name;
+    return spot;
+  }
+  function loadSpotIntoEditor(spot, savedId) {
+    const ed = spotEditor();
+    ed.savedId = savedId || null;
+    ed.name = spot.name || '';
+    ed.north = ed.east = ed.up = 0;
+    if (spot.kind === 'position') {
+      ed.kind = 'position';
+      ed.base = { latitude: Number(spot.latitude), longitude: Number(spot.longitude), altitudeMeters: Number(spot.altitudeMeters) };
+    } else {
+      const kind = SPOT_KIND_NAMES[spot.kind] && spot.kind !== 'position' ? spot.kind : 'fence', d = spotDefaults(kind, spotEnd(spot.icao, spot.runwayEnd));
+      Object.assign(ed, { kind, base: null, icao: spot.icao || ed.icao, end: spot.runwayEnd || '',
+        behind: finite(spot.behindMeters, d.behind), side: finite(spot.sideMeters, d.side), height: finite(spot.heightMeters, d.height) });
+    }
+    ed.syncedKey = spotKey(spot);
+  }
+  /** The aircraft "Watch from here" shows: the one being spotted, else the one picked in the list, else the nearest arrival, else the nearest. */
+  function spotWatchTarget() {
+    const sp = spotting(), list = trafficAircraft(), find = id => list.filter(a => a.objectId === id)[0];
+    if (sp.state !== 'off' && sp.targetId != null && find(sp.targetId)) return { aircraft: find(sp.targetId), why: 'the aircraft you are spotting' };
+    if (S.spotSelectedId != null && find(S.spotSelectedId)) return { aircraft: find(S.spotSelectedId), why: 'picked in the list' };
+    const arriving = list.filter(a => a.status === 'landing' || a.status === 'arriving')[0];
+    if (arriving) return { aircraft: arriving, why: 'the nearest arrival' };
+    return list.length ? { aircraft: list[0], why: 'the nearest aircraft' } : null;
+  }
+  /** Edits apply live while the view comes from a pinned spot of the same kind. */
+  function spotLive() {
+    const sp = spotting(), ed = spotEditor(), active = sp.spot;
+    if ((sp.state !== 'tracking' && sp.state !== 'lost') || !active || !active.pinned) return false;
+    return ed.kind === 'position' ? sp.view === 'spot' && active.kind === 'position' : sp.view === 'runway' && active.kind !== 'position' && Boolean(ed.end);
+  }
+  function spotWatchReason() {
+    if (!S.snapshot) return statusText();
+    const blocked = spottingBlock(), ed = spotEditor();
+    if (blocked) return blocked;
+    if (!spotWatchTarget()) return 'No traffic nearby to watch.';
+    if (ed.kind === 'position') return ed.base ? null : 'Save the current view as a spot first.';
+    if (!spotAirportCodes().length) return SPOT_NO_DATA.runway;
+    if (ed.end && !spotEnd(ed.icao, ed.end)) return 'No runway data is known for ' + ed.icao + ' ' + ed.end + ' yet. Fly near ' + ed.icao + ', or choose another airport.';
+    return null;
+  }
+  function watchFromEditor() {
+    const target = spotWatchTarget();
+    if (!target || spotWatchReason()) { renderSpots(); return; }
+    const spot = editorSpot(), ed = spotEditor();
+    ed.syncedKey = spotKey(spot);
+    spotTarget(target.aircraft.objectId, ed.kind === 'position' ? 'spot' : 'runway', spot);
+  }
+  // Live edits: the latest editor spot, sent at most every SPOT_ADJUST_MS and never while one is in flight.
+  function queueSpotAdjust() {
+    const a = S.spotAdjust;
+    if (!spotLive()) return;
+    a.wanted = editorSpot();
+    spotEditor().syncedKey = spotKey(a.wanted);
+    if (a.timer || a.inflight) return;
+    a.timer = setTimeout(sendSpotAdjust, Math.max(0, SPOT_ADJUST_MS - (Date.now() - a.last)));
+  }
+  function sendSpotAdjust() {
+    const a = S.spotAdjust, spot = a.wanted;
+    a.timer = 0;
+    a.wanted = null;
+    if (!spot || !spotLive()) return;
+    a.inflight = true;
+    a.last = Date.now();
+    command('AdjustSpot', { spot }, { quiet: true }).then(ack => {
+      a.inflight = false;
+      S.spotNote = ack.status === 'Completed' ? '' : reasonText(ack.reason);
+      applySpottingAck(ack);
+      if (a.wanted && !a.timer) a.timer = setTimeout(sendSpotAdjust, Math.max(0, SPOT_ADJUST_MS - (Date.now() - a.last)));
+      else renderSpots();
+    });
+  }
+  const spotAdjustPending = () => Boolean(S.spotAdjust.timer || S.spotAdjust.inflight || S.spotAdjust.wanted);
+  function spotEdited() {
+    spotEditor().editedAt = Date.now();
+    S.spotNote = '';
+    renderSpots();
+    queueSpotAdjust();
+  }
+  /** Follows the pinned spot the module shows (another panel, Next target, a fresh snapshot), unless the user is editing. */
+  function syncSpotEditor() {
+    const sp = spotting(), ed = spotEditor(), active = sp.state !== 'off' && sp.spot && sp.spot.pinned ? sp.spot : null;
+    if (!active || spotAdjustPending() || Date.now() - ed.editedAt < 1000) return;
+    const key = spotKey(active);
+    if (key === ed.syncedKey) return;
+    const saved = savedSpots().filter(s => s.name === active.name && spotKey(s) === key)[0];
+    loadSpotIntoEditor(active, saved ? saved.id : null);
+  }
+  function spotOffsetsChanged(ed) {
+    if (ed.kind === 'position' || ed.kind === 'custom') return;
+    const d = spotDefaults(ed.kind, spotEnd(ed.icao, ed.end));
+    if (Math.abs(d.behind - ed.behind) > 0.05 || Math.abs(d.side - ed.side) > 0.05 || Math.abs(d.height - ed.height) > 0.05) ed.kind = 'custom';
+  }
+  function setSpotKind(kind) {
+    const ed = spotEditor();
+    ed.kind = kind;
+    if (kind !== 'custom') Object.assign(ed, spotDefaults(kind, spotEnd(ed.icao, ed.end)));
+    spotEdited();
+  }
+  function readSpotField(input, commit) {
+    const ed = spotEditor(), field = SPOT_FIELDS[ed.kind === 'position' ? 'position' : 'runway'].filter(f => f[0] === input.dataset.key)[0];
+    if (!field) return;
+    const n = Number(input.value);
+    if (input.value.trim() !== '' && isFinite(n)) {
+      ed[field[0]] = M.clamp(tenth(n), field[2], field[3]);
+      spotOffsetsChanged(ed);
+    }
+    if (commit) input.value = String(ed[field[0]]);
+    spotEdited();
+  }
+  function chooseSpotEnd(end) {
+    const ed = spotEditor(), sp = spotting(), wasPinned = sp.state !== 'off' && sp.view === 'runway' && sp.spot && sp.spot.pinned;
+    ed.end = end;
+    if (end && ed.kind !== 'custom') Object.assign(ed, spotDefaults(ed.kind, spotEnd(ed.icao, end)));
+    if (!end && wasPinned && sp.targetId != null) {
+      // Auto: back to the automatic end selection for the aircraft being watched.
+      ed.syncedKey = '';
+      spotTarget(sp.targetId, 'runway', null);
+    }
+    spotEdited();
+  }
+  function chooseSpotAirport(icao) {
+    const ed = spotEditor(), ends = spotEnds(icao);
+    ed.icao = icao;
+    if (!spotEnd(icao, ed.end)) ed.end = spotLive() && ends[0] ? ends[0].end : '';
+    if (ed.end && ed.kind !== 'custom') Object.assign(ed, spotDefaults(ed.kind, spotEnd(icao, ed.end)));
+    spotEdited();
+  }
+  function leavePositionSpot() {
+    const ed = spotEditor();
+    Object.assign(ed, { kind: 'fence', base: null, name: '', savedId: null, north: 0, east: 0, up: 0 }, spotDefaults('fence', spotEnd(ed.icao, ed.end)));
+    spotEdited();
+  }
+  /* Saved spots (host.spottingSpots). */
+  const newSpotId = () => 's' + Date.now().toString(36) + Math.floor(Math.random() * 1679616).toString(36);
+  function writeSpots(list, message) {
+    S.working.settings.host.spottingSpots = list;
+    queueOps([{ op: 'setSettings', settings: S.working.settings }], true);  // the module saves the list at once
+    if (message) announce(message);
+    renderSpots();
+  }
+  function savedFromEditor(id, name) {
+    const ed = spotEditor(), spot = editorSpot();
+    if (!spot) return null;
+    const out = Object.assign({ id, name, icao: ed.icao || '' }, spot);
+    out.name = name;
+    if (spot.kind === 'position') out.icao = ed.icao || '';
+    return out;
+  }
+  function defaultSpotName() {
+    const ed = spotEditor();
+    if (ed.kind === 'position') return (ed.icao ? ed.icao + ' ' : '') + 'view ' + (savedSpots().filter(s => s.kind === 'position').length + 1);
+    return ed.icao + ' ' + ed.end + ' ' + SPOT_KIND_NAMES[ed.kind];
+  }
+  function saveEditorSpot() {
+    if (savedSpots().length >= SPOTS_MAX || !editorSpot()) return;
+    const ed = spotEditor(), id = newSpotId(), name = (ed.savedId ? '' : ed.name) || defaultSpotName(), spot = savedFromEditor(id, name);
+    if (ed.kind === 'position') { ed.base = { latitude: spot.latitude, longitude: spot.longitude, altitudeMeters: spot.altitudeMeters }; ed.north = ed.east = ed.up = 0; }
+    ed.savedId = id;
+    ed.name = name;
+    writeSpots(savedSpots().concat([spot]), 'Spot saved: ' + name + '.');
+    queueSpotAdjust();  // a live view takes the name
+  }
+  function updateSavedSpot() {
+    const ed = spotEditor(), old = savedSpot(ed.savedId);
+    if (!old || !editorSpot()) return;
+    const spot = savedFromEditor(old.id, old.name);
+    if (ed.kind === 'position') { ed.base = { latitude: spot.latitude, longitude: spot.longitude, altitudeMeters: spot.altitudeMeters }; ed.north = ed.east = ed.up = 0; }
+    writeSpots(savedSpots().map(s => (s.id === old.id ? spot : s)), 'Spot updated: ' + old.name + '.');
+  }
+  function renameSavedSpot(id, text) {
+    const name = String(text || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, SPOT_NAME_MAX);
+    S.spotRenaming = null;
+    S.spotRenameText = null;
+    const spot = savedSpot(id);
+    if (!spot || !name || name === spot.name) { renderSpots(); return; }
+    const ed = spotEditor();
+    if (ed.savedId === id) { ed.name = name; ed.syncedKey = spotKey(editorSpot()); }
+    writeSpots(savedSpots().map(s => (s.id === id ? Object.assign({}, s, { name }) : s)), 'Spot renamed: ' + name + '.');
+    if (ed.savedId === id) queueSpotAdjust();
+  }
+  function deleteSavedSpot(id) {
+    const spot = savedSpot(id);
+    if (!spot) return;
+    if (spotEditor().savedId === id) spotEditor().savedId = null;
+    if (S.spotRenaming === id) S.spotRenaming = null;
+    writeSpots(savedSpots().filter(s => s.id !== id), 'Spot deleted: ' + spot.name + '.');
+  }
+  function watchSavedSpot(id) {
+    const spot = savedSpot(id);
+    if (!spot) return;
+    loadSpotIntoEditor(spot, id);
+    watchFromEditor();
+    renderSpots();
+  }
+  function editSavedSpot(id) {
+    const spot = savedSpot(id);
+    if (!spot) return;
+    loadSpotIntoEditor(spot, id);
+    spotEdited();
+  }
+  /** "Save current view as a spot": where the camera on screen is (DroneHere.world), as a position spot. */
+  function saveViewAsSpot() {
+    if (savedSpots().length >= SPOTS_MAX) return;
+    command('DroneHere', {}, { quiet: true }).then(ack => {
+      const world = ack && ack.status === 'Completed' && ack.result && ack.result.world;
+      if (!world || !isFinite(world.latitude) || !isFinite(world.longitude) || !isFinite(world.altitudeMeters)) {
+        S.spotNote = reasonText(ack && ack.reason) || 'The current view has no world position.';
+        renderSpots();
+        return;
+      }
+      const ed = spotEditor();
+      Object.assign(ed, { kind: 'position', base: { latitude: world.latitude, longitude: world.longitude, altitudeMeters: world.altitudeMeters }, north: 0, east: 0, up: 0, savedId: null, name: '' });
+      ed.name = defaultSpotName();
+      saveEditorSpot();
+      S.spotNote = ack.result.source === 'behindAircraft' ? 'No Camera Studio view was on screen, so the spot is 40 m behind and 12 m above your aircraft.' : '';
+      renderSpots();
+    });
+  }
+  function savedSpotDetail(s) {
+    if (s.kind === 'position') return 'Saved view' + (s.icao ? ' near ' + s.icao : '') + ' - ' + fmt(s.latitude, 5) + ', ' + fmt(s.longitude, 5) + ', ' + Math.round(s.altitudeMeters) + ' m';
+    const d = spotDefaults(s.kind, spotEnd(s.icao, s.runwayEnd)), side = finite(s.sideMeters, d.side), m = n => String(tenth(n));
+    return s.icao + ' ' + s.runwayEnd + ' - ' + SPOT_KIND_NAMES[s.kind] + ' - ' + m(finite(s.behindMeters, d.behind)) + ' m behind, ' +
+      m(Math.abs(side)) + ' m ' + (side < 0 ? 'left' : 'right') + ', ' + m(finite(s.heightMeters, d.height)) + ' m up';
+  }
+  function savedSpotReason(s) {
+    if (!S.snapshot) return statusText();
+    const blocked = spottingBlock();
+    if (blocked) return blocked;
+    if (!spotWatchTarget()) return 'No traffic nearby to watch.';
+    if (s.kind !== 'position' && !spotEnd(s.icao, s.runwayEnd)) return 'No runway data is known for ' + s.icao + ' ' + s.runwayEnd + ' yet. Fly near ' + (s.icao || 'the airport') + ' first.';
+    return null;
+  }
+  function buildSpots(pane) {
+    const summary = make('summary');
+    add(summary, icon('map-pin'), make('strong', 'Spots'), make('small', 'Watch from a runway spot or a saved view, and edit it live', 'mc-spots-summary'));
+    const body = make('div', undefined, 'mc-spots-body');
+    const field = (label, control) => { const box = make('label', undefined, 'mc-spot-field'); add(box, make('span', label), control); return box; };
+    const airport = make('select'); airport.id = 'mc-spot-airport'; airport.setAttribute('aria-label', 'Airport');
+    airport.addEventListener('change', () => chooseSpotAirport(airport.value));
+    const end = make('select'); end.id = 'mc-spot-end'; end.setAttribute('aria-label', 'Runway end');
+    end.addEventListener('change', () => chooseSpotEnd(end.value));
+    const kinds = make('div', undefined, 'mc-setting-choices mc-spot-kinds'); kinds.id = 'mc-spot-kind';
+    kinds.setAttribute('role', 'group'); kinds.setAttribute('aria-label', 'Spot type');
+    SPOT_KINDS.forEach(([kind, label]) => { const b = button(label, () => setSpotKind(kind)); b.dataset.kind = kind; b.setAttribute('data-focus-key', 'spot-kind:' + kind); kinds.appendChild(b); });
+    const kindBox = make('div', undefined, 'mc-spot-field mc-spot-kind-field'); add(kindBox, make('span', 'Spot type'), kinds);
+    const picker = make('div', undefined, 'mc-spot-picker'); picker.id = 'mc-spot-picker';
+    add(picker, field('Airport', airport), field('Runway end', end), kindBox);
+    const place = make('div', undefined, 'mc-spot-place'); place.id = 'mc-spot-place';
+    const back = button('Runway spots', leavePositionSpot, 'mc-secondary', 'view-runway'); back.id = 'mc-spot-leave-position';
+    add(place, make('span', undefined, 'mc-spot-place-text'), back);
+    const offsets = make('div', undefined, 'mc-spot-offsets'); offsets.id = 'mc-spot-offsets';
+    ['a', 'b', 'c'].forEach(slot => {
+      const box = make('div', undefined, 'mc-spot-field mc-spot-offset'), input = make('input'), step = make('span', undefined, 'mc-spot-step');
+      Object.assign(input, { type: 'number', id: 'mc-spot-offset-' + slot, step: 1 });
+      input.addEventListener('input', () => readSpotField(input, false));
+      input.addEventListener('change', () => readSpotField(input, true));
+      // -/+ move by 10 m (1 m for heights), live while a pinned spot is shown.
+      const nudge = sign => () => { const big = input.dataset.key !== 'height' && input.dataset.key !== 'up'; input.value = String(tenth((Number(input.value) || 0) + sign * (big ? 10 : 1))); readSpotField(input, true); };
+      const less = button(null, nudge(-1), 'mc-secondary mc-spot-less', 'minus'), more = button(null, nudge(1), 'mc-secondary mc-spot-more', 'plus');
+      less.setAttribute('data-focus-key', 'spot-less:' + slot); more.setAttribute('data-focus-key', 'spot-more:' + slot);
+      add(step, less, input, make('span', 'm', 'mc-spot-unit'), more);
+      const label = make('label', undefined, 'mc-spot-offset-label'); label.htmlFor = input.id;
+      add(box, label, step);
+      offsets.appendChild(box);
+    });
+    const help = make('p', undefined, 'mc-note mc-spot-help'); help.id = 'mc-spot-help';
+    const actions = make('div', undefined, 'mc-spot-actions');
+    const watch = button('Watch from here', watchFromEditor, 'mc-primary', 'play'); watch.id = 'mc-spot-watch';
+    const save = button('Save spot', saveEditorSpot, 'mc-secondary', 'save'); save.id = 'mc-spot-save';
+    const update = button('Update spot', updateSavedSpot, 'mc-secondary', 'check'); update.id = 'mc-spot-update';
+    const here = button('Save current view as a spot', saveViewAsSpot, 'mc-secondary', 'camera'); here.id = 'mc-spot-here';
+    add(actions, watch, save, update, here);
+    const note = make('p', undefined, 'mc-note mc-spot-note'); note.id = 'mc-spot-note'; note.setAttribute('role', 'status');
+    const savedHead = make('h5', undefined, 'mc-spot-saved-head'); savedHead.id = 'mc-spot-saved-head';
+    const saved = make('div', undefined, 'mc-spot-saved'); saved.id = 'mc-spot-saved'; saved.setAttribute('aria-label', 'Saved spots');
+    add(body, picker, place, offsets, help, actions, note, savedHead, saved);
+    add(pane, summary, body);
+    pane.addEventListener('toggle', () => { S.spotsOpen = pane.open; });
+  }
+  function setOptions(select, options, value) {
+    const key = JSON.stringify(options);
+    if (select.dataset.key !== key) {
+      empty(select);
+      options.forEach(([v, label]) => { const o = make('option', label); o.value = v; select.appendChild(o); });
+      select.dataset.key = key;
+    }
+    if (select.value !== value) select.value = value;
+  }
+  function savedSpotRow(s, sp) {
+    const row = make('div', undefined, 'mc-spot-saved-row'), ed = spotEditor();
+    row.dataset.spotId = s.id;
+    row.dataset.editing = String(ed.savedId === s.id);
+    row.dataset.active = String(sp.state !== 'off' && Boolean(sp.spot && sp.spot.pinned) && sp.spot.name === s.name && spotKey(sp.spot) === spotKey(s));
+    const text = make('div', undefined, 'mc-spot-saved-text');
+    if (S.spotRenaming === s.id) {
+      const input = make('input'); Object.assign(input, { type: 'text', value: S.spotRenameText == null ? s.name : S.spotRenameText, maxLength: SPOT_NAME_MAX, className: 'mc-spot-rename' });
+      input.setAttribute('aria-label', 'Spot name'); input.setAttribute('data-focus-key', 'spot-rename:' + s.id);
+      input.addEventListener('input', () => { S.spotRenameText = input.value; });
+      input.addEventListener('keydown', e => {
+        // preventDefault: the key must not go on to press a button that takes the focus after the list is rebuilt.
+        if (e.key === 'Enter') { e.preventDefault(); renameSavedSpot(s.id, input.value); } else if (e.key === 'Escape') { e.preventDefault(); S.spotRenaming = S.spotRenameText = null; renderSpots(); }
+      });
+      const ok = button('Save', () => renameSavedSpot(s.id, input.value), 'mc-secondary', 'check'); ok.setAttribute('data-focus-key', 'spot-rename-ok:' + s.id);
+      const cancel = button('Cancel', () => { S.spotRenaming = S.spotRenameText = null; renderSpots(); }, 'mc-secondary', 'x');
+      add(text, input, make('small', savedSpotDetail(s), 'mc-spot-saved-detail'));
+      row.appendChild(text);
+      const tools = make('div', undefined, 'mc-spot-saved-tools'); add(tools, ok, cancel); row.appendChild(tools);
+      if (S.spotRenameFocus) { S.spotRenameFocus = false; setTimeout(() => { if (input.isConnected) { input.focus(); input.select(); } }, 0); }
+      return row;
+    }
+    add(text, make('strong', s.name), make('small', savedSpotDetail(s), 'mc-spot-saved-detail'));
+    const tools = make('div', undefined, 'mc-spot-saved-tools'), reason = savedSpotReason(s);
+    const watch = button('Watch', () => watchSavedSpot(s.id), 'mc-secondary', 'play');
+    watch.disabled = Boolean(reason); watch.title = reason || 'Watch ' + (spotWatchTarget() ? trafficLabel(spotWatchTarget().aircraft) : 'the aircraft') + ' from ' + s.name;
+    const edit = button('Edit', () => editSavedSpot(s.id), 'mc-secondary', 'settings-2');
+    edit.title = 'Show ' + s.name + ' in the editor above';
+    const rename = button('Rename', () => { S.spotRenaming = s.id; S.spotRenameText = null; S.spotRenameFocus = true; renderSpots(); }, 'mc-secondary', 'pencil');
+    const remove = button('Delete', () => deleteSavedSpot(s.id), 'mc-secondary mc-danger', 'trash-2');
+    [[watch, 'watch'], [edit, 'edit'], [rename, 'rename'], [remove, 'delete']].forEach(([b, name]) => { b.dataset.action = name; b.setAttribute('data-focus-key', 'spot-' + name + ':' + s.id); b.setAttribute('aria-label', b.textContent + ' ' + s.name); });
+    add(tools, watch, edit, rename, remove);
+    add(row, text, tools);
+    if (reason) row.appendChild(make('small', reason, 'mc-spot-saved-reason'));
+    return row;
+  }
+  // Display only, safe at the 1 Hz TrafficChanged rate: controls are kept and updated in place.
+  function renderSpots() {
+    if (IS_MINI || !$('mc-spot-state')) return;
+    let pane = $('mc-spots');
+    if (!pane) {
+      pane = make('details', undefined, 'mc-spots'); pane.id = 'mc-spots';
+      pane.open = S.spotsOpen !== false;
+      buildSpots(pane);
+      const state = $('mc-spot-state');
+      state.parentNode.insertBefore(pane, state.nextSibling);
+    }
+    syncSpotEditor();
+    const ed = spotEditor(), sp = spotting(), codes = spotAirportCodes(), position = ed.kind === 'position', live = spotLive();
+    if (!ed.icao && codes.length) ed.icao = codes[0];
+    pane.dataset.mode = position ? 'position' : 'runway';
+    pane.dataset.live = String(live);
+    // Airport and runway end (Auto: the end the aircraft lands on or departs from).
+    const airportOptions = codes.map(code => [code, code]);
+    if (ed.icao && codes.indexOf(ed.icao) < 0) airportOptions.push([ed.icao, ed.icao + ' (no data yet)']);
+    if (!airportOptions.length) airportOptions.push(['', 'No airport data yet']);
+    setOptions($('mc-spot-airport'), airportOptions, ed.icao);
+    const endOptions = [['', 'Auto']].concat(spotEnds(ed.icao).map(r => [r.end, r.end + ' (' + pad3(r.headingDeg) + '°)']));
+    if (ed.end && !spotEnd(ed.icao, ed.end)) endOptions.push([ed.end, ed.end + ' (no data yet)']);
+    setOptions($('mc-spot-end'), endOptions, ed.end);
+    $('mc-spot-airport').disabled = !codes.length && !ed.icao;
+    $('mc-spot-end').disabled = !ed.icao;
+    $('mc-spot-picker').hidden = position;
+    const auto = !position && !ed.end;
+    $$('button[data-kind]', $('mc-spot-kind')).forEach(b => {
+      b.setAttribute('aria-pressed', String(!auto && b.dataset.kind === ed.kind));
+      b.disabled = auto;
+      b.title = auto ? 'Choose a runway end to pick a spot type. Auto always uses the fence line.' : '';
+    });
+    // Position spot: what it is, and a way back to runway spots.
+    $('mc-spot-place').hidden = !position;
+    if (position && ed.base) {
+      const at = nudgedPosition(ed);
+      setText($('mc-spot-place').querySelector('.mc-spot-place-text'), (ed.name || 'Saved view') + ': ' + fmt(at.latitude, 5) + ', ' + fmt(at.longitude, 5) + ', ' + Math.round(at.altitudeMeters) + ' m above sea level');
+    }
+    // Offsets (runway) or nudge (position).
+    const fields = SPOT_FIELDS[position ? 'position' : 'runway'];
+    ['a', 'b', 'c'].forEach((slot, i) => {
+      const input = $('mc-spot-offset-' + slot), [key, label, min, max, unitHelp] = fields[i];
+      const box = input.parentNode.parentNode, less = box.querySelector('.mc-spot-less'), more = box.querySelector('.mc-spot-more');
+      setText(box.querySelector('.mc-spot-offset-label'), label);
+      less.disabled = more.disabled = auto;
+      less.setAttribute('aria-label', 'Less ' + label.toLowerCase()); more.setAttribute('aria-label', 'More ' + label.toLowerCase());
+      input.dataset.key = key;
+      input.min = String(min); input.max = String(max);
+      input.setAttribute('aria-label', label + ' (meters)');
+      input.title = label + ': ' + unitHelp + ' (' + min + ' to ' + max + ')';
+      input.disabled = auto;
+      if (document.activeElement !== input) input.value = String(ed[key]);
+    });
+    const d = position ? null : spotDefaults(ed.kind === 'custom' ? 'fence' : ed.kind, spotEnd(ed.icao, ed.end));
+    setText($('mc-spot-help'), position
+      ? 'North, East and Up move this spot in meters from where it was saved (negative: south, west, down). The camera stays there and aims at the aircraft with auto zoom.'
+      : auto ? 'Auto picks the end each aircraft lands on or takes off from, at the fence line (150 m behind the threshold, 80 m to the right). Choose an end to pick a spot type or edit the offsets.'
+      : (ed.kind === 'custom' ? 'Custom offsets' : SPOT_KINDS.filter(k => k[0] === ed.kind)[0][1] + ' default: ' + fmt(d.behind, 0) + ' m behind the threshold, ' + fmt(Math.abs(d.side), 0) + ' m ' + (d.side < 0 ? 'left' : 'right') + ', ' + fmt(d.height, 1) + ' m up') +
+        '. Behind: meters before the threshold (negative: past it, over the runway). Side: + right, - left of the landing direction. Height: above the runway.');
+    // Actions.
+    const reason = spotWatchReason(), target = spotWatchTarget(), full = savedSpots().length >= SPOTS_MAX;
+    const watch = $('mc-spot-watch'), save = $('mc-spot-save'), update = $('mc-spot-update'), here = $('mc-spot-here');
+    watch.disabled = Boolean(reason);
+    watch.title = reason || 'Watch ' + trafficLabel(target.aircraft) + ' from ' + (position ? ed.name || 'this spot' : auto ? 'the automatic runway end' : spotPlaceName(editorSpot()));
+    save.disabled = full || !editorSpot();
+    save.title = full ? 'You have ' + SPOTS_MAX + ' saved spots. Delete one first.' : !editorSpot() ? 'Choose a runway end to save a spot.' : 'Keep this spot in your settings (no camera profile needed)';
+    const editing = savedSpot(ed.savedId);
+    update.hidden = !editing;
+    if (editing) { setText(update.querySelector('span'), 'Update "' + editing.name + '"'); update.disabled = !editorSpot(); update.title = 'Save these values into ' + editing.name; }
+    here.disabled = !S.snapshot || !aircraftLoaded() || full;
+    here.title = !S.snapshot ? statusText() : !aircraftLoaded() ? 'Load a flight first.' : full ? 'You have ' + SPOTS_MAX + ' saved spots. Delete one first.' : 'Save where the camera on screen is now as a spot you can watch any aircraft from';
+    const note = S.spotNote || (live ? 'Watching from ' + spotPlaceName(sp.spot) + ': changes apply as you edit.'
+      : reason ? reason : 'Watch from here shows ' + trafficLabel(target.aircraft) + ' (' + target.why + '). Pick another aircraft by its name in the list.');
+    setText($('mc-spot-note'), note);
+    $('mc-spot-note').dataset.tone = S.spotNote || (reason && !live) ? 'warn' : live ? 'live' : '';
+    // Saved spots: rebuilt only when something shown changes, keeping focus.
+    const list = $('mc-spot-saved'), spots = savedSpots();
+    setText($('mc-spot-saved-head'), spots.length ? 'Saved spots (' + spots.length + ')' : 'Saved spots');
+    const key = JSON.stringify([spots, S.spotRenaming, ed.savedId, sp.state, sp.spot, spots.map(savedSpotReason), target && target.aircraft.objectId]);
+    if (list.dataset.key !== key) {
+      list.dataset.key = key;
+      keepFocus(list, () => {
+        empty(list);
+        spots.forEach(s => list.appendChild(savedSpotRow(s, sp)));
+        if (!spots.length) list.appendChild(make('p', 'No saved spots yet. Save a runway spot, or save the current view as a spot.', 'mc-empty'));
+      });
+    }
+  }
+  const pad3 = n => { const v = Math.round(((Number(n) % 360) + 360) % 360); return (v < 10 ? '00' : v < 100 ? '0' : '') + v; };
   function renderSpottingSettings() {
     if (!S.working || !$('mc-settings-navigation')) return;
     let pane = $('mc-settings-section-spotting');
@@ -3151,7 +3696,7 @@
         });
         add(box, input, document.createTextNode(unit)); add(row, copy, box); pane.appendChild(row);
       });
-      pane.appendChild(make('p', 'Tower and runway views use the loaded airport cameras, or a view computed from scenery data (a runway-end fence spot, the tower) when there are none. Chase, Fly-by, Tower and Runway need no camera profile; Track aims the current airport or free camera. Auto-spot picks arriving and departing aircraft at the loaded airport. Release, Panic, Cinematic mode and airport Auto switch stop spotting.', 'mc-note'));
+      pane.appendChild(make('p', 'Tower and runway views use the loaded airport cameras, or a view computed from scenery data (a runway-end fence spot, the tower) when there are none. Chase, Fly-by, Tower and Runway need no camera profile; Track aims the current airport or free camera. Auto-spot picks arriving and departing aircraft at the loaded airport. Spots on the Traffic page pick a runway end and offsets, or a saved camera position, and keep your spots without a camera profile. Release, Panic, Cinematic mode and airport Auto switch stop spotting.', 'mc-note'));
     }
     const host = S.working.settings.host;
     $$('input[data-key]', pane).forEach(input => { if (document.activeElement !== input) input.value = String(host[input.dataset.key] == null ? input.dataset.fallback : host[input.dataset.key]); });
@@ -3188,7 +3733,7 @@
         return waitForCommit(ack.requestId).then(done => {
           S.pendingCommit = null;
           if (done.status === 'Committed') {
-            announce('Changes saved for ' + P().name + '.');
+            announce(P() ? 'Changes saved for ' + P().name + '.' : 'Changes saved.');  // settings can be saved with no profile open
             if(window.FSCSSaveFeedback)window.FSCSSaveFeedback.play(ack.requestId);
             bridge.send('RequestSnapshot', {});
             updateSavedState();

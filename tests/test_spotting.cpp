@@ -1713,3 +1713,310 @@ TEST_CASE("module: per-frame watch follows spotting; runway spots from cached sc
     m.seconds(.2);
     CHECK_EQ(m.services.watchRequests.back(), 0u);
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Spot picker: pinned runway spots edited live (AdjustSpot), position spots (view "spot") and saved spots
+
+TEST_CASE("spotting: position spots and spot names - parsing, ranges, JSON") {
+    std::string error;
+    auto place = tr::parsePositionSpot({{"kind", "position"}, {"name", "  Hill \x01" "by the fence  "}, {"latitude", 40.01}, {"longitude", -90.02}, {"altitudeMeters", 130}}, error);
+    CHECK(place.has_value());
+    if (place) {
+        CHECK_EQ(place->name, std::string("Hill by the fence"));
+        CHECK_NEAR(place->position.lat, 40.01, 1e-12);
+        CHECK_NEAR(place->position.lon, -90.02, 1e-12);
+        CHECK_NEAR(place->position.altitude, 130, 1e-12);
+        const auto j = tr::toJson(*place);
+        CHECK_EQ(js::str(j, "kind"), std::string("position"));
+        CHECK_EQ(js::str(j, "name"), std::string("Hill by the fence"));
+        for (const char* k : {"latitude", "longitude", "altitudeMeters"}) CHECK(j.contains(k));
+    }
+    CHECK(!tr::parsePositionSpot({{"kind", "position"}, {"latitude", 91}, {"longitude", 0}, {"altitudeMeters", 0}}, error).has_value());
+    CHECK(error.find("position") != std::string::npos);
+    CHECK(!tr::parsePositionSpot({{"kind", "position"}, {"latitude", 40}, {"longitude", 0}}, error).has_value());
+    CHECK(error.find("altitudeMeters") != std::string::npos);
+    CHECK(!tr::parsePositionSpot({{"kind", "position"}, {"latitude", 40}, {"longitude", 0}, {"altitudeMeters", 20000}}, error).has_value());
+    CHECK(!tr::parsePositionSpot(json("nope"), error).has_value());
+    // Names: at most 60 bytes, never splitting a UTF-8 character.
+    const std::string longName = std::string(59, 'a') + "\xC3\xA9" + "bc";
+    CHECK_EQ(tr::spotName({{"name", longName}}), std::string(59, 'a'));
+    CHECK_EQ(tr::spotName({{"name", std::string(70, 'x')}}).size(), std::size_t{60});
+    CHECK_EQ(tr::spotName({{"name", "   "}}), std::string());
+    // A runway spot keeps its name; toJson only reports a name that is set.
+    const std::vector<tr::SpotAirport> airports{tr::spotAirport(airportFixture())};
+    auto runway = tr::parseRunwaySpot({{"icao", "KAAA"}, {"runwayEnd", "09"}, {"name", "Fence 09"}}, airports, 3, error);
+    CHECK(runway.has_value() && runway->name == "Fence 09");
+    if (runway) CHECK_EQ(js::str(tr::toJson(*runway), "name"), std::string("Fence 09"));
+    CHECK(!tr::toJson(tr::runwaySpot(airports[0].ends[0], "fence", 3)).contains("name"));
+    CHECK(tr::parseSpotView("spot") == tr::SpotView::Spot);
+    CHECK_EQ(std::string(tr::toString(tr::SpotView::Spot)), std::string("spot"));
+}
+
+TEST_CASE("spotting coordinator: a position spot stands still, aims at the target with auto zoom, never below its terrain") {
+    SpotRig r(false, false);
+    r.c.setSpotAirports({tr::spotAirport(airportFixture())});
+    // Arriving on final for 09; the target's terrain is the airport elevation (100 m).
+    r.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, 0, -7000 + 70 * t, 370 - 3.7 * t, 90, 70, -3.7)}; };
+    r.advance(.1);
+    CHECK(!r.c.spotViewAvailable(tr::SpotView::Spot, 7, r.t));  // needs a position spot
+    CHECK(r.c.spotTarget(7, tr::SpotView::Spot, r.t).find("position spot") != std::string::npos);
+    tr::PositionSpot far{"Far away", ap::world(kAirport, {0, 30000, -50})};
+    CHECK(r.c.spotTarget(7, tr::SpotView::Spot, r.t, std::nullopt, far).find("20 km") != std::string::npos);
+    const tr::PositionSpot hill{"Hill", ap::world(kAirport, {-100, -3000, -40})};
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Spot, r.t, std::nullopt, hill), std::string());
+    r.acquire();
+    r.advance(1);
+    CHECK(r.c.spotOverlay());
+    CHECK(r.c.spotPinned());
+    CHECK(r.c.spotView() == tr::SpotView::Spot);
+    CHECK(r.c.spotPlace().has_value() && r.c.spotPlace()->name == "Hill");
+    CHECK_NEAR(gap(r.camera(), hill.position), 0, 1e-6);
+    r.checkAimed();
+    // Stays put and zooms out as the target comes close.
+    const double far0 = r.shown().fovRad;
+    r.advance(56);  // passing about 150 m away
+    CHECK_NEAR(gap(r.camera(), hill.position), 0, 1e-6);
+    CHECK(r.shown().fovRad > far0);
+    r.checkAimed();
+    // A spot below the target's terrain is lifted to it plus the clearance.
+    const tr::PositionSpot ditch{"Ditch", ap::world(kAirport, {-400, -1500, 30})};
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Spot, r.t, std::nullopt, ditch), std::string());
+    r.advance(.5);
+    CHECK_NEAR(r.camera().altitude, kAirport.altitude + tr::kTerrainClearanceMeters, 1e-6);
+    // Track from the spot keeps standing there.
+    CHECK(r.c.spotViewAvailable(tr::SpotView::Track, 7, r.t));
+    // DroneHere: the spotting view on screen, with its world position.
+    const auto drone = r.send("DroneHere");
+    CHECK_EQ(js::str(drone, "status"), std::string("Completed"));
+    CHECK_EQ(js::str(drone["result"], "source"), std::string("spot"));
+    CHECK_NEAR(drone["result"]["world"]["latitude"].get<double>(), r.camera().lat, 1e-9);
+    CHECK_NEAR(drone["result"]["world"]["longitude"].get<double>(), r.camera().lon, 1e-9);
+    CHECK_NEAR(drone["result"]["world"]["altitudeMeters"].get<double>(), r.camera().altitude, 1e-6);
+}
+
+TEST_CASE("spotting coordinator: AdjustSpot moves a pinned runway or position spot live, keeping the target and the view") {
+    SpotRig r(false, false);
+    r.c.setSpotAirports({tr::spotAirport(airportFixture())});
+    r.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, 0, -7000 + 70 * t, 370 - 3.7 * t, 90, 70, -3.7), plane(8, 200, 0, 0, 0, 0, 0, true)}; };
+    r.advance(.1);
+    const tr::RunwaySpot fence09{"KAAA", "09", "fence", 150, 80, 3, "Fence 09"};
+    const tr::PositionSpot hill{"Hill", ap::world(kAirport, {-400, -1500, -40})};
+    // Nothing to adjust: not spotting, a chase, an automatic runway view.
+    CHECK(r.c.adjustSpot(fence09, std::nullopt, r.t).find("pinned spot") != std::string::npos);
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Chase, r.t), std::string());
+    r.acquire();
+    r.advance(.5);
+    CHECK(r.c.adjustSpot(fence09, std::nullopt, r.t).find("pinned spot") != std::string::npos);
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Runway, r.t), std::string());
+    r.advance(.5);
+    CHECK(!r.c.spotPinned());
+    CHECK(r.c.adjustSpot(fence09, std::nullopt, r.t).find("pinned spot") != std::string::npos);
+    // Pinned: offsets move the camera at once, the target, view and zoom carry on.
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Runway, r.t, fence09), std::string());
+    r.advance(10);
+    CHECK(r.c.spotPinned());
+    const double fov = r.shown().fovRad;
+    const auto stopped = r.backend.count("release");
+    const tr::RunwaySpot custom{"KAAA", "09", "custom", 300, -60, 12, "Fence 09"};
+    CHECK_EQ(r.c.adjustSpot(custom, std::nullopt, r.t), std::string());
+    r.advance(.02);
+    auto place = at(r.camera());
+    CHECK_NEAR(place.y, -1300, .5);
+    CHECK_NEAR(place.x, 60, .5);  // left of an eastbound landing is north
+    CHECK_NEAR(-place.z, 12, .1);
+    CHECK_NEAR(r.shown().fovRad, fov, .05);  // eased, not cut
+    CHECK_EQ(r.c.spotTargetId(), 7u);
+    CHECK(r.c.spotView() == tr::SpotView::Runway);
+    CHECK(r.c.spotRunway().has_value() && r.c.spotRunway()->kind == "custom" && r.c.spotRunway()->name == "Fence 09");
+    CHECK_EQ(r.backend.count("release"), stopped);
+    r.checkAimed();
+    // Another end; an unknown end and a position spot are refused and change nothing.
+    CHECK_EQ(r.c.adjustSpot(tr::RunwaySpot{"KAAA", "27", "fence", 150, 80, 3, ""}, std::nullopt, r.t), std::string());
+    r.advance(.02);
+    CHECK_NEAR(at(r.camera()).y, 1150, .5);
+    CHECK(r.c.adjustSpot(tr::RunwaySpot{"KAAA", "36", "fence", 150, 80, 3, ""}, std::nullopt, r.t).find("not known") != std::string::npos);
+    CHECK(r.c.adjustSpot(std::nullopt, hill, r.t).find("runway spot") != std::string::npos);
+    CHECK(r.c.spotRunway().has_value() && r.c.spotRunway()->runwayEnd == "27");
+    // A position spot: nudged live, refused with a runway spot or too far away.
+    CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Spot, r.t, std::nullopt, hill), std::string());
+    r.advance(.5);
+    const tr::PositionSpot nudged{"Hill", ap::world(kAirport, {-380, -1450, -55})};
+    CHECK_EQ(r.c.adjustSpot(std::nullopt, nudged, r.t), std::string());
+    r.advance(.02);
+    CHECK_NEAR(gap(r.camera(), nudged.position), 0, 1e-6);
+    CHECK(r.c.adjustSpot(fence09, std::nullopt, r.t).find("position spot") != std::string::npos);
+    CHECK(r.c.adjustSpot(std::nullopt, tr::PositionSpot{"Far", ap::world(kAirport, {0, 40000, -50})}, r.t).find("20 km") != std::string::npos);
+    CHECK_NEAR(gap(r.camera(), nudged.position), 0, 1e-6);
+    r.c.stopSpotting("done", r.t);
+    CHECK(r.c.adjustSpot(std::nullopt, nudged, r.t).find("pinned spot") != std::string::npos);
+}
+
+TEST_CASE("module: SpotTarget view spot, AdjustSpot, pinned spots kept by Next target, SpottingChanged.spot") {
+    SpotModule m;
+    m.truth = [](double t) {
+        return std::vector<be::TrafficAircraft>{plane(7, 0, -9000 + 70 * t, 470 - 3.7 * t, 90, 70, -3.7), plane(8, 200, 300, 0, 0, 0, 0, true)};
+    };
+    m.seconds(3);
+    auto snap = m.snapshot();
+    CHECK_EQ(snap["spotting"]["runways"].size(), std::size_t{2});
+    if (snap["spotting"]["runways"].size() == 2) {
+        const auto& r09 = snap["spotting"]["runways"][0];
+        CHECK_NEAR(js::num(r09, "lengthMeters", 0), 2000, .5);
+        CHECK(js::num(r09, "widthMeters", 0) > 0);
+    }
+    const json hill{{"kind", "position"}, {"name", "Hill"}, {"latitude", ap::world(kAirport, {-400, -1500, 0}).lat},
+                    {"longitude", ap::world(kAirport, {-400, -1500, 0}).lon}, {"altitudeMeters", 140}};
+    // Wrong combinations are refused with a reason.
+    CHECK_EQ(status(m.panel("SpotTarget", {{"objectId", 7}, {"view", "spot"}})), std::string("Rejected"));
+    auto ack = m.panel("SpotTarget", {{"objectId", 7}, {"view", "runway"}, {"spot", hill}});
+    CHECK_EQ(status(ack), std::string("Rejected"));
+    CHECK(js::str(ack, "reason").find("spot view") != std::string::npos);
+    CHECK_EQ(status(m.panel("SpotTarget", {{"objectId", 7}, {"view", "spot"}, {"spot", {{"icao", "KAAA"}, {"runwayEnd", "09"}}}})), std::string("Rejected"));
+    ack = m.panel("AdjustSpot", {{"spot", {{"icao", "KAAA"}, {"runwayEnd", "09"}}}});
+    CHECK_EQ(status(ack), std::string("Rejected"));
+    CHECK(js::str(ack, "reason").find("pinned spot") != std::string::npos);
+    // A pinned runway spot with a name; AdjustSpot edits it in place.
+    ack = m.panel("SpotTarget", {{"objectId", 7}, {"view", "runway"}, {"spot", {{"icao", "KAAA"}, {"runwayEnd", "09"}, {"kind", "fence"}, {"name", "My fence"}}}});
+    CHECK_EQ(status(ack), std::string("Completed"));
+    auto spot = ack["result"]["spotting"]["spot"];
+    CHECK_EQ(js::str(spot, "name"), std::string("My fence"));
+    CHECK(js::boolean(spot, "pinned", false));
+    m.seconds(.5);
+    ack = m.panel("AdjustSpot", {{"spot", {{"icao", "KAAA"}, {"runwayEnd", "09"}, {"kind", "custom"}, {"behindMeters", 250}, {"sideMeters", -40}, {"heightMeters", 6}, {"name", "My fence"}}}});
+    CHECK_EQ(status(ack), std::string("Completed"));
+    spot = ack["result"]["spotting"]["spot"];
+    CHECK_EQ(js::str(spot, "kind"), std::string("custom"));
+    CHECK_NEAR(js::num(spot, "behindMeters", 0), 250, 1e-9);
+    CHECK_EQ(ack["result"]["spotting"]["targetId"].get<int>(), 7);
+    CHECK_EQ(js::str(ack["result"]["spotting"], "view"), std::string("runway"));
+    m.seconds(.2);
+    CHECK_NEAR(at(*m.app.coordinator().spotCameraPosition()).y, -1250, .5);
+    CHECK_EQ(js::num(m.lastEvent("SpottingChanged")["payload"]["spot"], "behindMeters", 0), 250.0);
+    CHECK_EQ(status(m.panel("AdjustSpot", {{"spot", {{"icao", "KAAA"}, {"runwayEnd", "09"}, {"heightMeters", -3}}}})), std::string("Rejected"));
+    CHECK_EQ(status(m.panel("AdjustSpot", {{"spot", hill}})), std::string("Rejected"));
+    // Next target keeps the pinned spot.
+    m.tap("VK_LCONTROL+VK_LMENU+T");
+    m.seconds(.2);
+    CHECK(m.app.coordinator().spotRunway().has_value() && m.app.coordinator().spotPinned());
+    CHECK_NEAR(m.app.coordinator().spotRunway()->behindMeters, 250, 1e-9);
+    // The automatic runway view again: SpotTarget without a spot.
+    ack = m.panel("SpotTarget", {{"objectId", 7}, {"view", "runway"}});
+    CHECK_EQ(status(ack), std::string("Completed"));
+    CHECK(!m.app.coordinator().spotPinned());
+    // A position spot: view "spot", nudged with AdjustSpot, kept by Next target.
+    ack = m.panel("SpotTarget", {{"objectId", 7}, {"view", "spot"}, {"spot", hill}});
+    CHECK_EQ(status(ack), std::string("Completed"));
+    spot = ack["result"]["spotting"]["spot"];
+    CHECK_EQ(js::str(ack["result"]["spotting"], "view"), std::string("spot"));
+    CHECK_EQ(js::str(spot, "kind"), std::string("position"));
+    CHECK_EQ(js::str(spot, "name"), std::string("Hill"));
+    CHECK(js::boolean(spot, "pinned", false));
+    auto nudged = hill;
+    nudged["altitudeMeters"] = 160;
+    CHECK_EQ(status(m.panel("AdjustSpot", {{"spot", nudged}})), std::string("Completed"));
+    m.seconds(.2);
+    CHECK_NEAR(m.app.coordinator().spotCameraPosition()->altitude, 160, 1e-6);
+    m.tap("VK_LCONTROL+VK_LMENU+T");
+    m.seconds(.2);
+    CHECK(m.app.coordinator().spotView() == tr::SpotView::Spot);
+    CHECK(m.app.coordinator().spotPlace().has_value());
+    const auto drone = m.panel("DroneHere");
+    CHECK_EQ(js::str(drone["result"], "source"), std::string("spot"));
+    CHECK_NEAR(drone["result"]["world"]["altitudeMeters"].get<double>(), 160, 1e-6);
+    CHECK_EQ(status(m.panel("StopSpotting")), std::string("Completed"));
+    CHECK_EQ(status(m.panel("AdjustSpot", {{"spot", nudged}})), std::string("Rejected"));
+}
+
+TEST_CASE("settings: host.spottingSpots - normalized, clamped, capped, ids repaired; defaults empty") {
+    namespace pr = fscs::profiles;
+    CHECK(pr::defaultSettingsDocument()["host"]["spottingSpots"].is_array());
+    CHECK(pr::defaultSettingsDocument()["host"]["spottingSpots"].empty());
+    const json raw = json::array({
+        {{"id", "a1"}, {"name", "  Fence 09  "}, {"icao", "kaaa"}, {"kind", "fence"}, {"runwayEnd", "09"}, {"behindMeters", 9000}, {"sideMeters", -9000}, {"heightMeters", -5}, {"latitude", 1}},
+        {{"id", "a1"}, {"name", ""}, {"icao", "KAAA"}, {"kind", "custom"}, {"runwayEnd", "27"}},           // repeated id, no name, default offsets
+        {{"id", "p 1"}, {"name", "Hill"}, {"kind", "position"}, {"latitude", 40.1}, {"longitude", -90.2}, {"altitudeMeters", 99999}, {"runwayEnd", "09"}},
+        {{"id", "x"}, {"kind", "roof"}, {"runwayEnd", "09"}},                                            // unknown kind
+        {{"id", "y"}, {"kind", "fence"}},                                                                // no end
+        {{"id", "z"}, {"kind", "position"}, {"latitude", 95}, {"longitude", 0}, {"altitudeMeters", 0}},  // bad position
+        "junk"});
+    const auto spots = pr::normalizeSpottingSpots(raw);
+    CHECK_EQ(spots.size(), std::size_t{3});
+    if (spots.size() == 3) {
+        const json& fence = spots[0];
+        CHECK_EQ(js::str(fence, "id"), std::string("a1"));
+        CHECK_EQ(js::str(fence, "name"), std::string("Fence 09"));
+        CHECK_EQ(js::str(fence, "icao"), std::string("KAAA"));
+        CHECK_EQ(js::num(fence, "behindMeters", 0), 5000.0);
+        CHECK_EQ(js::num(fence, "sideMeters", 0), -5000.0);
+        CHECK_EQ(js::num(fence, "heightMeters", 1), 0.0);
+        CHECK(!fence.contains("latitude"));
+        const json& custom = spots[1];
+        CHECK(js::str(custom, "id") != "a1");
+        CHECK(!js::str(custom, "id").empty());
+        CHECK_EQ(js::str(custom, "name"), std::string("Spot"));
+        CHECK(!custom.contains("behindMeters"));  // the kind's default when shown
+        const json& hill = spots[2];
+        CHECK(js::str(hill, "id") != "p 1");  // not a usable id: replaced
+        CHECK_EQ(js::str(hill, "kind"), std::string("position"));
+        CHECK_EQ(js::num(hill, "altitudeMeters", 0), 10000.0);
+        CHECK(!hill.contains("runwayEnd"));
+        CHECK_EQ(js::str(hill, "icao"), std::string());
+    }
+    // At most 200, through normalizeSettings like every host setting.
+    json many = json::array();
+    for (int i = 0; i < 230; ++i) many.push_back({{"id", "s" + std::to_string(i)}, {"kind", "fence"}, {"runwayEnd", "09"}, {"icao", "KAAA"}});
+    json doc = pr::defaultSettingsDocument();
+    doc["host"]["spottingSpots"] = many;
+    const auto normalized = pr::normalizeSettings(doc);
+    CHECK_EQ(normalized["host"]["spottingSpots"].size(), pr::kSpottingSpotsMax);
+    CHECK(pr::normalizeSettings(json::object())["host"]["spottingSpots"].is_array());
+}
+
+TEST_CASE("module: saved spots persist at once without a camera profile, never as unsaved edits, and across sessions") {
+    SpotModule m(false, "SimObjects\\Airplanes\\test_jet\\aircraft.cfg");
+    m.seconds(1);
+    CHECK(!m.app.coordinator().canActivate());
+    auto snap = m.snapshot();
+    CHECK(snap["working"]["profile"].is_null());
+    auto settings = snap["working"]["settings"];
+    CHECK(settings["host"]["spottingSpots"].is_array());
+    settings["host"]["spottingSpots"] = json::array({
+        {{"id", "s1"}, {"name", "Fence 09"}, {"icao", "KAAA"}, {"kind", "fence"}, {"runwayEnd", "09"}, {"behindMeters", 150}, {"sideMeters", 80}, {"heightMeters", 3}},
+        {{"id", "s2"}, {"name", "Hill"}, {"icao", "KAAA"}, {"kind", "position"}, {"latitude", 40.01}, {"longitude", -90.01}, {"altitudeMeters", 7000000}}});
+    CHECK_EQ(status(m.panel("UpdateDraft", {{"ops", json::array({{{"op", "setSettings"}, {"settings", settings}}})}})), std::string("Completed"));
+    m.seconds(.2);
+    const json committed = m.app.repository().committed().settings["host"]["spottingSpots"];
+    CHECK_EQ(committed.size(), std::size_t{2});
+    if (committed.size() == 2) CHECK_EQ(js::num(committed[1], "altitudeMeters", 0), 10000.0);  // clamped
+    snap = m.snapshot();
+    CHECK(!snap["working"]["dirty"]["settings"].get<bool>());
+    // Rename and delete are saved the same way; other settings stay unsaved edits until Save, which works without a profile.
+    settings = snap["working"]["settings"];
+    settings["host"]["spottingSpots"][0]["name"] = "North fence";
+    settings["host"]["spottingSpots"].erase(1);
+    settings["host"]["spottingRadiusNm"] = 30;
+    CHECK_EQ(status(m.panel("UpdateDraft", {{"ops", json::array({{{"op", "setSettings"}, {"settings", settings}}})}})), std::string("Completed"));
+    m.seconds(.2);
+    const auto& saved = m.app.repository().committed().settings["host"];
+    CHECK_EQ(saved["spottingSpots"].size(), std::size_t{1});
+    CHECK_EQ(js::str(saved["spottingSpots"][0], "name"), std::string("North fence"));
+    CHECK_EQ(js::num(saved, "spottingRadiusNm", 0), 20.0);  // not saved with the spots
+    CHECK(m.snapshot()["working"]["dirty"]["settings"].get<bool>());
+    const auto commit = m.panel("CommitChanges");
+    CHECK_EQ(status(commit), std::string("Pending"));
+    m.seconds(.5);
+    CHECK_EQ(js::num(m.app.repository().committed().settings["host"], "spottingRadiusNm", 0), 30.0);
+    CHECK(!m.snapshot()["working"]["dirty"]["settings"].get<bool>());
+    CHECK_EQ(js::str(m.lastEvent("CommitCompleted")["payload"], "status"), std::string("Committed"));
+    // The next session reads them back.
+    FakeBackend camera;
+    FakeServices services;
+    ModuleApp restarted(camera, services, m.storage, "restart-spots", "test");
+    restarted.start(0);
+    const auto& again = restarted.repository().committed().settings["host"]["spottingSpots"];
+    CHECK_EQ(again.size(), std::size_t{1});
+    if (again.size() == 1) {
+        CHECK_EQ(js::str(again[0], "id"), std::string("s1"));
+        CHECK_EQ(js::str(again[0], "name"), std::string("North fence"));
+    }
+}

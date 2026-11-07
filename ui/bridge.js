@@ -483,6 +483,8 @@
     repo.settings = { schemaVersion: 2, ui: { shortcuts: true, contrast: false, backups: true, remember: true, precision: 'normal', theme: 'dark', reducedMotion: false, miniEnabled: true, miniHover: true, miniPinned: false, miniOpacity: 0.65, nameDisplay: 'both' }, host: { allowUnqualifiedAdapter: false, lookSpeedDegPerSec: 60, moveSpeedMetersPerSec: 0.5, binocularsFovDeg: 10 } };
     Object.assign(repo.settings.host, { cinematicMinSeconds: 8, cinematicMaxSeconds: 20, cinematicCockpitWeight: 0.15, cinematicCuts: true, cinematicDrift: true });
     Object.assign(repo.settings.host, { spottingRadiusNm: 20, autoSpotHoldSeconds: 30 });
+    // Saved spotting spots (a preference, saved at once): one runway spot to start with.
+    repo.settings.host.spottingSpots = [{ id: 'demo-fence-27', name: 'KDEM 27 fence line', icao: 'KDEM', kind: 'fence', runwayEnd: '27', behindMeters: 150, sideMeters: 80, heightMeters: 3 }];
     repo.bindings = seedBindings();
 
     const m = {
@@ -790,13 +792,69 @@
       m.traffic = { aircraft: list, at };
       return clone(m.traffic);
     }
-    const SPOT_VIEWS = ['tower', 'runway', 'chase', 'flyby', 'track'];
+    const SPOT_VIEWS = ['tower', 'runway', 'chase', 'flyby', 'track', 'spot'];
     const AUTO_STATUSES = ['arriving', 'landing', 'takeoff', 'departing'];
     const AUTO_VIEWS = { arriving: 'runway', landing: 'runway', takeoff: 'runway', taxi: 'tower', departing: 'chase' };
     const NO_VIEW_DATA = { tower: 'No tower position is known for an airport near this aircraft yet.', runway: 'No runway data is known for an airport near this aircraft yet.' };
     const spotLabel = a => ((a.airline && a.flightNumber ? a.airline + ' ' + a.flightNumber : '') || a.atcId || a.title) + (a.model ? ' - ' + a.model : '');
     // Computed tower and runway views come from the scenery data of the loaded airport (the demo field's runway 09/27).
-    const DEMO_RUNWAYS = [{ icao: 'KDEM', end: '09', headingDeg: 90 }, { icao: 'KDEM', end: '27', headingDeg: 270 }];
+    const DEMO_RUNWAYS = [{ icao: 'KDEM', end: '09', headingDeg: 90, lengthMeters: 2000, widthMeters: 45 }, { icao: 'KDEM', end: '27', headingDeg: 270, lengthMeters: 2000, widthMeters: 45 }];
+    const RUNWAY_SPOT_KINDS = ['fence', 'approach', 'threshold', 'custom'];
+    const spotRunwayDefaults = (kind, end) => kind === 'approach' ? { behindMeters: 1852, sideMeters: 0, heightMeters: 1852 * GLIDE - 90 }
+      : kind === 'threshold' ? { behindMeters: 0, sideMeters: end.widthMeters / 2 + 12, heightMeters: 3 } : { behindMeters: 150, sideMeters: 80, heightMeters: 3 };
+    const spotName = value => String(value && value.name || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60);
+    const metersBetween = (a, b) => Math.hypot((b.latitude - a.latitude) * 111320, (b.longitude - a.longitude) * 111320 * Math.cos(a.latitude * Math.PI / 180));
+    /** SpotTarget / AdjustSpot `spot` as the module parses it: { spot } (with pinned) or { error }. */
+    function parseSpot(value, target) {
+      if (!value || typeof value !== 'object') return { error: 'A runway spot needs an airport and a runway end.' };
+      const finite = (key, low, high) => typeof value[key] === 'number' && isFinite(value[key]) && value[key] >= low && value[key] <= high;
+      const name = spotName(value), named = out => (name ? Object.assign(out, { name }) : out);
+      if (value.kind === 'position') {
+        if (!finite('latitude', -90, 90) || !finite('longitude', -180, 180)) return { error: "The spot's position is not valid." };
+        if (!finite('altitudeMeters', -500, 10000)) return { error: "The spot's altitudeMeters is out of range." };
+        if (target && metersBetween(value, target) > 20000) return { error: 'That spot is more than 20 km from this aircraft. Choose a spot near it.' };
+        return { spot: named({ kind: 'position', latitude: value.latitude, longitude: value.longitude, altitudeMeters: value.altitudeMeters, pinned: true }) };
+      }
+      const end = airportLoaded() ? DEMO_RUNWAYS.find(r => r.icao === value.icao && r.end === value.runwayEnd) : null;
+      if (!end) return { error: 'That runway end is not known. Wait for the airport\'s scenery data, or choose another end.' };
+      const kind = value.kind === undefined ? 'fence' : value.kind;
+      if (RUNWAY_SPOT_KINDS.indexOf(kind) < 0) return { error: 'Choose a spot type: fence, approach, threshold or custom.' };
+      const spot = Object.assign({ icao: end.icao, runwayEnd: end.end, kind }, spotRunwayDefaults(kind === 'custom' ? 'fence' : kind, end));
+      for (const [key, low, high] of [['behindMeters', -5000, 5000], ['sideMeters', -5000, 5000], ['heightMeters', 0, 1000]]) {
+        if (value[key] === undefined || value[key] === null) continue;
+        if (!finite(key, low, high)) return { error: "The spot's " + key + ' is out of range.' };
+        spot[key] = value[key];
+      }
+      spot.pinned = true;
+      return { spot: named(spot) };
+    }
+    /** host.spottingSpots as the module normalizes it (at most 200, clamped, ids repaired). */
+    function normalizeSpots(list) {
+      const out = [], ids = {};
+      (Array.isArray(list) ? list : []).forEach(v => {
+        if (out.length >= 200 || !v || typeof v !== 'object') return;
+        const kind = v.kind, num = key => (typeof v[key] === 'number' && isFinite(v[key]) ? v[key] : null), clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+        const spot = { kind };
+        if (kind === 'position') {
+          if (num('latitude') === null || num('longitude') === null || num('altitudeMeters') === null || Math.abs(v.latitude) > 90 || Math.abs(v.longitude) > 180) return;
+          Object.assign(spot, { latitude: v.latitude, longitude: v.longitude, altitudeMeters: clamp(v.altitudeMeters, -500, 10000) });
+        } else if (RUNWAY_SPOT_KINDS.indexOf(kind) >= 0) {
+          const end = String(v.runwayEnd || '').trim().slice(0, 8);
+          if (!end) return;
+          spot.runwayEnd = end;
+          [['behindMeters', -5000, 5000], ['sideMeters', -5000, 5000], ['heightMeters', 0, 1000]].forEach(([key, low, high]) => { if (num(key) !== null) spot[key] = clamp(v[key], low, high); });
+        } else return;
+        const icao = String(v.icao || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        spot.icao = icao.length <= 8 ? icao : '';
+        spot.name = spotName(v) || 'Spot';
+        let id = typeof v.id === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(v.id) && !ids[v.id] ? v.id : '';
+        for (let n = out.length + 1; !id; n++) if (!ids['spot-' + n]) id = 'spot-' + n;
+        ids[id] = true;
+        spot.id = id;
+        out.push(spot);
+      });
+      return out;
+    }
     const spottingState = () => ({ targetId: m.spot.targetId, view: m.spot.view, autoSpot: m.spot.autoSpot, state: m.spot.state, targetLabel: m.spot.targetLabel || '', reason: m.spot.reason || null,
       views: { tower: airportLoaded(), runway: airportLoaded() }, runways: airportLoaded() ? clone(DEMO_RUNWAYS) : [], spot: m.spot.spot ? clone(m.spot.spot) : null });
     const spotEnv = () => ({ uiInstanceId: 'module', requestId: 'spotting-' + (++m.seq) });
@@ -811,23 +869,33 @@
       return runway[0] || null;
     }
     /** Validates a spotting request; returns { error } or what spotApply needs. */
-    function spotCheck(objectId, view) {
-      if (SPOT_VIEWS.indexOf(view) < 0) return { error: 'Choose a tower, runway, chase, fly-by or track view.' };
+    function spotCheck(objectId, view, pinned) {
+      if (SPOT_VIEWS.indexOf(view) < 0) return { error: 'Choose a tower, runway, chase, fly-by, track or spot view.' };
+      const position = Boolean(pinned) && pinned.kind === 'position';
+      if (view === 'spot' && !position) return { error: 'The spot view needs a position spot.' };
+      if (pinned && position && view !== 'spot') return { error: 'A position spot can only be used with the spot view.' };
+      if (pinned && !position && view !== 'runway') return { error: 'A runway spot can only be used with the runway view.' };
       const caps = capabilities();
       if (!caps.spottingAvailable) return { error: caps.spottingBlockReason };
       trafficPayload();
       const target = m.traffic.aircraft.find(a => a.objectId === objectId);
       if (!target) return { error: 'That aircraft is no longer nearby.' };
       let camera = null, runway = null;
+      if (pinned) {
+        // A chosen runway spot or position spot: a computed view at that place, aimed at the target.
+        const parsed = parseSpot(pinned, target);
+        if (parsed.error) return { error: parsed.error };
+        return { target, camera: null, view, runway: parsed.spot };
+      }
       if (view === 'tower' || view === 'runway') {
         // The loaded airport set's view when the profile is usable, else a computed view from scenery data.
         if (!airportLoaded()) return { error: NO_VIEW_DATA[view] };
         camera = caps.canActivate ? spotAirportCamera(view, target) : null;
-        if (!camera && view === 'runway') runway = { icao: 'KDEM', runwayEnd: target.headingDeg > 0 && target.headingDeg <= 180 ? '09' : '27', kind: 'fence', behindMeters: 150, sideMeters: 80, heightMeters: 3 };
+        if (!camera && view === 'runway') runway = { icao: 'KDEM', runwayEnd: target.headingDeg > 0 && target.headingDeg <= 180 ? '09' : '27', kind: 'fence', behindMeters: 150, sideMeters: 80, heightMeters: 3, pinned: false };
       }
       if (view === 'track') {
         const shown = m.ownership.state === 'Active' && workingCamera(m.active.cameraId);
-        const overlay = m.spot.state !== 'off' && m.spot.view ? ['tower', 'runway', 'track'].indexOf(m.spot.view) >= 0 : false;
+        const overlay = m.spot.state !== 'off' && m.spot.view ? ['tower', 'runway', 'track', 'spot'].indexOf(m.spot.view) >= 0 : false;
         if (!caps.canActivate && !overlay) return { error: 'Track aims an airport or free camera from your camera profile. Without one, use Chase, Fly-by, Tower or Runway.' };
         const world = m.spot.state !== 'off' && m.spot.view ? overlay : Boolean(shown && (shown.mode === 'airport' || shown.mode === 'free'));
         if (!world) return { error: 'Track aims the current airport or free camera at the aircraft. Show one of those views first.' };
@@ -848,10 +916,24 @@
       if (m.ownership.state !== 'Active') { setOwnership('Acquiring'); later(() => { setOwnership('Active'); shown(); }, 450); } else shown();
       event('SpottingChanged', spottingState());
     }
-    function spotTarget(env, objectId, view) {
-      const check = spotCheck(objectId, view);
+    function spotTarget(env, objectId, view, spot) {
+      const check = spotCheck(objectId, view, spot || null);
       if (check.error) return ack(env, 'Rejected', check.error, { spotting: spottingState() });
       spotApply(check, false);
+      return ack(env, 'Completed', null, { spotting: spottingState() });
+    }
+    /** AdjustSpot: moves the pinned spot being shown; same target, view and auto-spot state. */
+    function adjustSpot(env, value) {
+      const s = m.spot, current = s.spot;
+      const reject = reason => ack(env, 'Rejected', reason, { spotting: spottingState() });
+      if ((s.state !== 'tracking' && s.state !== 'lost') || !current || !current.pinned) return reject('Not watching from a pinned spot. Choose Watch from here first.');
+      const position = Boolean(value) && value.kind === 'position';
+      if (position !== (current.kind === 'position')) return reject(position ? 'This view shows a runway spot. Adjust it with a runway spot.' : 'This view shows a position spot. Adjust it with a position spot.');
+      const parsed = parseSpot(value, m.traffic.aircraft.find(a => a.objectId === s.targetId));
+      if (parsed.error) return reject(parsed.error);
+      s.spot = parsed.spot;
+      m.spotAdjusts = (m.spotAdjusts || 0) + 1;
+      event('SpottingChanged', spottingState());
       return ack(env, 'Completed', null, { spotting: spottingState() });
     }
     /** Ends spotting (and Auto-spot). restore: back to the camera shown before spotting began, or release. */
@@ -1070,7 +1152,9 @@
           if (!n) { message = 'No traffic nearby.'; break; }
           const step = action === 'spotNext' ? 1 : -1, i = list.findIndex(a => a.objectId === m.spot.targetId);
           const target = list[i < 0 ? (step > 0 ? 0 : n - 1) : (i + step + n) % n];
-          let check = spotCheck(target.objectId, m.spot.state !== 'off' && m.spot.view ? m.spot.view : 'chase');
+          // A pinned runway spot or position spot stays where it is for the next aircraft.
+          const view = m.spot.state !== 'off' && m.spot.view ? m.spot.view : 'chase', kept = m.spot.state !== 'off' && m.spot.spot && m.spot.spot.pinned ? m.spot.spot : null;
+          let check = spotCheck(target.objectId, view, kept);
           if (check.error && check.view !== 'chase') check = spotCheck(target.objectId, 'chase');
           if (check.error) { message = blocked(check.error); break; }
           spotApply(check, false); recalled = true; message = 'Spotting ' + spotLabel(target) + '.';
@@ -1119,7 +1203,8 @@
         case 'NextCategory': return nextCategory(env);
         case 'ReturnToPilot': return activate(env, m.working.profile.defaultCameraId);
         case 'SetCinematic': return setCinematic(env, Boolean(payload.enabled));
-        case 'SpotTarget': return spotTarget(env, payload.objectId, payload.view);
+        case 'SpotTarget': return spotTarget(env, payload.objectId, payload.view, payload.spot);
+        case 'AdjustSpot': return adjustSpot(env, payload.spot);
         case 'StopSpotting': endSpotting('Spotting was stopped.', true); return ack(env, 'Completed', null, { spotting: spottingState() });
         case 'SetAutoSpot': return setAutoSpot(env, Boolean(payload.enabled));
         case 'StartWalkaround': event('WalkaroundChanged',Object.assign({running:true},payload)); return ack(env,'Accepted');
@@ -1142,6 +1227,12 @@
           const airportBefore = airportLoaded();
           try { next = applyOps({ profile: displayProfile(), settings: m.working.settings, bindings: m.working.bindings }, ops); } catch (error) { return ack(env, 'Rejected', error.reason || 'invalidOps'); }
           m.working.profile = splitDisplay(next.profile); m.working.settings = next.settings; m.working.bindings = next.bindings;
+          if (ops.some(op => op.op === 'setSettings')) {
+            // Preferences are saved at once and never pending: the mini pin and the saved spotting spots.
+            m.working.settings.host.spottingSpots = normalizeSpots(m.working.settings.host.spottingSpots);
+            repo.settings.ui.miniPinned = Boolean(m.working.settings.ui.miniPinned);
+            repo.settings.host.spottingSpots = clone(m.working.settings.host.spottingSpots);
+          }
           m.working.draftRevision++;
           ack(env, 'Completed', null, { draftRevision: m.working.draftRevision });
           draftChanged(ops, env.uiInstanceId);
@@ -1150,11 +1241,7 @@
             if (!workingCamera(m.selection.cameraId)) m.selection = { profileId: m.working.profile.profileId, cameraId: m.working.profile.defaultCameraId };
             broadcastSnapshot();
           }
-          if (ops.some(op => op.op === 'setSettings')) {
-            // Pinning is a global presentation preference: persisted at once, never a pending change.
-            repo.settings.ui.miniPinned = Boolean(m.working.settings.ui.miniPinned);
-            event('CapabilitiesChanged', capabilities());
-          }
+          if (ops.some(op => op.op === 'setSettings')) event('CapabilitiesChanged', capabilities());
           const edited = ops.find(op => op.op === 'setCamera' && op.camera.id === m.active.cameraId);
           if (edited) {
             m.live = clone(edited.camera);
@@ -1306,14 +1393,25 @@
         case 'DroneHere': {
           // The demo aircraft sits at DEMO_AIRCRAFT_ORIGIN heading north, level: its frame is north, east, down.
           if (!m.aircraft || !m.aircraft.modelKey) return ack(env, 'Rejected', 'Load a flight and wait for the aircraft position before placing a drone.');
+          const worldOf = (origin, frd) => ({ latitude: round(origin.lat + frd[0] / 111320, 7), longitude: round(origin.lon + frd[1] / (111320 * Math.cos(origin.lat * Math.PI / 180)), 7), altitudeMeters: round(origin.altitude - frd[2], 2) });
+          if (m.ownership.state === 'Active' && m.spot.state !== 'off' && (!m.active.cameraId || m.spot.view === 'spot')) {
+            // A spotting view on screen: a position spot where it stands, else 60 m behind and 15 m above the target.
+            const target = m.traffic.aircraft.find(a => a.objectId === m.spot.targetId), place = m.spot.spot && m.spot.spot.kind === 'position' ? m.spot.spot : null;
+            const world = place ? { latitude: place.latitude, longitude: place.longitude, altitudeMeters: place.altitudeMeters }
+              : target ? worldOf({ lat: target.latitude, lon: target.longitude, altitude: target.altitudeFt * FT }, [-60 * Math.cos(target.headingDeg * Math.PI / 180), -60 * Math.sin(target.headingDeg * Math.PI / 180), -15]) : worldOf(DEMO_AIRCRAFT_ORIGIN, [-40, 0, -12]);
+            return ack(env, 'Completed', null, { worldOrigin: clone(DEMO_AIRCRAFT_ORIGIN), positionMetersFRD: [0, 0, 0], orientationCameraToAnchorXYZW: [0, 0, 0, 1], fovRad: round(M.degToRad(60), 5),
+              world, source: 'spot', message: 'Drone placed at the spotting view.' });
+          }
           const live = m.ownership.state === 'Active' && m.live ? composedPose() : null;
           const drone = live && m.live.mode === 'free' && validOrigin(m.live.worldOrigin);
+          const origin = drone ? m.live.worldOrigin : DEMO_AIRCRAFT_ORIGIN;
           return ack(env, 'Completed', null, live ? {
+            world: worldOf(origin, live.positionMetersFRD),
             worldOrigin: clone(drone ? m.live.worldOrigin : DEMO_AIRCRAFT_ORIGIN), positionMetersFRD: live.positionMetersFRD,
             orientationCameraToAnchorXYZW: live.orientationCameraToAnchorXYZW, fovRad: live.fovRad, source: 'view', message: 'Drone placed at the current view.',
           } : {
             worldOrigin: clone(DEMO_AIRCRAFT_ORIGIN), positionMetersFRD: [-40, 0, -12], orientationCameraToAnchorXYZW: M.quatFromHpb(0, -16.7, 0).map(v => round(v, 7)),
-            fovRad: round(M.degToRad(62), 5), source: 'behindAircraft', message: 'No Camera Studio view was on screen: drone placed behind and above the aircraft.',
+            fovRad: round(M.degToRad(62), 5), source: 'behindAircraft', message: 'No Camera Studio view was on screen: drone placed behind and above the aircraft.', world: worldOf(DEMO_AIRCRAFT_ORIGIN, [-40, 0, -12]),
           });
         }
         case 'EnumerateDefinitions': ack(env, 'Completed'); return event('DefinitionsListed', { names: ['Pilot', 'Copilot', 'Instrument_01', 'Instrument_02'] }, env.uiInstanceId);
@@ -1467,6 +1565,9 @@
         trafficTick(true);
         return clone(m.traffic);
       },
+      // The saved spotting spots as stored (host.spottingSpots, saved at once), and how many AdjustSpot edits were applied.
+      get savedSpots() { return clone(repo.settings.host.spottingSpots || []); },
+      get spotAdjusts() { return m.spotAdjusts || 0; },
       raiseFault(code, message) { clearMotion(); setOwnership('Faulted', code || 'adapterError'); event('FaultRaised', { code: code || 'adapterError', message: message || 'The simulator rejected a camera update.' }); },
       get state() { return clone({ session: m.session, ownership: m.ownership, active: m.active, selection: m.selection, draftRevision: m.working.draftRevision, dirty: dirty(), instances: Array.from(m.instances.keys()) }); },
     };

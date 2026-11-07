@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
+#include <tuple>
 #include <utility>
 
 namespace fscs::profiles {
@@ -282,7 +284,83 @@ json defaultSettingsDocument() {
                         {"cinematicCockpitWeight", cinematic.cinematicCockpitWeight}, {"cinematicCuts", cinematic.cinematicCuts},
                         {"cinematicDrift", cinematic.cinematicDrift}});
     doc["host"].update({{"spottingRadiusNm", cinematic.spottingRadiusNm}, {"autoSpotHoldSeconds", cinematic.autoSpotHoldSeconds}});
+    doc["host"]["spottingSpots"] = json::array();
     return doc;
+}
+
+namespace {
+
+// Printable text, trimmed, at most `max` bytes without splitting a UTF-8 sequence.
+std::string cleanText(const std::string& text, std::size_t max) {
+    std::string out;
+    for (const char c : text)
+        if (static_cast<unsigned char>(c) >= 32 && c != 127) out.push_back(c);
+    const auto first = out.find_first_not_of(' ');
+    if (first == std::string::npos) return {};
+    out = out.substr(first, out.find_last_not_of(' ') - first + 1);
+    if (out.size() > max) {
+        std::size_t lead = max;
+        while (lead > 0 && (static_cast<unsigned char>(out[lead]) & 0xC0) == 0x80) --lead;
+        out.resize(lead);
+    }
+    return out;
+}
+
+bool spotIdValid(const std::string& id) {
+    return !id.empty() && id.size() <= 64 && std::all_of(id.begin(), id.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.' || c == ':';
+    });
+}
+
+}  // namespace
+
+json normalizeSpottingSpots(const json& spots) {
+    json out = json::array();
+    if (!spots.is_array()) return out;
+    std::vector<std::string> ids;
+    const auto taken = [&](const std::string& id) { return std::find(ids.begin(), ids.end(), id) != ids.end(); };
+    const auto number = [](const json& v, const char* key) {
+        const auto& x = js::get(v, key);
+        return x.is_number() ? x.get<double>() : NAN;
+    };
+    for (const auto& v : spots) {
+        if (out.size() >= kSpottingSpotsMax) break;
+        if (!v.is_object()) continue;
+        const std::string kind = js::str(v, "kind");
+        json spot{{"kind", kind}};
+        if (kind == "position") {
+            const double lat = number(v, "latitude"), lon = number(v, "longitude"), alt = number(v, "altitudeMeters");
+            if (!std::isfinite(lat) || !std::isfinite(lon) || !std::isfinite(alt) || std::abs(lat) > 90 || std::abs(lon) > 180) continue;
+            spot.update({{"latitude", lat}, {"longitude", lon}, {"altitudeMeters", std::clamp(alt, kSpottingSpotMinAltitude, kSpottingSpotMaxAltitude)}});
+        } else if (kind == "fence" || kind == "approach" || kind == "threshold" || kind == "custom") {
+            const std::string end = cleanText(js::str(v, "runwayEnd"), 8);
+            if (end.empty()) continue;
+            spot["runwayEnd"] = end;
+            for (const auto& [key, low, high] : {std::tuple<const char*, double, double>{"behindMeters", -kSpottingSpotOffsetMaxMeters, kSpottingSpotOffsetMaxMeters},
+                                                 {"sideMeters", -kSpottingSpotOffsetMaxMeters, kSpottingSpotOffsetMaxMeters},
+                                                 {"heightMeters", 0.0, kSpottingSpotHeightMaxMeters}}) {
+                const double x = number(v, key);
+                if (std::isfinite(x)) spot[key] = std::clamp(x, low, high);  // missing: the kind's default
+            }
+        } else {
+            continue;
+        }
+        std::string icao;
+        for (const char c : js::str(v, "icao"))
+            if (std::isalnum(static_cast<unsigned char>(c))) icao.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        spot["icao"] = icao.size() <= 8 ? icao : std::string();
+        const std::string name = cleanText(js::str(v, "name"), kSpottingSpotNameMax);
+        spot["name"] = name.empty() ? std::string("Spot") : name;
+        std::string id = js::str(v, "id");
+        if (!spotIdValid(id) || taken(id)) {
+            std::size_t n = out.size() + 1;
+            do id = "spot-" + std::to_string(n++); while (taken(id));
+        }
+        ids.push_back(id);
+        spot["id"] = id;
+        out.push_back(std::move(spot));
+    }
+    return out;
 }
 
 json normalizeSettings(const json& doc) {
@@ -313,6 +391,7 @@ json normalizeSettings(const json& doc) {
                         {"cinematicDrift", h.cinematicDrift}});
     out["host"]["airportAutoGenerate"] = h.airportAutoGenerate;
     out["host"].update({{"spottingRadiusNm", h.spottingRadiusNm}, {"autoSpotHoldSeconds", h.autoSpotHoldSeconds}});
+    out["host"]["spottingSpots"] = normalizeSpottingSpots(js::get(js::object(doc, "host"), "spottingSpots"));
     return out;
 }
 

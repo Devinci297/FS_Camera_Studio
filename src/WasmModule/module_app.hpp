@@ -153,7 +153,10 @@ private:
     bool spottingEvent(const std::string& name, json& payload);
     void updateSpotting(double now);
     std::string spot(std::uint32_t objectId, traffic::SpotView view, double now,
-                     const std::optional<traffic::RunwaySpot>& runway = std::nullopt);
+                     const std::optional<traffic::RunwaySpot>& runway = std::nullopt,
+                     const std::optional<traffic::PositionSpot>& place = std::nullopt);
+    // SpotTarget / AdjustSpot `spot`: a runway spot (kinds fence, approach, threshold, custom) or a position spot.
+    std::string parseSpot(const json& value, std::optional<traffic::RunwaySpot>& runway, std::optional<traffic::PositionSpot>& place) const;
     void updateSpotAirports(double now);
     static constexpr double kSpotAirportsSeconds = 2;
     bool setAutoSpot(bool enabled, double now, std::string* why = nullptr);
