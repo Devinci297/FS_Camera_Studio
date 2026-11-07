@@ -32,6 +32,8 @@
   const doc = global.document, settings = doc.getElementById('mc-page-settings'), root = doc.getElementById('mc-sim');
   if (!settings || !root) return;
   const current = global.FSCS_BUILD_VERSION || 'unknown';
+  // One installer and version for both simulators; only the simulator to close differs.
+  const SIM = /[?&]host=xplane\b/.test((global.location && global.location.search) || '') ? 'X-Plane' : 'MSFS';
   const el = (tag, text, cls) => { const e = doc.createElement(tag); if (text) e.textContent = text; if (cls) e.className = cls; return e; };
   const box = el('section', '', 'mc-update-settings');box.id = 'mc-update-settings';
   const heading = el('h4', 'Version & updates'), build = el('p', 'Installed build: ' + current, 'mc-note');
@@ -39,7 +41,7 @@
   const check = el('button', 'Check for updates', 'mc-secondary cursor-interaction');check.type = 'button';check.id = 'mc-update-check';
   const download = el('button', 'Download update', 'mc-primary cursor-interaction');download.type='button';download.hidden=true;download.id='mc-update-download';
   const link = el('input');link.type='text';link.readOnly=true;link.hidden=true;link.setAttribute('aria-label','Update installer link');
-  const hint = el('p', 'Download the installer, save your views, then close MSFS and run setup. Your saved profiles are preserved.', 'mc-note');
+  const hint = el('p', 'Download the installer, save your views, then close ' + SIM + ' and run setup. Your saved profiles are preserved.', 'mc-note');
   const choices = el('div','','mc-update-actions');choices.appendChild(check);choices.appendChild(download);
   const label = el('label','','mc-switch-row');const labelText=el('span','Check when the editor opens','mc-switch-copy');const auto=el('input','','mc-switch');auto.type='checkbox';
   let preference=true;try {preference=global.localStorage.getItem('fscs.checkUpdates')!=='false';}catch (_){}auto.checked=preference;
@@ -69,8 +71,8 @@
   download.addEventListener('click',()=>{
     if(!candidate)return;link.hidden=false;link.select();
     try {if(typeof global.OpenBrowser==='function')global.OpenBrowser(candidate.url);else global.open(candidate.url,'_blank','noopener');
-      status.textContent='Download requested. Close MSFS before running setup. If no browser opened, copy the installer link below.';
-    }catch(_){status.textContent='Copy the installer link below into your browser. Close MSFS before running setup.';}
+      status.textContent='Download requested. Close '+SIM+' before running setup. If no browser opened, copy the installer link below.';
+    }catch(_){status.textContent='Copy the installer link below into your browser. Close '+SIM+' before running setup.';}
   });
   link.addEventListener('focus',()=>link.select());
   function maybeCheck(){

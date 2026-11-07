@@ -1,13 +1,13 @@
 {
-  "baseline": "0.4.0-release",
+  "baseline": "0.5.0-release",
   "liveVerified": false,
   "files": {
     "html_ui/icons/toolbar/ICON_TOOLBAR_FSCS_CAMERA_MINI.svg": "4cd88dc1f4a6c5ab9e8dc1aaede62925ec8f86be28c0681bb34b2ef8c3103f7f",
     "html_ui/icons/toolbar/ICON_TOOLBAR_FSCS_CAMERA_STUDIO.svg": "f59dd1d4d27a03f7b9cde946a4ea4b778179345232007b7738b961f0012c19b0",
-    "html_ui/InGamePanels/FSCameraStudio/app.css": "ce8aea110b81ea70225da51d38c9ef3dfbf71aa7273a0ad8ff26548798d45bf9",
-    "html_ui/InGamePanels/FSCameraStudio/app.js": "0808d1ee7a9956b3bedea275d4b48800792ada6d5e585c6abcc363e73bab5415",
+    "html_ui/InGamePanels/FSCameraStudio/app.css": "a40e11e90d7998d41de1ae236c789ac617b6fd7f4eb30c37464b22bab8bc39d9",
+    "html_ui/InGamePanels/FSCameraStudio/app.js": "80d32eff5ff38fb3a5733fc59e00f20e54716efe7bb4e4bc55331f1fd339aba7",
     "html_ui/InGamePanels/FSCameraStudio/audio/cameras-saved.wav": "a199e831742dcc3f1b62bf46091a4225dff06fc36c1a9f271b5ef02e2c7c095a",
-    "html_ui/InGamePanels/FSCameraStudio/bridge.js": "ad58fd7f57d066b87e95f71b74a0c1f73b2e8cfab6590fc8dc6a144fe32b5ee6",
+    "html_ui/InGamePanels/FSCameraStudio/bridge.js": "1ced9dcf7b991553cf504002b4a02165c251e76621cbdc9f385ea449c439e4f1",
     "html_ui/InGamePanels/FSCameraStudio/icons/atlas.json": "ae07cd7deaafb0bd43284b7ddb1a230f68b293e8f57d8348f0ae513c28529468",
     "html_ui/InGamePanels/FSCameraStudio/icons/camera-studio-icons.png": "e6a5168a984c1745717fe79a867e2943204a63a95840a42def9245bbc548b8c5",
     "html_ui/InGamePanels/FSCameraStudio/icons.js": "ee202251d19e02d623046718edec906276d3f1cc51f2c169ebe9fe3494f7e49d",
@@ -19,13 +19,13 @@
     "html_ui/InGamePanels/FSCameraStudio/save-feedback.js": "6f3fc6418b345ec93566e35a0a3f15c421f551f1ea5bb3bcbdfc05fc0b249d21",
     "html_ui/InGamePanels/FSCameraStudio/surface-main.js": "a27d7fd06a7d7fc8c029f058b3566d8a6783bf4c19c7450e9b88a56ab58fb63d",
     "html_ui/InGamePanels/FSCameraStudio/surface-mini.js": "d942d29b73455cfdd1d2f72cba84d456c0d5b363cee23b8331e7658aa6faf653",
-    "html_ui/InGamePanels/FSCameraStudio/updates.js": "c8da8d5ee30a14de586b83ce58623c475bbeada1e8f7515632dbcf2ce027bcec",
-    "html_ui/InGamePanels/FSCameraStudio/version.js": "0b3a90216199fc3842629512372490e0fb852c5e49cc9ad81bb040fd50cab37a",
+    "html_ui/InGamePanels/FSCameraStudio/updates.js": "b601a4e27998cc14f7a6c3a357a3f7e9f8e07ab69a5a41614766f955799da3ca",
+    "html_ui/InGamePanels/FSCameraStudio/version.js": "a144a31199e3e09efe039f0d66162c63673d2aa14d4f7dcc272ea5794dc295ec",
     "html_ui/Textures/Menu/toolbar/ICON_TOOLBAR_FSCS_CAMERA_MINI.svg": "4cd88dc1f4a6c5ab9e8dc1aaede62925ec8f86be28c0681bb34b2ef8c3103f7f",
     "html_ui/Textures/Menu/toolbar/ICON_TOOLBAR_FSCS_CAMERA_STUDIO.svg": "f59dd1d4d27a03f7b9cde946a4ea4b778179345232007b7738b961f0012c19b0",
     "InGamePanels/fscs-camera-mini.spb": "ddd7b35b14cb02faa30b875b3e75b3c8e2aa47c346d00a8ecc2e75234777235c",
     "InGamePanels/fscs-camera-studio.spb": "76cb818dda1c6ed3b7693763848647c95baab33606e964fb3a32485345f8f020",
-    "layout.json": "4f301aa394d958bc80e8c6ad3f88301d45331f6af980665aadd3e7971a528bbc",
-    "manifest.json": "ee182f74e6a183f0f787d880791bb85c0eff61fd7598417c91341906612d4f66"
+    "layout.json": "40e42e1229c3db7a6e1f4d65c7337e0d58fd8b3c5d69a9dc0e56f1f50076a028",
+    "manifest.json": "331e7ee52b519257bb0ede78a0c181230a26659d27fbc632f6178c0da9938820"
   }
 }
