@@ -222,7 +222,8 @@
       'mc-nav-profiles':'Create, import, export and manage camera profiles.',
       'mc-nav-settings':'Customize appearance, mouse look and camera controls.',
       'mc-nav-traffic':'Follow other aircraft from the tower, the runway, a chase or a fly-by camera.',
-      'mc-traffic-search':'Show aircraft whose airline, flight number or callsign matches.',
+      'mc-traffic-search':'Show aircraft whose airline, flight number, callsign or type matches.',
+      'mc-dock-traffic-search':'Find aircraft by airline, flight number, callsign or type. Enter follows the first match; Esc clears.',
       'mc-traffic-distance':'Hide aircraft farther away than this. Settings > Spotting sets how far Camera Studio looks.',
       'mc-tab-position':'Move, rotate and zoom the selected camera.',
       'mc-tab-motion':'Configure transitions and camera motion effects.',
@@ -237,7 +238,7 @@
     if(control.closest('#mc-setting-theme'))return 'Use the '+control.textContent.trim().toLowerCase()+' appearance.';
     if(control.dataset.precision)return 'Use '+control.dataset.precision+' movement and rotation steps; this also scales keyboard movement.';
     if(control.classList.contains('mc-category-head'))return (control.getAttribute('aria-expanded')==='true'?'Collapse ':'Expand ')+(control.getAttribute('aria-label')||'category')+'. Right-click for category actions.';
-    if(control.closest('#mc-dock-traffic'))return control.title||control.getAttribute('aria-label')||control.textContent.trim();
+    if(control.closest('#mc-dock-traffic')||control.closest('#mc-dock-traffic-bar'))return control.title||control.getAttribute('aria-label')||control.textContent.trim();
     if(control.closest('#mc-dock-categories'))return 'Show '+(control.getAttribute('aria-label')||control.textContent.trim())+' cameras. Right-click for category actions.';
     if(control.classList.contains('mc-camera-select')||control.closest('#mc-dock-favorites'))return (control.title||control.getAttribute('aria-label')||control.textContent.trim())+'. Right-click for camera actions.';
     if(control.title)return control.title;
@@ -2532,6 +2533,7 @@
         if (all.length > 5) { const more = button('+' + (all.length - 5) + ' more', quickPicker); more.setAttribute('data-focus-key', 'more'); favorites.appendChild(more); }
         if (!all.length && P()) favorites.appendChild(button('Add favorite views', () => { if (IS_MINI) requestMainEditor(); else { openEditor('cameras'); setTab('behavior'); } }));
       }
+      if (IS_MINI) showMiniTrafficBar(Boolean($('mc-dock-traffic')));
     });
     updateActiveState();
     layoutMiniCategories();
@@ -2557,7 +2559,14 @@
     let legend=pane.querySelector('.mc-dock-category-legend');
     if(!legend){legend=make('span',undefined,'mc-dock-category-legend');pane.insertBefore(legend,pane.firstChild);}
     legend.textContent=groups.filter(g=>g.dataset.hasCategories==='true').map(g=>g.querySelector('.mc-category-group-label').textContent).join(' / ');legend.hidden=narrow;
-    const height=Math.max(narrow?58:72,rows*28+Math.max(0,rows-1)*2+(narrow?0:14));
+    let height=Math.max(narrow?58:72,rows*28+Math.max(0,rows-1)*2+(narrow?0:14));
+    // Traffic: the filter bar stays fixed above the list, so give the list room for two rows of aircraft under it.
+    const trafficBar=$('mc-dock-traffic-bar');
+    if(trafficBar&&!trafficBar.hidden){
+      const body=dock.querySelector('.mc-dock-body'),favorites=$('mc-dock-favorites');
+      const above=Array.from(body.children).filter(el=>el!==favorites&&!el.hidden&&!el.classList.contains('mc-sb')&&el.offsetParent!==null).reduce((sum,el)=>sum+el.offsetHeight+2,0);
+      height=Math.max(height,Math.min(122,above+2*32+2));
+    }
     const categoryWidth=usedColumns*cell+4;
     pane.style.width=categoryWidth+'px';pane.style.height=height+'px';flat.style.gridTemplateColumns='repeat('+usedColumns+',minmax(0,1fr))';
     pane.style.paddingTop=(narrow?0:14)+'px';
@@ -2824,6 +2833,7 @@
     all: () => true, ground: a => Boolean(a.onGround),
     arriving: a => a.status === 'arriving' || a.status === 'landing',
     departing: a => a.status === 'departing' || a.status === 'takeoff',
+    cruise: a => a.status === 'cruise',
   };
   const SPOTTING_OFF = { targetId: null, view: null, autoSpot: false, state: 'off', targetLabel: '', reason: null };
   const spotting = () => Object.assign({}, SPOTTING_OFF, S.spotting || {});
@@ -2845,8 +2855,9 @@
     const nm = Number(a.distanceNm) || 0, altitude = Number(a.altitudeFt) || 0;
     return [(nm < 10 ? nm.toFixed(1) : String(Math.round(nm))) + ' NM', (altitude < 0 ? '-' : '') + thousands(altitude) + ' ft', Math.round(Number(a.groundSpeedKt) || 0) + ' kt'];
   }
-  // Airline, flight number and callsign, with spaces and dashes ignored ("DLH 4AB" finds DLH4AB, "DAIBL" finds D-AIBL).
-  const trafficMatches = (a, query) => [a.atcId, a.airline, a.flightNumber, (a.airline || '') + (a.flightNumber || ''), trafficLabel(a)].some(value => searchKey(value).indexOf(query) >= 0);
+  // Airline, flight number, callsign and type, with spaces and dashes ignored ("DLH 4AB" finds DLH4AB, "DAIBL" finds D-AIBL,
+  // "a320" finds an Airbus A320). "$$..." models are unresolved placeholders and never match.
+  const trafficMatches = (a, query) => [a.atcId, a.airline, a.flightNumber, (a.airline || '') + (a.flightNumber || ''), trafficLabel(a), /^\$\$/.test(a.model || '') ? '' : a.model, a.title].some(value => searchKey(value).indexOf(query) >= 0);
   // Tower and runway views come from the loaded airport camera set (saved or temporary).
   function airportViewsLoaded() {
     const code = S.airports && S.airports.loaded;
@@ -3001,12 +3012,72 @@
     if (sp.state !== 'off' && sp.targetId != null && sp.view !== view) spotTarget(sp.targetId, view);
     else renderMiniTraffic();
   }
+  // Mini filters: status chips beside the view choice and a search box, kept above the list so they never scroll away.
+  const MINI_TRAFFIC_FILTERS = [['all', 'All'], ['departing', 'Departures'], ['arriving', 'Arrivals'], ['ground', 'On ground'], ['cruise', 'Cruise']];
+  const MINI_TRAFFIC_EMPTY = { departing: 'departing aircraft', arriving: 'arriving aircraft', ground: 'aircraft on the ground', cruise: 'aircraft in cruise' };
+  const miniTrafficFilter = () => S.miniTrafficFilter || (S.miniTrafficFilter = { status: 'all', query: '' });
   function miniTrafficButton(id) {
     const entry = button(null, () => spotTarget(entry.objectId, miniSpotView()), 'mc-dock-traffic-aircraft');
     entry.dataset.objectId = id;
     entry.setAttribute('data-focus-key', 'mini-spot:' + id);
-    add(entry, icon('plane'), make('strong'), make('small', undefined, 'mc-dock-traffic-figures'));
+    // Callsign, distance and status are separate boxes with margins (Coherent ignores flex gap), so they never run together.
+    add(entry, icon('plane'), make('strong', undefined, 'mc-dock-traffic-callsign'), make('small', undefined, 'mc-dock-traffic-figures'), make('span', undefined, 'mc-dock-traffic-status'));
     return entry;
+  }
+  function setMiniTrafficFilter(status) {
+    miniTrafficFilter().status = status;
+    const list = $('mc-dock-favorites');
+    if (list) list.scrollTop = 0;
+    renderMiniTraffic();
+  }
+  /** The fixed toolbar above the aircraft list: view choice, status filters, search and Stop. Built once and kept,
+      so the search box keeps focus and text while the list below refreshes every second. */
+  function miniTrafficBar() {
+    let bar = $('mc-dock-traffic-bar');
+    if (bar) return bar;
+    bar = make('div', undefined, 'mc-dock-traffic-bar');
+    bar.id = 'mc-dock-traffic-bar';
+    const views = make('div', undefined, 'mc-dock-traffic-views');
+    views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Spotting view');
+    SPOT_VIEWS.forEach(([view, label, iconName]) => {
+      const choose = button(label, () => chooseMiniSpotView(view), 'mc-dock-traffic-view', iconName);
+      choose.dataset.view = view;
+      choose.setAttribute('data-focus-key', 'mini-spot-view:' + view);
+      views.appendChild(choose);
+    });
+    const filters = make('div', undefined, 'mc-dock-traffic-filters');
+    filters.setAttribute('role', 'group'); filters.setAttribute('aria-label', 'Show traffic');
+    MINI_TRAFFIC_FILTERS.forEach(([value, label]) => {
+      const choose = button(null, () => setMiniTrafficFilter(value), 'mc-dock-traffic-filter');
+      choose.dataset.filter = value;
+      choose.setAttribute('data-focus-key', 'mini-spot-filter:' + value);
+      add(choose, make('span', label), make('span', undefined, 'mc-dock-traffic-filter-count'));
+      filters.appendChild(choose);
+    });
+    const search = make('label', undefined, 'mc-dock-traffic-search');
+    const input = make('input');
+    input.type = 'search'; input.id = 'mc-dock-traffic-search'; input.placeholder = 'Find callsign or type';
+    input.setAttribute('aria-label', 'Find aircraft by airline, callsign or type'); input.autocomplete = 'off'; input.spellcheck = false;
+    input.addEventListener('input', () => { miniTrafficFilter().query = input.value; renderMiniTraffic(); });
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && input.value) { event.preventDefault(); event.stopPropagation(); input.value = ''; miniTrafficFilter().query = ''; renderMiniTraffic(); }
+      else if (event.key === 'Enter') {
+        // Enter follows the first match, so finding and watching an aircraft is type + Enter.
+        const first = $$('#mc-dock-traffic .mc-dock-traffic-aircraft').filter(b => !b.disabled)[0];
+        if (first) { event.preventDefault(); first.click(); }
+      }
+    });
+    add(search, icon('search'), input);
+    const stop = button('Stop', stopSpotting, 'mc-dock-traffic-stop', 'circle-stop');
+    stop.setAttribute('data-focus-key', 'mini-spot-stop');
+    add(bar, views, filters, search, stop);
+    const body = $('mc-mini-panel').querySelector('.mc-dock-body');
+    body.insertBefore(bar, $('mc-dock-favorites'));
+    return bar;
+  }
+  function showMiniTrafficBar(open) {
+    const bar = open ? miniTrafficBar() : $('mc-dock-traffic-bar');
+    if (bar) bar.hidden = !open;
   }
   // Display only and in place, so a click or hover survives the once-a-second TrafficChanged refresh.
   function renderMiniTraffic() {
@@ -3014,34 +3085,37 @@
     if (count) updateMiniTrafficCount(count);
     const pane = $('mc-dock-traffic');
     if (!pane) return;
-    const sp = spotting(), all = trafficAircraft(), shown = all.slice(0, MINI_TRAFFIC_LIMIT), chosen = miniSpotView();
-    let views = pane.querySelector('.mc-dock-traffic-views'), list = pane.querySelector('.mc-dock-traffic-list'), note = pane.querySelector('.mc-note');
-    if (!views) {
-      views = make('div', undefined, 'mc-dock-traffic-views');
-      views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Spotting view');
-      SPOT_VIEWS.forEach(([view, label, iconName]) => {
-        const choose = button(label, () => chooseMiniSpotView(view), 'mc-dock-traffic-view', iconName);
-        choose.dataset.view = view;
-        choose.setAttribute('data-focus-key', 'mini-spot-view:' + view);
-        views.appendChild(choose);
-      });
-      const stop = button('Stop', stopSpotting, 'mc-dock-traffic-stop', 'circle-stop');
-      stop.setAttribute('data-focus-key', 'mini-spot-stop');
-      views.appendChild(stop);
+    const bar = miniTrafficBar();
+    bar.hidden = false;
+    const sp = spotting(), all = trafficAircraft(), chosen = miniSpotView(), filter = miniTrafficFilter();
+    const query = searchKey(filter.query), keep = TRAFFIC_FILTERS[filter.status] || TRAFFIC_FILTERS.all;
+    const matching = all.filter(a => !query || trafficMatches(a, query));
+    const filtered = matching.filter(keep), shown = filtered.slice(0, MINI_TRAFFIC_LIMIT);
+    let list = pane.querySelector('.mc-dock-traffic-list'), note = pane.querySelector('.mc-note');
+    if (!list) {
       list = make('div', undefined, 'mc-dock-traffic-list');
       list.setAttribute('role', 'group'); list.setAttribute('aria-label', 'Nearby aircraft, nearest first');
       note = make('span', undefined, 'mc-note');
-      add(pane, views, list, note);
+      add(pane, list, note);
     }
     const reasons = {};
     SPOT_VIEWS.forEach(([view]) => { reasons[view] = spotViewReason(view); });
-    $$('button[data-view]', views).forEach(choose => {
+    $$('button[data-view]', bar).forEach(choose => {
       const view = choose.dataset.view, reason = reasons[view];
       choose.disabled = Boolean(reason);
       choose.setAttribute('aria-pressed', String(view === chosen));
       choose.title = reason || (sp.state !== 'off' ? 'Show ' + (sp.targetLabel || 'the aircraft') + ' in the ' + SPOT_VIEW_NAMES[view] + ' view' : 'Follow the aircraft you pick in the ' + SPOT_VIEW_NAMES[view] + ' view');
     });
-    const stop = views.querySelector('.mc-dock-traffic-stop');
+    // Each chip counts the aircraft it would show with the current search, so an empty filter reads as empty before a click.
+    $$('button[data-filter]', bar).forEach(choose => {
+      const value = choose.dataset.filter, n = matching.filter(TRAFFIC_FILTERS[value] || TRAFFIC_FILTERS.all).length;
+      choose.setAttribute('aria-pressed', String(value === filter.status));
+      setText(choose.querySelector('.mc-dock-traffic-filter-count'), String(n));
+      choose.title = n + ' ' + (value === 'all' ? 'aircraft' : MINI_TRAFFIC_EMPTY[value]) + (query ? ' matching "' + filter.query.trim() + '"' : '') + ' within ' + spottingRadius() + ' NM';
+    });
+    const input = $('mc-dock-traffic-search');
+    if (input.value !== filter.query && document.activeElement !== input) input.value = filter.query;
+    const stop = bar.querySelector('.mc-dock-traffic-stop');
     stop.hidden = sp.state === 'off' && !sp.autoSpot;
     stop.title = 'Stop spotting and return to the view you had before';
     const blocked = reasons[chosen], wanted = {};
@@ -3054,7 +3128,10 @@
       entry.objectId = a.objectId;
       entry.dataset.status = a.status || '';
       setText(entry.querySelector('strong'), label);
-      setText(entry.querySelector('small'), summary);
+      setText(entry.querySelector('small'), figures[0]);
+      const chip = entry.querySelector('.mc-dock-traffic-status');
+      setText(chip, status);
+      chip.hidden = !status;
       entry.setAttribute('aria-label', label + ', ' + summary);
       entry.setAttribute('aria-pressed', String(tracked));
       entry.disabled = Boolean(blocked);
@@ -3062,11 +3139,14 @@
       entry.title = blocked || (SPOT_VIEW_NAMES[chosen] + ' view of ' + label + (detail ? ' (' + detail + ')' : '') + ': ' + figures.join(', ') + (status ? ', ' + status.toLowerCase() : ''));
       if (list.children[index] !== entry) list.insertBefore(entry, list.children[index] || null);
     });
-    $$('.mc-dock-traffic-aircraft', list).filter(entry => !wanted[entry.dataset.objectId]).forEach(entry => entry.remove());
+    $$('.mc-dock-traffic-aircraft', list).filter(entry => !wanted[entry.dataset.objectId]).forEach(entry => entry.parentNode.removeChild(entry));
+    const what = MINI_TRAFFIC_EMPTY[filter.status] || 'aircraft';
     const text = !S.snapshot ? statusText()
       : !all.length ? 'No other aircraft within ' + spottingRadius() + ' NM. AI, VATSIM and IVAO traffic appears here once the simulator places it.'
+      : !shown.length && query ? 'No ' + what + ' match "' + filter.query.trim() + '". Esc clears the search.'
+      : !shown.length ? 'No ' + what + ' within ' + spottingRadius() + ' NM right now.'
       : blocked && sp.state === 'off' ? blocked
-      : all.length > shown.length ? 'Nearest ' + shown.length + ' of ' + all.length + '. The Traffic page in the editor lists them all.' : '';
+      : filtered.length > shown.length ? 'Nearest ' + shown.length + ' of ' + filtered.length + '. Search, or open the Traffic page in the editor, to find the rest.' : '';
     note.hidden = !text;
     setText(note, text);
   }
