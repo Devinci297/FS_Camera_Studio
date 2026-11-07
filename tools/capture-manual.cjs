@@ -21,11 +21,16 @@ const {chromium}=require(process.env.FSCS_PLAYWRIGHT||'playwright'),fs=require('
  await page.setViewportSize({width:1250,height:1500});
  for(const section of ['tracking','airport','updates']){await page.locator('#mc-settings-link-'+section).click();await shot(section==='updates'?'updates':section+'-settings','#mc-settings-section-'+section);}
  await page.setViewportSize({width:1250,height:1000});
+ await page.evaluate(()=>{FSCDemo.arriveAtAirport();FSCDemo.traffic({time:100});});await page.locator('#mc-nav-traffic').click();await page.waitForTimeout(300);await shot('traffic');
+ await page.locator('#mc-nav-settings').click();await page.setViewportSize({width:1250,height:1500});
+ for(const section of ['cinematic','gamepad']){await page.locator('#mc-settings-link-'+section).click();await shot(section+'-settings','#mc-settings-section-'+section);}
+ await page.setViewportSize({width:1250,height:1000});
  await page.locator('#mc-nav-cameras').click();await page.evaluate(()=>{FSCApp.state.airports={loaded:'',nearby:[],facilities:[{icao:'KMCO'},{icao:'KORL'}],radiusNm:25};});
  await page.locator('#mc-add').click();await page.getByRole('button',{name:'Create airport cameras',exact:true}).click();await page.locator('#mc-airport-codes').fill('KMCO');await shot('airports','.mc-dialog');
  const mini=await browser.newPage({viewport:{width:1600,height:400},deviceScaleFactor:1.5});await mini.goto('file:///'+source.replace(/main\.html$/,'mini.html').replaceAll('\\','/')+'?surface=mini');await mini.waitForFunction(()=>window.FSCApp&&FSCApp.state.snapshot);
  await mini.evaluate(()=>{FSCApp.state.working.settings.ui.miniHover=false;FSCDemo.setOwnership('Observing');document.getElementById('mc-mini-pin').click();});
  for(const [width,file] of [[1600,'airport-controls-mini'],[1200,'airport-controls-mini-detail'],[760,'airport-controls-mini-narrow']]){await mini.setViewportSize({width,height:400});await mini.waitForTimeout(100);await mini.locator('#mc-mini-panel').screenshot({path:out+'/'+file+'.png'});}
+ await mini.evaluate(()=>FSCDemo.traffic({time:100}));await mini.setViewportSize({width:1200,height:400});await mini.locator('#mc-dock-traffic-tab').click();await mini.waitForTimeout(200);await mini.locator('#mc-mini-panel').screenshot({path:out+'/mini-traffic.png'});
  fs.writeFileSync(out+'/capture.json',JSON.stringify({version:await page.evaluate(()=>FSCS_BUILD_VERSION),source:path.relative(process.cwd(),source),environment:'Browser demo fixtures; not a live simulator capture',captured:new Date().toISOString()},null,2)+'\n');
  console.log('Captured current release UI images.');
  }finally{await browser.close();}

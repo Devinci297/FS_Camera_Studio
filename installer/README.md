@@ -2,18 +2,21 @@
 
 The Windows installer deploys the **verified packaged build**, not a fresh compile of the working tree.
 This preserves the reviewed simulator host and its native pointer routing.
-The package's 26 files remain byte-identical to the selected release receipt. No user profiles or development
+The package files remain byte-identical to the selected release receipt. No user profiles or development
 configuration are included. Setup works offline, per user, without the MSFS SDK or a background service.
 
 ## Build
 
 ```powershell
 tools\get-installer-compiler.ps1
-python tools/diagnostics/stage-v0.3.py --freeze
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.3.0
-python tools/diagnostics/stage-v0.3.py
+python tools/diagnostics/stage-v0.4.py --freeze
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.4.0
+tools\package.ps1 -Compile -Wasm build/wasm/release-0.4.0/FSCameraStudio.wasm -OutputDirectory build/release-0.4.0-compile
+python tools/diagnostics/stage-v0.4.py --host build/release-0.4.0-compile/Packages/fs-camera-studio
+python tools/diagnostics/stage-v0.4.py
+node tools/capture-manual.cjs
 python tools/build-manual.py
-python tools/build-installer.py --version 0.3.0 --package build/release/0.3.0/fs-camera-studio --receipt build/release/0.3.0/staged.json
+python tools/build-installer.py --version 0.4.0 --package build/release/0.4.0/fs-camera-studio --receipt build/release/0.4.0/staged.json
 ```
 
 The build dependency is Inno Setup 6.7.3, downloaded from its official GitHub release and checked for a valid
@@ -70,7 +73,7 @@ registered fixture path before cleanup. Never point the test harness at the real
 - [MSFS virtual file system](https://docs.flightsimulator.com/msfs2024/retail/devmode/menus/tools_info/virtual-file-system/virtual-file-system-information/): installer discovery through InstalledPackagesPath and Community2024.
 - [Inno Setup downloads](https://jrsoftware.org/isdl.php), [script events](https://jrsoftware.org/ishelp/topic_scriptevents.htm), [SHA-256 verification](https://jrsoftware.org/ishelp/topic_isxfunc_getsha256offile.htm).
 
-Installer tests do not replace live MSFS acceptance. Version 0.3.0 includes global airport defaults and overrides,
-cross-aircraft profile copying, compact library navigation, dual bindings and controller hat-release handling.
-The latest T.16000M fix still needs live hardware verification; see
-`doc/test-evidence/2026-10-11-v0.3.0.md`.
+Installer tests do not replace live MSFS acceptance. Version 0.4.0 adds camera feel (follow horizon, head
+movement, mounted cam, binoculars, glance views), cinematic mode, temporary airport vantage points, free drone
+cameras with gamepad control, traffic spotting, Pop out and the mini Traffic tab. Profiles saved by 0.4.0 use
+schema 4 and cannot be read by 0.3.0. See `doc/test-evidence/2026-11-07-v0.4.0.md`.
