@@ -155,6 +155,7 @@ const char* PanelWindows::onFrame(XPLMWindowID, const char* text, void* refcon) 
     const bool ok = arg.is_string() || arg.is_object();
     if (ok && w && !w->heard) {
         w->heard = true;  // once per page load: proves the page reached the plugin
+        w->loaded = true;  // its scripts run before the load-finished callback: answer its Hello at once
         log(std::string(kSurfaceName[w->surface]) + " page connected");
     }
     if (ok && w && w->owner && w->owner->inbound_) w->owner->inbound_(w->surface, arg.is_string() ? arg.get<std::string>() : raw);
