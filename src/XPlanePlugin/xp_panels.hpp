@@ -28,6 +28,9 @@ public:
     // `inbound(surface, frame)`: a frame from a page, called inside the X-Plane callback; the host queues it.
     void init(std::string uiIndexUrl, std::function<void(Surface, std::string)> inbound);
     void show(Surface s, bool visible);
+    // Open again at startup, as it was when X-Plane last closed: a mini starts hidden, in hover mode, until its page
+    // says otherwise (pinned, or hover turned off), so the bottom edge reveals it without opening it each session.
+    void restore(Surface s);
     void toggle(Surface s);
     // Open as far as the user is concerned: a hover-hidden mini still counts as open.
     bool visible(Surface s) const;
@@ -39,7 +42,7 @@ public:
     void fitHeight(Surface s, int height);
     // Every frame: moves a window that is being dragged by its page, and hides or reveals a hover mini.
     void update(double now);
-    static constexpr int kRevealBand = 6;           // boxels above the screen's bottom edge that reveal the mini
+    static constexpr int kRevealBand = 10;          // boxels above the screen's bottom edge that reveal the mini
     static constexpr int kHoverMargin = 16;         // around the window, still counted as over it
     static constexpr double kHideDelaySeconds = 0.8;
     void post(const std::string& frame);  // a module frame for every page, delivered by flush()

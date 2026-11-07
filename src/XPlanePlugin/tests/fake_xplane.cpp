@@ -530,6 +530,13 @@ int main(int argc, char** argv) {
     dr("sim/graphics/view/pilots_head_y") = 0.9;
     dr("sim/graphics/view/pilots_head_z") = -0.6;
 
+    // The first session starts with the mini closed (as a user who closed it would), so it is opened below.
+    {
+        const fs::path panels = fs::path(g_root) / "Output" / "preferences" / "XPCameraStudio" / "panels.json";
+        fs::create_directories(panels.parent_path());
+        writeFile(panels, R"({"miniOpen":false})");
+    }
+
     Plugin plugin;
     if (!plugin.load(argv[1])) return 1;
     char name[256] = {}, sig[256] = {}, desc[256] = {};
@@ -845,6 +852,23 @@ int main(int argc, char** argv) {
     check(g_windows.empty(), "XPluginDisable closes the windows");
     check(plugin.enable() == 1, "XPluginEnable again");
     frames(5);
+    {
+        FakeWindow* mini = nullptr;
+        for (FakeWindow* w : g_windows)
+            if (w->url.find("surface=mini") != std::string::npos) mini = w;
+        check(mini && !mini->visible && pubi("xpcs/mini_open") == 1,
+              "the mini, open when X-Plane closed, is there again after a restart: hidden, waiting at the bottom edge");
+        if (mini) {
+            int sl = 0, st = 0, sr = 0, sb = 0;
+            XPLMGetScreenBoundsGlobal(&sl, &st, &sr, &sb);
+            g_mouseX = (mini->params.left + mini->params.right) / 2;
+            g_mouseY = sb + 2;
+            frames(2);
+            check(mini->visible, "and the mouse at the bottom edge brings it up without opening it first");
+            g_mouseY = (st + sb) / 2;
+            frames(90);
+        }
+    }
     win = openEditor();
     Page again{win, "main-def456"};
     again.send("Hello", {{"surface", "main"}});

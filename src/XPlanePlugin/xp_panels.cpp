@@ -109,6 +109,17 @@ void PanelWindows::show(Surface s, bool visible) {
     if (visible) XPLMBringWindowToFront(w.id);
 }
 
+void PanelWindows::restore(Surface s) {
+    create(s);
+    Win& w = wins_[s];
+    if (!w.id) return;
+    w.wanted = true;
+    w.autoHide = s == Mini;
+    w.revealed = false;
+    w.leftAt = -1;
+    apply(w);
+}
+
 // Shown when open, unless a hover mini is waiting for the mouse.
 void PanelWindows::apply(Win& w) {
     if (!w.id) return;

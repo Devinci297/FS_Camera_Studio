@@ -28,6 +28,7 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -86,6 +87,7 @@ struct Host {
     std::unique_ptr<host::ModuleApp> app;
     std::deque<std::pair<xplane::PanelWindows::Surface, std::string>> inbound;
     fs::path xplaneRoot;
+    fs::path panelState;  // <profiles folder>/panels.json: whether the mini was open when X-Plane last closed
     double now = 0;
     double nextAircraftCheck = 0;
     bool aircraftDirty = true;
@@ -413,6 +415,20 @@ int onCommand(XPLMCommandRef cmd, XPLMCommandPhase phase, void*) {
     return 0;
 }
 
+// panels.json: {"miniOpen": true|false}. Missing or unreadable: open.
+bool readMiniOpen(const fs::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    if (!in) return true;
+    const auto state = nlohmann::json::parse(in, nullptr, false);
+    return !state.is_object() || state.value("miniOpen", true);
+}
+void writeMiniOpen(const fs::path& file, bool open) {
+    std::error_code ec;
+    fs::create_directories(file.parent_path(), ec);
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    if (out) out << nlohmann::json{{"miniOpen", open}}.dump();
+}
+
 bool startHost() {
     g = new Host();
     char systemPath[1024] = {}, prefsPath[1024] = {};
@@ -430,6 +446,7 @@ bool startHost() {
 
     const std::string index = toUtf8(xplane::pathFromUtf8(g_pluginFolder) / "ui" / "index.html");
     g->panels.init(xplane::fileUrl(index), &onInbound);
+    g->panelState = storageRoot / "panels.json";
     g->services.toPanels = [](const std::string& text) { if (g) g->panels.post(text); };
     g->mouse = std::make_unique<xplane::MouseLook>([](BackendEvent e) { if (g) g->services.stage(std::move(e)); });
     g->services.onNativeMouse = [](bool on) { if (g && g->mouse) g->mouse->setEnabled(on); };
@@ -447,12 +464,15 @@ bool startHost() {
     XPLMGetVersions(&xplaneVersion, &xplmVersion, &hostId);
     deliver(be::Connected{"X-Plane " + std::to_string(xplaneVersion)});
     deliver(be::SimRunning{true});
+    // The mini is there from the start, as in MSFS's toolbar, unless it was closed last time.
+    if (readMiniOpen(g->panelState)) g->panels.restore(xplane::PanelWindows::Mini);
     return true;
 }
 
 void stopHost() {
     if (!g) return;
     if (g->app) g->app->shutdown(g->now);
+    writeMiniOpen(g->panelState, g->panels.visible(xplane::PanelWindows::Mini));
     g->services.onNativeMouse = nullptr;
     g->services.airports = nullptr;
     g->services.traffic = nullptr;
