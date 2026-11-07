@@ -136,7 +136,7 @@ There is no desktop application, tray app or external process.
   0.5 s the correction eases back to 0 (camera banks with the aircraft). Held through a simulator pause.
 * Validation: ≤ 10 MiB, finite numbers, |position| ≤ 10 000 m, FOV 0.1–2.8 rad, quaternion norm within 1e-3
   (normalised; zero rejected), unique UUIDs, every camera in exactly one category matching its `categoryId`,
-  existing `defaultCameraId`, unique non-zero `viewId`, ≤ 500 cameras, ≤ 100 categories, names 1–60 chars.
+  existing `defaultCameraId`, unique non-zero `viewId`, ≤ 2,000 cameras, ≤ 100 categories, names 1–60 chars.
   Unknown `requiredSchemaFeatures` → read-only, cannot activate. Schema 1 documents migrate (`shortcutSlot` →
   `viewId`, `smoothstep5` → `smoothstep3`, `smoothstep7` → `smoothstep5`) into a new revision; the input is retained.
   Schema 2 documents (and migrated schema 1) migrate to 3: `levelHorizon: true` → `followHorizon: 0`, `false` or
@@ -292,7 +292,7 @@ CommBus events: UI → module `FSCS_UI_TO_HOST` (`listener.callWasm`), module �
 
 **Chunking (both directions):** a message whose JSON exceeds 4000 characters is sent as consecutive
 `{"part": i, "of": n, "msgId": "<sender-unique>", "chunk": "<substring>"}` envelopes (i from 0). The receiver
-reassembles by `msgId`, discards incomplete sets after 5 s, and rejects totals above 2 MiB.
+reassembles by `msgId`, discards incomplete sets after 5 s, and rejects totals above 8 MiB.
 
 **Paused simulator:** JS does not process module→UI events while the sim is paused. The module therefore keeps
 only the latest state per event name for each surface (coalescing) and never builds a per-frame backlog.

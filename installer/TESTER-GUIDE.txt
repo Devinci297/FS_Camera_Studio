@@ -1,4 +1,4 @@
-FS CAMERA STUDIO - VERSION 0.5.0
+FS CAMERA STUDIO - VERSION 0.5.1
 Microsoft Flight Simulator 2024 and X-Plane 12 | Windows 11 x64
 
 INSTALL
@@ -23,9 +23,11 @@ INSTALL FOR X-PLANE 12 (XP CAMERA STUDIO)
    Resources\plugins\XPCameraStudio and backs up an older copy first.
 3. Start X-Plane and load a flight. Open Plugins > XP Camera Studio > Editor.
    The mini panel shows when the mouse reaches the bottom of the screen.
-4. Keys and buttons are X-Plane commands: the Bindings tab lists each xpcs/
-   command with Copy. Assign them in X-Plane's Settings > Keyboard or Joystick
-   (search for xpcs).
+4. For camera-view keys, choose Assign key binding in XPCS, select your native
+   controls profile, capture a key and review conflicts, then Assign after exit.
+   The bundled helper backs up preferences and removes conflicting assignments
+   after X-Plane closes. Keys take effect on the next launch. Other commands
+   and controller buttons use X-Plane Settings > Keyboard or Joystick.
 5. Profiles are saved in X-Plane 12\Output\preferences\XPCameraStudio and are
    kept on upgrade and uninstall. Profiles > Import also converts X-Camera
    camera files for the loaded aircraft.
@@ -142,6 +144,15 @@ INCLUDED FEATURES
   then Refresh, select a file and Import. Pasting profile code is also supported.
 - Successful saves request a native confirmation chime. Settings > Test sound
   checks the simulator UI sound route; spoken WAV is browser-only.
+
+NEW IN VERSION 0.5.1
+- Profiles hold up to 2,000 cameras; airport generation still stops at 500.
+- Move, rotate and zoom while watching traffic. Mouse look opens traffic camera
+  controls; Recenter restores framing. Adjusting stops Auto-spot switching.
+- Native camera keys can be assigned, changed or removed from XPCS. Choose the
+  X-Plane controls profile explicitly, review conflicts, then Assign after exit.
+  Effective next launch; selected preferences are backed up before changes.
+- Automated checks passed; live simulator acceptance of this patch is pending.
 
 NEW IN VERSION 0.5.0
 - X-Plane 12 support: XP Camera Studio, the same editor, mini panel, cameras,

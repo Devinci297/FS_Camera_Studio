@@ -1310,3 +1310,13 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-category-grid button{justify-content:center;padding:2px}
 #mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-entity-name{justify-content:center}
 #mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-entity-name>svg.mc-icon{margin-right:0}
+
+/* Direct adjustments for the active traffic view, independent of a saved camera. */
+#mc-sim .mc-spot-camera-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-bottom:10px}
+#mc-sim .mc-spot-camera-controls button{min-width:0;justify-content:center}
+
+#mc-sim .mc-binding-shade .mc-binding-row.mc-binding-xp{grid-template-columns:minmax(0,1fr)}
+
+#mc-sim .mc-xp-key-row{display:flex;align-items:center;gap:6px;margin:6px 0}
+#mc-sim .mc-xp-key-row>span{flex:1;overflow-wrap:anywhere}
+#mc-sim #mc-xp-key-profile{display:block;width:100%;margin:6px 0 12px}

@@ -17,17 +17,20 @@ const {chromium}=require(process.env.FSCS_PLAYWRIGHT||'playwright'),path=require
 (async()=>{
  const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
  const page=await browser.newPage({viewport:{width:1100,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
- let status=200,body=JSON.stringify([release('0.5.1')]);
+ let status=200,body='[]';
  await page.route('https://api.github.com/**',route=>route.fulfill({status,contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body}));
  await page.goto('file:///'+path.resolve(process.argv[2]||'ui/index.html').replaceAll('\\','/')+'?surface=main');
  await page.waitForFunction(()=>window.FSCApp.state.snapshot);
+ const current=await page.evaluate(()=>FSCS_BUILD_VERSION);
+ const parts=current.split('-')[0].split('.').map(Number);parts[2]++;
+ const next=parts.join('.');body=JSON.stringify([release(next)]);
  await page.locator('#mc-app-version').click();await page.locator('#mc-update-check').click();
- await page.getByText('Update available: 0.5.1',{exact:true}).waitFor();
+ await page.getByText('Update available: '+next,{exact:true}).waitFor();
  await page.evaluate(()=>{window.OpenBrowser=url=>window.openedUpdate=url;});
  await page.locator('#mc-update-download').click();
- assert.equal(await page.evaluate(()=>openedUpdate),`${base}/releases/download/v0.5.1/FS-Camera-Studio-0.5.1-Setup.exe`);
+ assert.equal(await page.evaluate(()=>openedUpdate),`${base}/releases/download/v${next}/FS-Camera-Studio-${next}-Setup.exe`);
  status=503;body='unavailable';await page.locator('#mc-update-check').click();await page.waitForFunction(()=>document.querySelector('#mc-update-status').textContent.includes('HTTP 503'));
  assert.equal(await page.locator('#mc-update-download').isVisible(),false);
- status=200;body=JSON.stringify([release('0.1.1-test.20261011.1')]);await page.locator('#mc-update-check').click();await page.getByText('You have the latest available build for this channel.',{exact:true}).waitFor();
+ status=200;body=JSON.stringify([release(current)]);await page.locator('#mc-update-check').click();await page.getByText('You have the latest available build for this channel.',{exact:true}).waitFor();
  assert.deepEqual(errors,[]);await browser.close();console.log('Update validation, version ordering, channel, errors, browser handoff and app bar passed.');
 })().catch(e=>{console.error(e);process.exit(1);});

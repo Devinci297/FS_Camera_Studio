@@ -185,7 +185,7 @@
       'mc-camera-color':'Choose the camera name and icon color, or inherit its category color.',
       'mc-category-default':'Start with this camera when selecting its category in the mini panel.',
       'mc-camera-menu':'Camera actions: rename, color, icon, duplicate, move or delete.',
-      'mc-camera-binding':'Assign a keyboard or controller shortcut to this camera.',
+      'mc-camera-binding':XPLANE ? 'Assign a native X-Plane camera shortcut, applied after the simulator exits.' : 'Assign a keyboard or controller shortcut to this camera.',
       'mc-favorite':'Show or hide this camera in quick access.',
       'mc-view-in-sim':'Activate this camera in the simulator.',
       'mc-editor-mouse-look':'Hold the right mouse button over the simulator scene and drag to look around.',
@@ -789,7 +789,7 @@
   /** Drop drone here: a new free camera at the current view (or behind the aircraft), in the aircraft profile's Drones category. */
   async function dropDrone() {
     if (!P() || readOnly()) return;
-    if (P().cameras.length >= 500) { announce('This profile has no room for another camera.', 'warn'); return; }
+    if (P().cameras.length >= 2000) { announce('This profile has reached its limit of 2,000 cameras.', 'warn'); return; }
     const findGroup = () => P().categories.filter(g => !g.airportIcao && g.name === 'Drones')[0] || null;
     if (!findGroup() && P().categories.length >= 100) { announce('This profile has no room for another category.', 'warn'); return; }
     const placed = await droneHere();
@@ -1373,6 +1373,8 @@
     });
   }
   function cameraShortcutLabel(view) {
+    // Stored MSFS bindings do not describe X-Plane's native keyboard assignments.
+    if (XPLANE) return '';
     return view.viewId ? bindingsFor('selectView',view.viewId).map(b => (b.input.label || b.input.definition || '').replace(/\s*\+\s*/g,'+')).join(' / ') : '';
   }
   function cameraRow(view, group, ro) {
@@ -1453,7 +1455,7 @@
     $('mc-camera-icon').disabled = ro;
     setIcon($('mc-camera-icon'), entityIcon(view, false));
     const assigned = view.viewId ? findBinding('selectView', view.viewId) : null;
-    setLabel($('mc-camera-binding'), assigned ? cameraShortcutLabel(view) : 'Assign binding');
+    setLabel($('mc-camera-binding'), XPLANE ? 'Assign X-Plane key' : assigned ? cameraShortcutLabel(view) : 'Assign binding');
     $('mc-camera-binding').disabled = ro;
     $('mc-camera-binding').setAttribute('aria-label', 'Assign binding for ' + view.name);
     renderViewButton();
@@ -2452,6 +2454,24 @@
     if (window.fscsUpdateMiniRect) window.fscsUpdateMiniRect();
   }
   function startMouseLook() {
+    const sp=spotting();
+    if(S.ownership.state==='Active' && (sp.state==='tracking'||sp.state==='lost')) {
+      const body=openDialog('Traffic camera controls');
+      add(body,make('strong',sp.targetLabel||'AI traffic','mc-look-camera'),
+        make('p','Hold right-click and drag over the simulator scene to rotate. Use your movement and look bindings to reposition the camera, and zoom controls to change the framing.','mc-note'),
+        make('p',XPLANE?'Assign xpcs/move_forward, move_back, move_left, move_right, move_up, move_down and look commands in X-Plane settings.':'Default movement: W/A/S/D, Q/E for height, and Shift for faster movement.','mc-note'),
+        make('p','The target stays selected. Adjustments are temporary; choosing another traffic view or Recenter resets them. Manual adjustment stops Auto-spot from switching targets.','mc-note'));
+      const stillSpotting=()=>{const now=spotting();return S.ownership.state==='Active'&&(now.state==='tracking'||now.state==='lost')&&now.targetId===sp.targetId&&now.view===sp.view;};
+      const controls=(title,items)=>{
+        body.appendChild(make('h4',title));
+        const group=make('div',undefined,'mc-spot-camera-controls');body.appendChild(group);
+        items.forEach(([label,payload])=>group.appendChild(button(label,()=>{if(stillSpotting())command('MouseLookDelta',payload);else closeDialog();},'mc-secondary')));
+      };
+      controls('Move - 0.5 m', [['Forward',{forwardMeters:.5}],['Back',{forwardMeters:-.5}],['Left',{rightMeters:-.5}],['Right',{rightMeters:.5}],['Up',{upMeters:.5}],['Down',{upMeters:-.5}]]);
+      controls('Rotate - 5 degrees', [['Look left',{headingDeg:-5}],['Look right',{headingDeg:5}],['Look up',{pitchDeg:5}],['Look down',{pitchDeg:-5}]]);
+      dialogActions([['Recenter',()=>{if(stillSpotting())command('RecenterLook',{});closeDialog();}],['Done',()=>closeDialog()]]);
+      compactEntityMenu();return;
+    }
     const view=IS_MINI?dockCamera():current();if(!view)return;
     const body=openDialog('Mouse look');
     $('mc-dialog-shade').classList.add('mc-mouselook-shade');
@@ -4083,9 +4103,9 @@
       $('mc-binding-status').hidden = true; $('mc-binding-kind').hidden = true;
       $('mc-binding-status').value = 'all'; $('mc-binding-kind').value = 'all';
       const intro = $('mc-page-bindings').querySelector('.mc-page-header p');
-      if (intro) intro.textContent = 'Each action is an X-Plane command. Set its key or button in X-Plane: Settings > Keyboard or Joystick, then search for xpcs.';
+      if (intro) intro.textContent = 'Each action is an X-Plane command. Use Assign key on a camera view to apply its shortcut after X-Plane exits. Other keys and controller buttons are set in X-Plane Settings > Keyboard or Joystick; search for xpcs.';
       $('mc-binding-search').placeholder = 'Search actions, cameras or commands';
-      if (!$('mc-binding-result').textContent || $('mc-binding-result').textContent === 'Select an assignment, then test it.') setBindingResult('Copy a command, then find it in X-Plane\'s Keyboard or Joystick settings to give it a key or button.');
+      if (!$('mc-binding-result').textContent || $('mc-binding-result').textContent === 'Select an assignment, then test it.') setBindingResult('Copy a command, then find it in X-Plane\'s Keyboard or Joystick settings to give it a key or button. Remove the same shortcut from any conflicting command there.');
     } else if (!$('mc-binding-kind').querySelector('[value="simZoom"]')) {
       const option = make('option', 'Mouse wheel / MSFS zoom'); option.value = 'simZoom'; $('mc-binding-kind').appendChild(option);
     }
@@ -4125,7 +4145,7 @@
     updateBindingToggle();
     $('mc-binding-count').textContent = shown + ' of ' + total + ' bindings';
   }
-  function xpBindingRow(spec) {
+  function xpBindingRow(spec, report = setBindingResult) {
     const row = make('div', undefined, 'mc-binding-row mc-binding-xp');
     const name = make('div', spec.name, 'mc-binding-name');
     name.appendChild(make('small', spec.detail)); row.appendChild(name);
@@ -4138,10 +4158,12 @@
     const copy = button('Copy', () => {
       field.focus(); field.select();
       let copied = false; try { copied = !!(document.execCommand && document.execCommand('copy')); } catch (_) { /* not allowed here */ }
-      setBindingResult(copied ? command + ' copied. Paste it into the search box of X-Plane\'s Keyboard or Joystick settings.' : 'Press Ctrl+C to copy ' + command + '.');
+      report(copied ? command + ' copied. Paste it into the search box of X-Plane\'s Keyboard or Joystick settings.' : 'Press Ctrl+C to copy ' + command + '.');
     }, 'mc-secondary');
     copy.setAttribute('aria-label', 'Copy ' + command);
-    add(group, field, copy); row.appendChild(group);
+    add(group, field, copy);
+    if (spec.action === 'selectView') group.appendChild(button('Assign key', () => assignDialog(spec), 'mc-secondary'));
+    row.appendChild(group);
     return row;
   }
   function bindingRow(spec) {
@@ -4277,11 +4299,134 @@
   function assignCameraBinding(view) {
     if(!view||readOnly())return;
     if(!view.viewId){
-      const used=cameras().map(c=>c.viewId).concat(bindingsList().map(b=>b.viewId));
+      const used=cameras().map(c=>c.viewId).concat(XPLANE ? [] : bindingsList().map(b=>b.viewId));
       let id=1;while(used.indexOf(id)>=0)id++;
+      if(XPLANE && id>30){
+        const body=openDialog('No X-Plane view command available');
+        body.appendChild(make('p','All 30 view IDs are in use. Free an ID from 1 to 30 in another camera before assigning this one.'));
+        dialogActions([['Close',()=>closeDialog()]]);return;
+      }
       view.viewId=id;saveCamera(view);renderDetails();renderTree();
     }
     assignDialog({action:'selectView',viewId:view.viewId,name:view.name,detail:'View ID '+view.viewId});
+  }
+  function xpAssignmentDialog(spec) {
+    const body = openDialog('Assign X-Plane key - ' + spec.name);
+    $('mc-dialog-shade').classList.add('mc-binding-shade');
+    const nativeCommand = xpCommand(spec.action, spec.viewId);
+    dialogActions([['Done', () => closeDialog()]]);
+    if (!nativeCommand || spec.action !== 'selectView') {
+      body.appendChild(make('p', 'Choose an unused camera view ID from 1 to 30, then save the camera.'));
+      nextFrame(fitAssignmentDialog); return;
+    }
+    body.appendChild(make('p', 'Assign a native X-Plane shortcut to ' + nativeCommand + '. Conflicting assignments for that key will be removed.'));
+    body.appendChild(make('p', 'Changes apply after X-Plane exits and take effect on the next launch. Close X-Plane normally and allow a few seconds before reopening it.', 'mc-note'));
+    const status = make('p', 'Loading X-Plane controls profiles...', 'mc-note'); status.id = 'mc-xp-key-status'; status.setAttribute('role', 'status');
+    body.appendChild(status);
+    const label = make('label', 'X-Plane controls profile');
+    const profiles = make('select'); profiles.id = 'mc-xp-key-profile'; profiles.setAttribute('aria-label', 'X-Plane controls profile');
+    const placeholder = make('option', 'Choose the controls profile used by your aircraft'); placeholder.value = '';
+    profiles.appendChild(placeholder); label.appendChild(profiles); body.appendChild(label);
+    const list = make('div'); list.id = 'mc-xp-key-list'; body.appendChild(list);
+    const capture = make('input'); capture.type = 'text'; capture.readOnly = true; capture.disabled = true;
+    capture.id = 'mc-xp-key-capture'; capture.className = 'mc-binding-input'; capture.placeholder = 'Press a shortcut';
+    capture.setAttribute('aria-label', 'Capture X-Plane camera shortcut'); body.appendChild(capture);
+    const preview = make('p', '', 'mc-note'); preview.id = 'mc-xp-key-preview'; body.appendChild(preview);
+    const cancel = button('Cancel pending changes for this controls profile', () => mutate({op:'cancel',revision}), 'mc-secondary');
+    cancel.id = 'mc-xp-key-cancel'; cancel.disabled = true; body.appendChild(cancel);
+    body.appendChild(make('p', 'Keyboard changes are saved separately from camera edits. Save any new camera or view ID changes before exiting.', 'mc-note'));
+    let selected = '', revision = null, draft = null, replace = null, sequence = 0, busy = false, inspectReady = false, pendingCount = 0;
+    const alive = () => !body.hidden && body.contains(profiles) && !profiles.closest('[hidden]') && body.contains(capture);
+    const name = key => (key.modifiers === '<NONE>' ? '' : key.modifiers.replace(/\+/g, ' + ') + ' + ') + key.key;
+    const api = async payload => {
+      if (!window.xplane || typeof window.xplane.fscsKeys !== 'function') throw new Error('This plugin build has no native key writer. Install the complete updated XPCS plugin and restart X-Plane.');
+      const result = await window.xplane.fscsKeys(payload);
+      if (!result || !result.ok) throw new Error(result && result.error || 'X-Plane did not confirm the keyboard request.');
+      return result;
+    };
+    const reset = () => { sequence++; draft = null; replace = null; capture.value = ''; preview.textContent = ''; assign.disabled = true; };
+    const controls = () => {
+      profiles.disabled = busy; capture.disabled = busy || !selected || !inspectReady;
+      list.querySelectorAll('button').forEach(b => { b.disabled = busy; });
+      assign.disabled = busy || !draft;
+      cancel.disabled = busy || !selected || !pendingCount;
+    };
+    const showResult = result => {
+      revision = result.revision; pendingCount = result.pendingCount;
+      cancel.disabled = busy || !selected || !result.pendingCount;
+      const errors = result.lastResult && result.lastResult.errors || [];
+      const error = errors.find(e => e.profile === selected);
+      status.textContent = result.pending ? 'Pending restart: queued keys below will be written after X-Plane exits.' :
+        error ? 'Last apply failed: ' + error.message :
+        'Native shortcuts below are read from the last saved controls profile.';
+    };
+    async function refresh() {
+      reset(); inspectReady = false; controls(); empty(list);
+      if (!selected) { status.textContent = 'Choose the X-Plane controls profile to change.'; cancel.disabled = true; return; }
+      status.textContent = 'Reading native shortcuts...';
+      const ticket = sequence, profile = selected;
+      try {
+        const result = await api({op:'inspect',profile,command:nativeCommand});
+        if (!alive() || ticket !== sequence) return;
+        inspectReady = true; showResult(result);
+        list.appendChild(make('div', 'Native shortcuts (including pending changes)', 'mc-section-label'));
+        if (!result.bindings.length) list.appendChild(make('p', 'No native shortcut assigned.', 'mc-note'));
+        result.bindings.forEach(key => {
+          const row = make('div', undefined, 'mc-xp-key-row'); row.appendChild(make('span', name(key)));
+          row.appendChild(button('Change', () => {
+            reset(); replace = key; preview.textContent = 'Replacing ' + name(key) + '. Press the new shortcut.'; capture.focus();
+          }, 'mc-secondary'));
+          row.appendChild(button('Remove', () => mutate({op:'remove',key,revision}), 'mc-secondary'));
+          list.appendChild(row);
+        });
+        list.appendChild(button('Add another key', () => {reset();capture.focus();}, 'mc-secondary'));
+      } catch (error) { if (alive() && ticket === sequence) status.textContent = error.message; }
+      if (alive()) { controls(); nextFrame(fitAssignmentDialog); }
+    }
+    async function mutate(payload) {
+      if (busy || !selected) return;
+      busy = true; sequence++; controls();
+      try {
+        const result = await api(Object.assign({profile:selected,command:nativeCommand}, payload));
+        if (!alive()) return;
+        busy = false; showResult(result); await refresh();
+      } catch (error) {
+        if (!alive()) return;
+        busy = false; draft = null; status.textContent = error.message; controls(); nextFrame(fitAssignmentDialog);
+      }
+    }
+    dialogActions([['Done', () => closeDialog()], ['Assign after exit', () => {
+      if (draft) mutate({op:'assign',input:draft.input,review:draft.review,replace});
+    }, 'mc-primary']]);
+    const assign = $('mc-dialog-actions').lastElementChild; assign.id = 'mc-xp-key-assign'; assign.disabled = true;
+    profiles.addEventListener('change', () => {selected = profiles.value; S.xpKeysProfile = selected; refresh();});
+    capture.addEventListener('keydown', async event => {
+      if (event.key === 'Escape' || event.key === 'Tab') return;
+      event.preventDefault(); event.stopPropagation();
+      if (busy || event.repeat) return;
+      const code = captureCode(event);
+      if (/^(Shift|Control|Alt|Meta)(Left|Right)$/.test(code)) return;
+      const input = {code,ctrl:event.ctrlKey,alt:event.altKey,shift:event.shiftKey,meta:event.metaKey};
+      const ticket = ++sequence; draft = null; assign.disabled = true;
+      try {
+        const result = await api({op:'preview',profile:selected,command:nativeCommand,input,replace});
+        if (!alive() || ticket !== sequence) return;
+        capture.value = name(result.key);
+        const conflicts = result.owners.filter(owner => owner !== nativeCommand);
+        preview.textContent = (conflicts.length ? 'Will remove ' + capture.value + ' from: ' + conflicts.join(', ') + '. ' : 'No conflicting command in the saved profile. ') +
+          (replace ? 'Will replace ' + name(replace) + '. ' : '') + 'Will assign ' + nativeCommand + ' after exit.';
+        draft = {input,review:result.review}; assign.disabled = false;
+      } catch (error) { if (alive() && ticket === sequence) preview.textContent = error.message; }
+      if (alive()) nextFrame(fitAssignmentDialog);
+    });
+    api({op:'profiles'}).then(result => {
+      if (!alive()) return;
+      result.profiles.forEach(p => { const option = make('option', p.name); option.value = p.id; profiles.appendChild(option); });
+      showResult(result);
+      if (result.profiles.some(p => p.id === S.xpKeysProfile)) profiles.value = S.xpKeysProfile;
+      selected = profiles.value; refresh();
+    }).catch(error => {if(alive())status.textContent = error.message;});
+    nextFrame(fitAssignmentDialog);
   }
   function fitAssignmentDialog() {
     const shade=$('mc-dialog-shade');
@@ -4298,6 +4443,7 @@
   }
   window.addEventListener('resize',()=>nextFrame(fitAssignmentDialog));
   function assignDialog(spec) {
+    if (XPLANE) { xpAssignmentDialog(spec); return; }
     spec = Object.assign({slot:'primary'}, spec);
     const existing = findBinding(spec.action, spec.viewId, spec.slot);
     // Closing the dialog always hands the keyboard back to the simulator.

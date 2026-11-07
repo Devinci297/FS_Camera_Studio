@@ -17,7 +17,7 @@ using json = nlohmann::json;
 
 constexpr int kProtocolVersion = 2;
 constexpr std::size_t kChunkChars = 4000;
-constexpr std::size_t kMaxMessageBytes = 2u << 20;
+constexpr std::size_t kMaxMessageBytes = 8u << 20;
 
 enum class AckStatus { Accepted, Completed, Rejected, Cancelled, TimedOut, Pending };
 std::string_view toString(AckStatus s);

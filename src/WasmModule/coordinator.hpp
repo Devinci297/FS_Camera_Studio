@@ -418,6 +418,10 @@ private:
         core::Vec3 chaseOffset{NAN, NAN, NAN};
         core::Vec3 chaseSmoothed{NAN, NAN, NAN}, chaseRate;  // critically damped chase offset and its rate
         double fovRad = NAN;
+        core::Vec3 manualOffset;  // temporary world north/east/down, never written to the profile
+        core::TemporaryLook manualLook;
+        core::ManualMover manualMover;
+        bool manuallyAdjusted = false;
         double runwayCheckAt = 0, cameraSince = 0;
         std::optional<traffic::RunwaySpot> runway;  // computed runway view: the runway spot shown
         bool pinned = false;                        // ... chosen by SpotTarget.spot: never re-picked
@@ -439,6 +443,11 @@ private:
     void updateSpot(double dt, double now);
     void placeSpotOverlay(double dt, double now);
     void submitSpotOverlay();
+    bool manualCameraReady() const;
+    void adjustSpot(double heading, double pitch, const core::Vec3& movement, double zoom = 0);
+    void updateSpotManual(double dt);
+    void applySpotAdjustments(SdkPose& pose);
+    void recenterSpot();
     // Drops spotting and tells the host (SpotStopped): `manual` for another recall, `released` for a loss of control.
     void endSpot(const std::string& reason, bool manual, bool released);
 };

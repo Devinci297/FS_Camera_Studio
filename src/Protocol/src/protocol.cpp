@@ -65,21 +65,25 @@ json makeEvent(std::string_view name, std::uint64_t seq, const std::string& boot
 
 std::vector<std::string> chunk(const std::string& text, const std::string& msgId) {
     if (text.size() <= kChunkChars) return {text};
-    std::vector<std::string> out;
-    // Never split inside a UTF-8 sequence: back off to a lead byte.
-    std::vector<std::pair<std::size_t, std::size_t>> ranges;
-    std::size_t pos = 0;
-    while (pos < text.size()) {
-        std::size_t end = std::min(text.size(), pos + kChunkChars);
-        while (end < text.size() && end > pos && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) --end;
-        ranges.emplace_back(pos, end - pos);
-        pos = end;
+    std::vector<std::string> pieces;
+    const std::string id=js::dump(json(msgId));
+    std::size_t pos=0;
+    while(pos<text.size()) {
+        std::size_t length=std::min<std::size_t>(3000,text.size()-pos);
+        std::string escaped;
+        for(;;) {
+            auto end=pos+length;
+            while(end<text.size() && end>pos && (static_cast<unsigned char>(text[end])&0xC0)==0x80)--end;
+            escaped=js::dump(json(text.substr(pos,end-pos)));
+            // Include JSON escaping and the envelope, not just raw payload bytes.
+            if(escaped.size()+id.size()+80<=kChunkChars || length<4) {pos=end;break;}
+            length=length*4/5;
+        }
+        pieces.push_back(std::move(escaped));
     }
-    // Written by hand so "part" leads, matching the JS side (nlohmann would sort keys alphabetically).
-    const std::string id = js::dump(json(msgId));
-    for (std::size_t i = 0; i < ranges.size(); ++i)
-        out.push_back("{\"part\":" + std::to_string(i) + ",\"of\":" + std::to_string(ranges.size()) + ",\"msgId\":" + id +
-                      ",\"chunk\":" + js::dump(json(text.substr(ranges[i].first, ranges[i].second))) + "}");
+    std::vector<std::string> out;
+    for(std::size_t i=0;i<pieces.size();++i)
+        out.push_back("{\"part\":"+std::to_string(i)+",\"of\":"+std::to_string(pieces.size())+",\"msgId\":"+id+",\"chunk\":"+pieces[i]+"}");
     return out;
 }
 
@@ -92,7 +96,7 @@ std::optional<std::string> Reassembler::feed(const std::string& piece, double no
     const std::string id = js::str(j, "msgId");
     const auto part = js::integer(j, "part", -1), of = js::integer(j, "of", -1);
     const json& chunkText = js::get(j, "chunk");
-    if (id.empty() || id.size() > 96 || of < 1 || of > 1024 || part < 0 || part >= of || !chunkText.is_string()) return std::nullopt;
+    if (id.empty() || id.size() > 96 || of < 1 || of > 8192 || part < 0 || part >= of || !chunkText.is_string()) return std::nullopt;
     auto& p = partial_[id];
     if (p.parts.empty()) {
         p.parts.resize(static_cast<std::size_t>(of));

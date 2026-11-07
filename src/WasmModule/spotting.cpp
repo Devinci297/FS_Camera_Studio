@@ -331,6 +331,11 @@ void ModuleApp::updateSpotting(double now) {
 }
 
 bool ModuleApp::spottingEvent(const std::string& name, json& payload) {
+    if (name == "SpotAdjusted") {
+        stopAutoSpot("The spotting camera was adjusted manually.");
+        emitSpotting();
+        return true;
+    }
     if (name == "SpotStopped") {
         spotReason_ = js::str(payload, "reason");
         // Another recall, Release, Panic and a loss of control end auto-spot too.

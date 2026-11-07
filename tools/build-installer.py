@@ -94,8 +94,9 @@ def build(args):
     shutil.copy2(ROOT / 'output/pdf/FS-Camera-Studio-Manual.pdf', stage / 'FS-Camera-Studio-Manual.pdf')
     (stage / 'AFTER-INSTALL.txt').write_text(
         'Installation complete.\n\nMSFS 2024: open Camera Studio from the toolbar.\n'
-        'X-Plane 12: Plugins > XP Camera Studio > Editor. Assign keys to the xpcs/ commands\n'
-        'in X-Plane\'s Keyboard settings (the Bindings tab lists them).\n'
+        'X-Plane 12: Plugins > XP Camera Studio > Editor. Use Assign key binding for cameras.\n'
+        'Choose your controls profile, review conflicts and choose Assign after exit.\n'
+        'Native camera keys take effect on the next X-Plane launch. Other keys/buttons: X-Plane Settings.\n'
         'Airport creation: Camera library + > Create airport cameras.\n'
         'WASD follows your view; Q/E changes height; Shift boosts movement.\n'
         'Ctrl+S saves. Bindings are customizable.\n\n'
@@ -164,9 +165,9 @@ def build(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='0.5.0')
-    parser.add_argument('--package', default='build/release/0.5.0/fs-camera-studio')
-    parser.add_argument('--receipt', default='build/release/0.5.0/staged.json')
+    parser.add_argument('--version', default='0.5.1')
+    parser.add_argument('--package', default='build/release/0.5.1/fs-camera-studio')
+    parser.add_argument('--receipt', default='build/release/0.5.1/staged.json')
     parser.add_argument('--xplane', default='build-xp/XPCameraStudio', help='The built X-Plane plugin folder (win_x64 and ui).')
     parser.add_argument('--compiler', default='build/installer-tools/inno/ISCC.exe')
     parser.add_argument('--test-harness', action='store_true', help='Internal lifecycle test build, always under build/, never dist/. Uses a named test process guard.')

@@ -80,9 +80,9 @@ TEST_CASE("airports: tower preserves scenery position or provides a labeled stab
 
 TEST_CASE("airports: large airports reserve a tower slot and regeneration adds it without replacing views") {
  auto f=airportFixture();f["parking"]=json::array();f.erase("tower");
- for(std::size_t n=0;n<kMaxCameras+10;++n)f["parking"].push_back({{"name","Parking "+std::to_string(n)},{"key",std::to_string(n)},{"north",100},{"east",100},{"heading",0}});
+ for(std::size_t n=0;n<ap::kMaxGeneratedCameras+10;++n)f["parking"].push_back({{"name","Parking "+std::to_string(n)},{"key",std::to_string(n)},{"north",100},{"east",100},{"heading",0}});
  std::vector<std::string> notes;const json opts={{"runways",false},{"taxi",false}};
- auto p=ap::generate(f,opts,notes);CHECK(validateProfile(p).ok());CHECK_EQ(p["cameras"].size(),kMaxCameras);
+ auto p=ap::generate(f,opts,notes);CHECK(validateProfile(p).ok());CHECK_EQ(p["cameras"].size(),ap::kMaxGeneratedCameras);CHECK(p["cameras"].size()<kMaxCameras);
  CHECK_EQ(p["cameras"].back()["generatedKey"],json("tower"));
  f=airportFixture();f.erase("tower");auto withoutTower=ap::generate(f,{{"tower",false}},notes);
  withoutTower["cameras"][0]["name"]="My edited view";

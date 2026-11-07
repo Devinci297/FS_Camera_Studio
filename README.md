@@ -6,16 +6,17 @@ toolbar or menu, with a mini control panel at the bottom of the screen. The X-Pl
 **XP Camera Studio**; it runs the same module logic and the same editor and mini panel (see
 [X-Plane 12](#x-plane-12-xp-camera-studio)).
 
-**Version 0.5.0:** one Windows installer for Microsoft Flight Simulator 2024, X-Plane 12, or both.
-Installed and tested successfully in both simulators by the release tester on November 7, 2026.
+**Version 0.5.1:** one Windows installer for Microsoft Flight Simulator 2024, X-Plane 12, or both.
+Adds native X-Plane camera-key assignment, traffic-camera adjustment and a 2,000-camera profile limit.
+Automated validation is recorded below; live acceptance of these patch changes is pending.
 The MSFS build uses SDK 1.8.1; XP Camera Studio requires X-Plane 12.4.4 or newer on Windows x64.
 Both simulators share one version number and one update check.
 
-[Download 0.5.0](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.5.0)
+[Download 0.5.1](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.5.1)
 for the Windows installer, illustrated manual, example profile and checksums.
 
-See the [release notes](doc/releases/0.5.0.md) and
-[validation record](doc/test-evidence/2026-11-07-v0.5.0.md) for automated checks, live acceptance and known limits.
+See the [release notes](doc/releases/0.5.1.md) and
+[validation record](doc/test-evidence/2026-11-07-v0.5.1.md) for automated checks, live acceptance and known limits.
 Aircraft-specific camera poses and controller setups can still need adjustment; see
 [`doc/qualification.md`](doc/qualification.md).
 
@@ -38,7 +39,8 @@ FSCameraStudio.wasm — standalone module loaded by MSFS from the package
                   WASM Camera API (fsCamera*) — the only camera writer
 ```
 
-There is no desktop app, background service or external process. Both panels are mirrors of one authoritative
+MSFS needs no desktop app, background service or external process. X-Plane includes a small helper
+that applies queued native keyboard assignments after the simulator exits. Both panels are mirrors of one authoritative
 state held in the module, so the editor and the mini panel always agree.
 
 In X-Plane 12 the same module and UI run inside a native plugin:
@@ -56,7 +58,8 @@ XPCameraStudio.xpl — X-Plane plugin, run from a flight loop
 * **Safety first:** the module starts in *Observing* and never moves the view on its own. Release Camera is always
   available (both panels and a binding). If anything goes wrong — another add-on takes the camera, the sim takes
   over, a release can't be confirmed — it stops writing and hands control back.
-* **Profiles** are matched to the loaded aircraft by its package (liveries keep the same profile). Saves are one
+* **Profiles** support up to **2,000 cameras**; airport generation remains capped at 500 to leave room for
+  personal views. Profiles are matched to the loaded aircraft by its package (liveries keep the same profile). Saves are one
   transaction (profile + settings + bindings), written to one of two checksummed slots and verified by readback, so
   an interrupted save can never damage the last good one. Five backups per profile.
   Each aircraft also gets a readable, importable JSON file alongside these recovery slots; see
@@ -105,7 +108,11 @@ Everything above works the same in X-Plane, with these differences:
   `xpcs/toggle_mini`. The editor can be popped out to its own window; the mini panel shows on hover at the bottom.
 * **Bindings are X-Plane commands.** Every action is an `xpcs/` command (`xpcs/view_1` to `xpcs/view_30`,
   `xpcs/peek_1` to `xpcs/peek_30`, `xpcs/next_camera`, `xpcs/spot_next` and so on). The Bindings tab lists each one
-  with **Copy**; assign keys and buttons in X-Plane's Keyboard and Joystick settings. Read-only datarefs
+  with **Copy**. Camera-view keys can also be assigned directly: choose **Assign key binding**, select
+  your X-Plane controls profile, review conflicts, then **Assign after exit**. The bundled helper backs up the
+  native preferences and replaces conflicting assignments after X-Plane closes; keys take effect next launch.
+  Other keys and controller buttons use X-Plane's Keyboard and Joystick settings. See
+  [native camera-key assignment](doc/xplane-camera-bindings.md). Read-only datarefs
   (`xpcs/camera_active`, `xpcs/active_view`, `xpcs/active_camera`, `xpcs/fov_deg` and more) are published for
   cockpit builders and scripts.
 * **Cameras:** cockpit views move the pilot's head, so the 3D cockpit stays clickable; exterior, orbit, fly-by,
@@ -130,7 +137,7 @@ The app bar displays the version; click it for update detection and the installe
 Close MSFS before installing an update. Saved airport cameras load automatically within the configured radius
 (25 NM by default); other airports get a temporary set until you save it. Auto switch is a separate viewpoint control.
 
-### Reproduce version 0.5.0
+### Reproduce version 0.5.1
 
 The reviewed simulator host is frozen in `package/validated-host`, with hashes in
 `package/validated-host.json`. It is refreshed from the compiled package of the release commit, the same
@@ -138,30 +145,30 @@ The reviewed simulator host is frozen in `package/validated-host`, with hashes i
 plugin is built at the same version and goes into the same setup.
 
 ```powershell
-python tools/diagnostics/stage-v0.5.py --freeze
+python tools/diagnostics/stage-v0.5.1.py --freeze
 cmake --preset tests; cmake --build --preset tests; ctest --preset tests
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.5.0
-tools\package.ps1 -Compile -Wasm build/wasm/release-0.5.0/FSCameraStudio.wasm -OutputDirectory build/release-0.5.0-compile
-python tools/diagnostics/stage-v0.5.py --host build/release-0.5.0-compile/Packages/fs-camera-studio
-python tools/diagnostics/stage-v0.5.py
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.5.1
+tools\package.ps1 -Compile -Wasm build/wasm/release-0.5.1/FSCameraStudio.wasm -OutputDirectory build/release-0.5.1-compile
+python tools/diagnostics/stage-v0.5.1.py --host build/release-0.5.1-compile/Packages/fs-camera-studio
+python tools/diagnostics/stage-v0.5.1.py
 cmake -S . -B build-xp -G "Visual Studio 17 2022" -A x64 -DFSCS_BUILD_XPLANE=ON
 cmake --build build-xp --config Release --target xpcs_plugin
 node tools/capture-manual.cjs
 python tools/build-manual.py
-python tools/build-installer.py --version 0.5.0 --package build/release/0.5.0/fs-camera-studio --receipt build/release/0.5.0/staged.json --xplane build-xp/XPCameraStudio
-python tools/build-installer.py --test-harness --version 0.5.0 --package build/release/0.5.0/fs-camera-studio --receipt build/release/0.5.0/staged.json --xplane build-xp/XPCameraStudio
-python tools/test-installer.py --test-harness --version 0.5.0
+python tools/build-installer.py --version 0.5.1 --package build/release/0.5.1/fs-camera-studio --receipt build/release/0.5.1/staged.json --xplane build-xp/XPCameraStudio
+python tools/build-installer.py --test-harness --version 0.5.1 --package build/release/0.5.1/fs-camera-studio --receipt build/release/0.5.1/staged.json --xplane build-xp/XPCameraStudio
+python tools/test-installer.py --test-harness --version 0.5.1
 ```
 
-See [release notes](doc/releases/0.5.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
-and the bundled illustrated manual. [0.5.0 release evidence and live checks](doc/test-evidence/2026-11-07-v0.5.0.md)
+See [release notes](doc/releases/0.5.1.md), [A320 starter guidance](doc/A320-starter-profile.md)
+and the bundled illustrated manual. [0.5.1 release evidence and live checks](doc/test-evidence/2026-11-07-v0.5.1.md)
 separate automated verification from simulator acceptance. Earlier tester recipes remain available in their Git tags.
 
 Install ReportLab for manual generation and obtain Inno Setup with `tools/get-installer-compiler.ps1`.
 `package/validated-host` freezes the reviewed toolbar host, including compiled panel definitions;
 its receipt is `package/validated-host.json`. The release stage uses this reviewed host, current version metadata and the rebuilt module.
-Refresh the host only from a compiled package that has been loaded in a flight, and commit the refreshed host and
-receipt with the release. The generated receipt,
+Refresh the host from the compiled release package and commit it with its receipt. Record automated checks
+and live simulator acceptance separately; do not carry acceptance from an earlier build forward. The generated receipt,
 installer and PDF are under `build/release`, `dist` and `output/pdf` respectively. Nothing is installed by these commands.
 
 For a shareable Windows tester setup, see [`installer/README.md`](installer/README.md).

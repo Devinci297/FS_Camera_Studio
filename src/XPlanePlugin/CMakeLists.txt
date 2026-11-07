@@ -16,7 +16,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PROJECT_SOURCE
 set_target_properties(fscs_core fscs_profiles fscs_protocol fscs_modulelib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_library(xpcs_plugin MODULE plugin_main.cpp xp_airports.cpp xp_camera.cpp xp_mouse.cpp xp_panels.cpp xp_storage.cpp
-    xp_traffic.cpp)
+    xp_traffic.cpp xp_key_bindings.cpp)
 find_package(Threads REQUIRED)  # the apt.dat index runs on a worker thread
 target_link_libraries(xpcs_plugin PRIVATE fscs_modulelib fscs_json Threads::Threads)
 target_include_directories(xpcs_plugin SYSTEM PRIVATE "${FSCS_XPSDK_DIR}/CHeaders/XPLM")
@@ -52,6 +52,20 @@ set_target_properties(xpcs_plugin PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${XPCS_PLUGIN_DIR}/${XPCS_PLATFORM_DIR}"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${XPCS_PLUGIN_DIR}/${XPCS_PLATFORM_DIR}")
 
+# A helper waits on the simulator process handle, then merges native keyboard assignments after its final save.
+if(WIN32)
+    add_executable(xpcs_key_helper xp_key_worker.cpp xp_key_bindings.cpp)
+    target_link_libraries(xpcs_key_helper PRIVATE fscs_json)
+    set_target_properties(xpcs_key_helper PROPERTIES OUTPUT_NAME XPCSKeyHelper
+        RUNTIME_OUTPUT_DIRECTORY "${XPCS_PLUGIN_DIR}/win_x64"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${XPCS_PLUGIN_DIR}/win_x64"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${XPCS_PLUGIN_DIR}/win_x64")
+    add_dependencies(xpcs_plugin xpcs_key_helper)
+    add_executable(xpcs_key_service_driver tests/key_service_driver.cpp xp_key_bindings.cpp)
+    target_link_libraries(xpcs_key_service_driver PRIVATE fscs_json)
+    target_include_directories(xpcs_key_service_driver PRIVATE .)
+endif()
+
 # The shared UI, without its tests, next to the plugin binary.
 add_custom_command(TARGET xpcs_plugin POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${XPCS_PLUGIN_DIR}/ui"
@@ -76,3 +90,8 @@ endif()
 add_executable(xpcs_xcamera_convert ../../tools/xcamera_convert.cpp xp_storage.cpp)
 target_link_libraries(xpcs_xcamera_convert PRIVATE fscs_profiles fscs_json)
 target_include_directories(xpcs_xcamera_convert PRIVATE .)
+
+add_executable(xpcs_key_tests tests/test_key_bindings.cpp ../../tests/main.cpp xp_key_bindings.cpp)
+target_link_libraries(xpcs_key_tests PRIVATE fscs_json)
+target_include_directories(xpcs_key_tests PRIVATE . ../../tests)
+add_test(NAME xpcs_key_tests COMMAND xpcs_key_tests)

@@ -8,6 +8,7 @@
 #include "xp_camera.hpp"
 #include "xp_geometry.hpp"
 #include "xp_mouse.hpp"
+#include "xp_key_bindings.hpp"
 #include "xp_panels.hpp"
 #include "xp_storage.hpp"
 #include "xp_traffic.hpp"
@@ -80,6 +81,7 @@ struct Host {
     xplane::XPServices services;
     std::unique_ptr<xplane::XPStorage> storage;
     xplane::PanelWindows panels;
+    std::unique_ptr<xplane::keys::Service> keys;
     std::unique_ptr<xplane::MouseLook> mouse;
     xplane::apt::Database airports;
     bool airportsLogged = false;
@@ -445,6 +447,12 @@ bool startHost() {
     findTelemetry(g->tel);
 
     const std::string index = toUtf8(xplane::pathFromUtf8(g_pluginFolder) / "ui" / "index.html");
+    g->keys=std::make_unique<xplane::keys::Service>(folderOf(prefsPath),
+        xplane::pathFromUtf8(g_pluginFolder)/"win_x64"/"XPCSKeyHelper.exe");
+    g->panels.nativeKeys=[](const std::string& request) { return g->keys->request(request); };
+    // Resume any pending transaction from an earlier session; the helper still waits for this process to exit.
+    const auto keyStatus=nlohmann::json::parse(g->keys->request("{\"op\":\"profiles\"}"),nullptr,false);
+    if(keyStatus.is_object() && !keyStatus.value("ok",false))log("native keys: "+keyStatus.value("error",std::string()));
     g->panels.init(xplane::fileUrl(index), &onInbound);
     g->panelState = storageRoot / "panels.json";
     g->services.toPanels = [](const std::string& text) { if (g) g->panels.post(text); };

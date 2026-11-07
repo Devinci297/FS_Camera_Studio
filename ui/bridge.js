@@ -29,7 +29,7 @@
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const CHUNK_TRIGGER = 4000;
   const CHUNK_TTL_MS = 5000;
-  const CHUNK_MAX_TOTAL = 2 * 1024 * 1024;
+  const CHUNK_MAX_TOTAL = 8 * 1024 * 1024;
   const HELLO_RETRY_MS = 2000;
   const LEASE_MS = 2000;
   const ACK_TIMEOUT_MS = 15000;
@@ -483,7 +483,7 @@
     const nameOk = n => typeof n === 'string' && n.trim().length >= 1 && n.length <= 60;
     if (!nameOk(p.name)) return 'Profile names need 1-60 characters.';
     if (!Array.isArray(p.categories) || !Array.isArray(p.cameras)) return 'The profile is incomplete.';
-    if (p.cameras.length > 500) return 'A profile can hold up to 500 cameras.';
+    if (p.cameras.length > 2000) return 'A profile can hold up to 2,000 cameras.';
     if (p.categories.length > 100) return 'A profile can hold up to 100 categories.';
     const ids = new Set(), seen = new Map(), views = new Set();
     for (const category of p.categories) {

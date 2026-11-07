@@ -413,15 +413,18 @@ json Coordinator::handle(const protocol::Command& c, double now) {
         return ack(c,AckStatus::Accepted);
     }
     if (c.action == "MouseLookDelta") {
-        if (state_ != Ownership::Active || !eligibleToSubmit()) return ack(c, AckStatus::Rejected, "Select a camera before using mouse look.");
+        if (!manualCameraReady()) return ack(c, AckStatus::Rejected, "Select a camera before using mouse look.");
         const double heading = js::num(p, "headingDeg", 0), pitch = js::num(p, "pitchDeg", 0);
         if (!std::isfinite(heading) || !std::isfinite(pitch) || std::abs(heading) > 45 || std::abs(pitch) > 45)
             return ack(c, AckStatus::Rejected, "Invalid mouse movement.");
         const double right = js::num(p, "rightMeters", 0), up = js::num(p, "upMeters", 0), forward = js::num(p, "forwardMeters", 0);
         if (!std::isfinite(right) || !std::isfinite(up) || !std::isfinite(forward) || std::abs(right) > .5 || std::abs(up) > .5 || std::abs(forward) > .5)
             return ack(c, AckStatus::Rejected, "Invalid mouse translation.");
-        engine_.offsetLook(heading * binocularsLookScale_, pitch * binocularsLookScale_);
-        engine_.offsetPosition({forward, right, -up});
+        if (spot_) adjustSpot(heading * binocularsLookScale_, pitch * binocularsLookScale_, {forward, right, -up});
+        else {
+            engine_.offsetLook(heading * binocularsLookScale_, pitch * binocularsLookScale_);
+            engine_.offsetPosition({forward, right, -up});
+        }
         emitLook(now);
         return ack(c, AckStatus::Completed);
     }
@@ -473,6 +476,7 @@ json Coordinator::handle(const protocol::Command& c, double now) {
         return ack(c, AckStatus::Completed);
     }
     if (c.action == "RecenterLook") {
+        if (spot_) { recenterSpot(); return ack(c, AckStatus::Completed); }
         engine_.recenterLook();
         resetFreeMotion();  // a drone returns to its saved place
         emitLook(now, true);
@@ -667,7 +671,7 @@ void Coordinator::startTransition(const CameraEntry& cam, bool cut) {
 
 void Coordinator::cancelMouseDrag() {
     // Pointer/focus cancellation is also a gesture end: do not strand a temporary look.
-    if(mouseMoved_ && mouseCameraId_==activeCameraId_) {
+    if(!spot_ && mouseMoved_ && mouseCameraId_==activeCameraId_) {
         if(const auto* cam=activeEntry();cam&&cam->resetMouseLookOnRelease)engine_.recenterLook();
     }
     mouseHeld_=mouseMoved_=false; mouseHeadingPending_=mousePitchPending_=0;
@@ -871,12 +875,12 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                 // A repeated down notification is still the same gesture. Resetting its easing
                 // accumulator here would drop motion and make a steady drag intermittently stop.
                 if (e.down && mouseHeld_) return;
-                if (!e.down && mouseMoved_ && mouseCameraId_ == activeCameraId_ && state_ == Ownership::Active && eligibleToSubmit()) {
+                if (!spot_ && !e.down && mouseMoved_ && mouseCameraId_ == activeCameraId_ && state_ == Ownership::Active && eligibleToSubmit()) {
                     if (const auto* camera = activeEntry(); camera && camera->resetMouseLookOnRelease) {
                         engine_.recenterLook(); emitLook(now, true);
                     }
                 }
-                mouseHeld_ = e.down && mouseMapped_ && !mouseBlocked_ && state_ == Ownership::Active && eligibleToSubmit();
+                mouseHeld_ = e.down && mouseMapped_ && !mouseBlocked_ && manualCameraReady();
                 mouseMoved_ = false;
                 mouseHeadingPending_ = mousePitchPending_ = 0; // stop immediately on release, without a settling jump
                 if (e.down) {
@@ -891,7 +895,7 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
                     {"maxRaw", mouseMaxRaw_}, {"concurrentBoundLook", mouseConcurrentLook_}});
             } else if constexpr (std::is_same_v<T, backend_event::NativeMouseAxis>) {
                 // Relative mouse counts, NOT a held joystick rate: never integrate a stale axis sample.
-                if (!mouseHeld_ || mouseBlocked_ || mouseCameraId_ != activeCameraId_ || state_ != Ownership::Active || !eligibleToSubmit() || e.delta == 0) return;
+                if (!mouseHeld_ || mouseBlocked_ || mouseCameraId_ != activeCameraId_ || !manualCameraReady() || e.delta == 0) return;
                 mouseMaxRaw_ = std::max(mouseMaxRaw_, std::abs(static_cast<double>(e.delta)));
                 if (e.delta < -32768 || e.delta > 32767) ++mouseLargeSamples_;
                 if (mouseLastSampleAt_ >= 0) mouseMaxSampleGap_ = std::max(mouseMaxSampleGap_, now - mouseLastSampleAt_);
@@ -1191,7 +1195,7 @@ void Coordinator::updateAirportAutoZoom(double dt) {
     const auto* cam = activeEntry();
     // Spotting zooms the aimed view (airport or free camera) on the target unless the camera turns auto zoom off.
     const bool spotAim = cam && spotAims(*cam);
-    if (!cam || (!spotAim && (cam->mode != profiles::CameraMode::Airport || aircraftTrackingFor(*cam) == "off" || targetAt_ < 0)) || mouseHeld_) {
+    if (!cam || (!spotAim && (cam->mode != profiles::CameraMode::Airport || aircraftTrackingFor(*cam) == "off" || targetAt_ < 0)) || (mouseHeld_ && !spotAim)) {
         airportAutoZoomFov_.reset();
         return;
     }
@@ -1375,7 +1379,8 @@ void Coordinator::submit(bool refreshTrackingPosition) {
         sdk.pitchDeg=-p.pitchDeg;sdk.bankDeg=p.bankDeg;sdk.headingDeg=p.headingDeg;
     }
     if ((cam->mode==profiles::CameraMode::Airport || spotAims(*cam)) && airportAutoZoomFov_) sdk.fovRad=*airportAutoZoomFov_;
-    sdk.fovRad = binocularsFov(sdk.fovRad, s.pose.fovRad);
+    if (spotAims(*cam)) applySpotAdjustments(sdk);
+    sdk.fovRad = binocularsFov(sdk.fovRad, spot_ ? sdk.fovRad : s.pose.fovRad);
     if (lastSubmitted_ && nearlyEqual(*lastSubmitted_, sdk)) return;
     if (backend_.submitPose(sdk)) {
         lastSubmitted_ = sdk;
@@ -1386,9 +1391,10 @@ void Coordinator::submit(bool refreshTrackingPosition) {
 
 void Coordinator::onAction(const ActionEvent& ev, double now) {
     if (ev.pulse) {
-        if (ev.pressed && eligibleToSubmit() && !mouseBlocked_ &&
+        if (ev.pressed && manualCameraReady() && !mouseBlocked_ &&
             (ev.action == Action::ZoomIn || ev.action == Action::ZoomOut)) {
-            engine_.offsetFov((ev.action == Action::ZoomIn ? -2.0 : 2.0) * core::kDegToRad);
+            const double zoom = (ev.action == Action::ZoomIn ? -2.0 : 2.0) * core::kDegToRad;
+            if (spot_) adjustSpot(0, 0, {}, zoom); else engine_.offsetFov(zoom);
             emitLook(now, true);
         }
         return;
@@ -1450,6 +1456,7 @@ void Coordinator::onAction(const ActionEvent& ev, double now) {
             break;
         case Action::RecenterLook:
             if (!ev.pressed) return;
+            if (spot_) { recenterSpot(); break; }
             engine_.recenterLook();
             resetFreeMotion();
             emitLook(now, true);
@@ -1459,7 +1466,7 @@ void Coordinator::onAction(const ActionEvent& ev, double now) {
             emit_("SurfaceRequest", {{"target", "main"}, {"op", "toggle"}});
             break;
         case Action::ToggleMouseLook:
-            if (!ev.pressed || !eligibleToSubmit()) return;
+            if (!ev.pressed || !manualCameraReady()) return;
             emit_("SurfaceRequest", {{"target", "mini"}, {"op", "mouseLook"}});
             break;
         case Action::ToggleHeadTracking:
@@ -1553,6 +1560,7 @@ void Coordinator::tick(double now) {
         return;
     }
 
+    if (spot_ && submitReady()) updateSpotManual(dt);
     if (spotBare() && submitReady()) {
         tickBareSpot(dt, now);
         return;
@@ -1576,7 +1584,7 @@ void Coordinator::tick(double now) {
         const bool mounted = effectCamera && effectCamera->mode == profiles::CameraMode::Mounted;
         mountVibration_.tick(dt, flightMotion_, mounted ? effectCamera->mountVibration : 0.,
                              mounted && motionReceivedAt_ >= 0 && now - motionReceivedAt_ < .5);
-        if (mouseHeld_ && !mouseBlocked_ && mouseCameraId_ == activeCameraId_) {
+        if (!spot_ && mouseHeld_ && !mouseBlocked_ && mouseCameraId_ == activeCameraId_) {
             ++mouseFrames_;
             mouseMaxFrameGap_ = std::max(mouseMaxFrameGap_, dt);
             mouseConcurrentLook_ = mouseConcurrentLook_ || manual_.lookRight != 0 || manual_.lookUp != 0;
@@ -1596,10 +1604,10 @@ void Coordinator::tick(double now) {
         }
         const bool manualActive = mouseHeld_ || manual_.lookRight != 0 || manual_.lookUp != 0 || manual_.moveForward != 0 ||
             manual_.moveRight != 0 || manual_.moveUp != 0 || manual_.zoomIn != 0;
-        engine_.tick(dt, effectCamera && effectCamera->mode == profiles::CameraMode::Free ? lookOnly(manual_) : manual_, movement);
-        updateFreeCamera(dt, now);
+        engine_.tick(dt, spot_ ? core::ManualInput{} : effectCamera && effectCamera->mode == profiles::CameraMode::Free ? lookOnly(manual_) : manual_, movement);
+        if (!spot_) updateFreeCamera(dt, now);
         updateGlance(now);
-        if (effectCamera && (effectCamera->mode == profiles::CameraMode::Orbit || effectCamera->mode == profiles::CameraMode::Flyby) && !engine_.transitioning() && !manualActive && !motionPaused_ && dt <= .1) {
+        if (effectCamera && (effectCamera->mode == profiles::CameraMode::Orbit || effectCamera->mode == profiles::CameraMode::Flyby) && !engine_.transitioning() && !spot_ && !manualActive && !motionPaused_ && dt <= .1) {
             motionTime_ += dt;
             engine_.animateBase(motionPose(*effectCamera));
         }
@@ -2228,6 +2236,8 @@ bool Coordinator::spotViewAvailable(traffic::SpotView view, std::uint32_t object
 
 std::optional<profiles::airport::Geo> Coordinator::spotCameraPosition() const {
     if (!spot_ || !spot_->overlay || !spot_->position.valid()) return std::nullopt;
+    if (lastSubmitted_ && lastSubmitted_->referential == Referential::World)
+        return profiles::airport::Geo{lastSubmitted_->x, lastSubmitted_->y, lastSubmitted_->z};
     return spot_->position;
 }
 
@@ -2335,8 +2345,8 @@ std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView vi
             if (spot_ && spot_->overlay && state_ == Ownership::Active && spot_->position.valid()) {
                 // Over a chase, fly-by or computed view: stay where that camera is and keep aiming.
                 next.overlay = next.fixed = true;
-                next.position = spot_->position;
-                next.fovRad = spot_->fovRad;
+                next.position = spotCameraPosition().value_or(spot_->position);
+                next.fovRad = lastSubmitted_ ? lastSubmitted_->fovRad : spot_->fovRad;
             } else if (cam && !(spot_ && spot_->overlay) &&
                        (cam->mode == profiles::CameraMode::Airport || cam->mode == profiles::CameraMode::Free)) {
                 cameraId = cam->id;
@@ -2383,6 +2393,8 @@ std::string Coordinator::spotTarget(std::uint32_t objectId, traffic::SpotView vi
         next.chaseSmoothed = spot_->chaseSmoothed;
         next.chaseRate = spot_->chaseRate;
     }
+    cancelMouseDrag();
+    engine_.freeze();
     spot_ = std::move(next);
     spotReason_.clear();
     lastSubmitted_.reset();
@@ -2448,6 +2460,7 @@ void Coordinator::endSpot(const std::string& reason, bool manual, bool released)
         return;
     }
     const bool aboveGround = spot_->aboveGround;
+    cancelMouseDrag();
     spot_.reset();
     spotReason_ = reason;
     lastSubmitted_.reset();  // the view underneath is shown again
@@ -2489,7 +2502,7 @@ void Coordinator::updateSpot(double dt, double now) {
         return;
     }
     // Runway view: follow the target to the best runway end or runway view, with a margin and a minimum dwell.
-    if (spot_->view == traffic::SpotView::Runway && !spot_->lost && !spot_->pinned && now >= spot_->runwayCheckAt) {
+    if (spot_->view == traffic::SpotView::Runway && !spot_->lost && !spot_->pinned && !spot_->manuallyAdjusted && now >= spot_->runwayCheckAt) {
         spot_->runwayCheckAt = now + kSpotRunwayRecheckSeconds;
         if (spot_->runway) {
             const auto* current = traffic::findRunwayEnd(spotAirports_, spot_->runway->icao, spot_->runway->runwayEnd);
@@ -2555,7 +2568,7 @@ void Coordinator::placeSpotOverlay(double dt, double now) {
     if (s.view == traffic::SpotView::Flyby && !s.fixed) {
         // Stationary ahead of the target; placed again once it has passed and is well beyond. The terrain floor applies
         // when it is placed only, so the camera never moves while the target comes past.
-        if (!s.position.valid() || (!hold && traffic::flybyPassed(s.position, t))) {
+        if (!s.position.valid() || (!hold && !s.manuallyAdjusted && traffic::flybyPassed(s.position, t))) {
             s.position = traffic::flybyPosition(t);
             if (std::isfinite(floor) && s.position.valid()) s.position.altitude = std::max(s.position.altitude, floor);
             s.fovRad = NAN;  // a cut: frame the target afresh
@@ -2571,6 +2584,78 @@ void Coordinator::placeSpotOverlay(double dt, double now) {
     const double wanted = traffic::autoZoomFov(std::max(distance, .5), frame, minimum, maximum);
     if (!std::isfinite(s.fovRad)) s.fovRad = wanted;
     else if (!motionPaused_ && dt > 0) s.fovRad = traffic::easeFov(core::clamp(s.fovRad, minimum, maximum), wanted, std::min(dt, .1), response);
+}
+
+bool Coordinator::manualCameraReady() const {
+    return submitReady() && (spot_.has_value() || !activeCameraId_.empty());
+}
+
+void Coordinator::adjustSpot(double heading, double pitch, const core::Vec3& movement, double zoom) {
+    if (!spot_ || !manualCameraReady() || !lastSubmitted_ || lastSubmitted_->referential != Referential::World) return;
+    if (!std::isfinite(heading) || !std::isfinite(pitch) || !movement.finite() || !std::isfinite(zoom)) return;
+    if (heading == 0 && pitch == 0 && movement.length() == 0 && zoom == 0) return;
+    auto& s = *spot_;
+    const auto& shown = *lastSubmitted_;
+    // Forward/right follow the visible view; vertical movement stays world vertical.
+    const auto orientation = core::Quat::fromPbh({-shown.pitchDeg, shown.bankDeg, shown.headingDeg});
+    s.manualOffset += orientation.rotate({movement.x, movement.y, 0}) + core::Vec3{0, 0, movement.z};
+    const double distance = s.manualOffset.length();
+    if (distance > 5000) s.manualOffset = s.manualOffset * (5000 / distance);
+    s.manualLook.headingDeg = core::wrapDeg(s.manualLook.headingDeg + heading);
+    s.manualLook.pitchDeg += core::clamp(-shown.pitchDeg + pitch, -89., 89.) + shown.pitchDeg;
+    s.manualLook.pitchDeg = core::clamp(s.manualLook.pitchDeg, -178., 178.);
+    s.manualLook.fovDeltaRad = core::clamp(s.manualLook.fovDeltaRad + zoom, -core::kMaxFovRad, core::kMaxFovRad);
+    if (!s.manuallyAdjusted) {
+        s.manuallyAdjusted = true;
+        emit_("SpotAdjusted", json::object());  // hold the chosen target while the user frames it
+    }
+}
+
+void Coordinator::updateSpotManual(double dt) {
+    if (!spot_ || !submitReady()) return;
+    auto& s = *spot_;
+    if (mouseBlocked_ || motionPaused_ || !(dt > 0) || dt > core::ManualMover::kMaxGapSeconds) {
+        s.manualMover.neutralize();
+        mouseHeadingPending_ = mousePitchPending_ = 0;
+        return;
+    }
+    s.manualMover.setSpeeds({settings_.lookSpeedDegPerSec * binocularsLookScale_,
+                            settings_.moveSpeedMetersPerSec * settings_.movementPrecisionScale, .5, 6.});
+    core::TemporaryLook delta;
+    s.manualMover.advance(dt, manual_, delta);
+    if (mouseHeld_ && mouseCameraId_ == activeCameraId_) {
+        const double blend = settings_.mouseSmoothingMs <= 0 ? 1. : -std::expm1(-dt / (settings_.mouseSmoothingMs / 1000.));
+        const double heading = mouseHeadingPending_ * blend, pitch = mousePitchPending_ * blend;
+        delta.headingDeg += heading; delta.pitchDeg += pitch;
+        mouseHeadingPending_ -= heading; mousePitchPending_ -= pitch;
+        ++mouseFrames_;
+    }
+    adjustSpot(delta.headingDeg, delta.pitchDeg, delta.translationHeadingFrame, delta.fovDeltaRad);
+}
+
+void Coordinator::applySpotAdjustments(SdkPose& sdk) {
+    if (!spot_ || !spot_->manuallyAdjusted || sdk.referential != Referential::World) return;
+    const auto& s = *spot_;
+    auto position = profiles::airport::world({sdk.x, sdk.y, sdk.z}, s.manualOffset);
+    const double floor = traffic::terrainFloor(s.target.groundAltitude, NAN);
+    if (std::isfinite(floor)) position.altitude = std::max(position.altitude, floor);
+    sdk.x = position.lat; sdk.y = position.lon; sdk.z = position.altitude;
+    if (const auto look = traffic::aim(position, s.target.position)) {
+        sdk.headingDeg = look->headingDeg;
+        sdk.pitchDeg = -look->pitchDeg;
+    }
+    sdk.headingDeg = core::wrapDeg(sdk.headingDeg + s.manualLook.headingDeg);
+    sdk.pitchDeg = -core::clamp(-sdk.pitchDeg + s.manualLook.pitchDeg, -89., 89.);
+    sdk.fovRad = core::clamp(sdk.fovRad + s.manualLook.fovDeltaRad, core::kMinFovRad, core::kMaxFovRad);
+}
+
+void Coordinator::recenterSpot() {
+    if (!spot_) return;
+    cancelMouseDrag();
+    spot_->manualOffset = {};
+    spot_->manualLook = {};
+    spot_->manualMover.neutralize();
+    spot_->manuallyAdjusted = false;
 }
 
 void Coordinator::submitSpotOverlay() {
@@ -2593,7 +2678,9 @@ void Coordinator::submitSpotOverlay() {
     sdk.pitchDeg = look ? -look->pitchDeg : lastSubmitted_ ? lastSubmitted_->pitchDeg : 0.0;
     sdk.bankDeg = 0;
     const double fov = std::isfinite(s.fovRad) ? s.fovRad : traffic::kChaseFovDeg * core::kDegToRad;
-    sdk.fovRad = binocularsFov(fov, fov);
+    sdk.fovRad = fov;
+    applySpotAdjustments(sdk);
+    sdk.fovRad = binocularsFov(sdk.fovRad, sdk.fovRad);
     if (lastSubmitted_ && nearlyEqual(*lastSubmitted_, sdk)) return;
     if (backend_.submitPose(sdk)) {
         lastSubmitted_ = sdk;

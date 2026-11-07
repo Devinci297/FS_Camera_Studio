@@ -1,4 +1,5 @@
 #include "test.hpp"
+#include "fscs/protocol/protocol.hpp"
 #include "fake_backend.hpp"
 #include "fscs/profiles/repository.hpp"
 #include "fscs/profiles/json_util.hpp"
@@ -85,4 +86,48 @@ TEST_CASE("save: exact readback still rejects corruption and preserves committed
     CHECK(r.save(edit).status == CommitStatus::Committed);
     Repository reload(r.driver, "a", "b"); reload.load([](auto) {});
     CHECK_EQ(reload.committed().profiles.begin()->second.current["name"], "Failed edit");
+}
+
+TEST_CASE("profiles: 2000 cameras save reload export and fit the panel transport") {
+    SavePerfRig r;
+    auto profile=makeC172Profile("capacity-test","Capacity test");
+    auto base=profile["cameras"][0];
+    auto group=profile["categories"][0];group["cameraIds"]=json::array();
+    profile["categories"]=json::array();profile["cameras"]=json::array();
+    for(std::size_t n=0;n<kMaxCameras;++n) {
+        auto camera=base;char id[37];std::snprintf(id,sizeof(id),"00000000-0000-4000-8000-%012zu",n+1);
+        camera["id"]=id;camera["name"]="Camera "+std::to_string(n+1);camera["viewId"]=0;
+        camera["categoryId"]=group["id"];group["cameraIds"].push_back(id);profile["cameras"].push_back(camera);
+    }
+    profile["defaultCameraId"]=profile["cameras"][0]["id"];group["defaultCameraId"]=profile["defaultCameraId"];
+    profile["categories"].push_back(group);
+    CHECK(validateProfile(profile).ok());
+    CHECK_EQ(kMaxCameras,std::size_t{2000});
+    CommitRequest initial;initial.upsertProfiles={profile};
+    CHECK(r.save(initial).status==CommitStatus::Committed);
+    profile["cameras"].back()["name"]="Last camera edited";
+    CommitRequest update;update.upsertProfiles={profile};CHECK(r.save(update).status==CommitStatus::Committed);
+    Repository reload(r.driver,"a","b");reload.load([](auto){});
+    const auto& loaded=reload.committed().profiles.begin()->second;
+    CHECK(loaded.current["cameras"]==profile["cameras"]);CHECK_EQ(loaded.current["revision"],json(2));CHECK_EQ(loaded.backups.size(),std::size_t{1});
+    CHECK(importProfileCode(profile.dump(),nullptr).has_value());
+    const auto wire=json{{"type","event"},{"name","Snapshot"},{"payload",{{"working",{{"profile",profile}}}}}}.dump();
+    CHECK(wire.size()<fscs::protocol::kMaxMessageBytes);
+    fscs::protocol::Reassembler assembler;std::optional<std::string> assembled;
+    for(const auto& frame:fscs::protocol::chunk(wire,"capacity")) {
+        CHECK(frame.size()<=fscs::protocol::kChunkChars);
+        assembled=assembler.feed(frame,0);
+    }
+    CHECK(assembled && *assembled==wire);
+    profile["cameras"].push_back(base);
+    CHECK(!validateProfile(profile).ok());
+}
+TEST_CASE("protocol: large snapshots over 1024 pieces survive the raised bounded channel") {
+    const auto text=json{{"data",std::string(5u<<20,'x')}}.dump();
+    const auto frames=fscs::protocol::chunk(text,"large-profile");
+    CHECK(frames.size()>1024);
+    fscs::protocol::Reassembler assembler;std::optional<std::string> whole;
+    for(const auto& frame:frames)whole=assembler.feed(frame,0);
+    CHECK(whole && *whole==text);
+    CHECK(!assembler.feed(std::string(fscs::protocol::kMaxMessageBytes+1,'x'),0));
 }

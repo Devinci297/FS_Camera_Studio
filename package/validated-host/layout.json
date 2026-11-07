@@ -1,124 +1,124 @@
 {
-    "content":  [
-                    {
-                        "path":  "html_ui/icons/toolbar/ICON_TOOLBAR_FSCS_CAMERA_MINI.svg",
-                        "size":  327,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/icons/toolbar/ICON_TOOLBAR_FSCS_CAMERA_STUDIO.svg",
-                        "size":  343,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/app.css",
-                        "size":  146297,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/app.js",
-                        "size":  423044,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/audio/cameras-saved.wav",
-                        "size":  78952,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/bridge.js",
-                        "size":  125352,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/icons.js",
-                        "size":  10361,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/icons/atlas.json",
-                        "size":  10625,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/icons/camera-studio-icons.png",
-                        "size":  1358187,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/main.html",
-                        "size":  34546,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/math.js",
-                        "size":  6160,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/mini.html",
-                        "size":  34608,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/msfs-panel.js",
-                        "size":  12554,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/panel-host.css",
-                        "size":  5494,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/save-feedback.js",
-                        "size":  3224,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/surface-main.js",
-                        "size":  30,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/surface-mini.js",
-                        "size":  30,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/updates.js",
-                        "size":  6974,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/InGamePanels/FSCameraStudio/version.js",
-                        "size":  38,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/Textures/Menu/toolbar/ICON_TOOLBAR_FSCS_CAMERA_MINI.svg",
-                        "size":  327,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "html_ui/Textures/Menu/toolbar/ICON_TOOLBAR_FSCS_CAMERA_STUDIO.svg",
-                        "size":  343,
-                        "date":  134385368110000000
-                    },
-                    {
-                        "path":  "InGamePanels/fscs-camera-mini.spb",
-                        "size":  824,
-                        "date":  134385199250000002
-                    },
-                    {
-                        "path":  "InGamePanels/fscs-camera-studio.spb",
-                        "size":  719,
-                        "date":  134385199250000002
-                    },
-                    {
-                        "path":  "modules/FSCameraStudio.wasm",
-                        "size":  4031210,
-                        "date":  134385367960000000
-                    }
-                ]
+  "content": [
+    {
+      "path": "html_ui/icons/toolbar/ICON_TOOLBAR_FSCS_CAMERA_MINI.svg",
+      "size": 327,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/icons/toolbar/ICON_TOOLBAR_FSCS_CAMERA_STUDIO.svg",
+      "size": 343,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/app.css",
+      "size": 146881,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/app.js",
+      "size": 434257,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/audio/cameras-saved.wav",
+      "size": 78952,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/bridge.js",
+      "size": 125353,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/icons.js",
+      "size": 10361,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/icons/atlas.json",
+      "size": 10625,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/icons/camera-studio-icons.png",
+      "size": 1358187,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/main.html",
+      "size": 34546,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/math.js",
+      "size": 6160,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/mini.html",
+      "size": 34608,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/msfs-panel.js",
+      "size": 12554,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/panel-host.css",
+      "size": 5494,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/save-feedback.js",
+      "size": 3224,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/surface-main.js",
+      "size": 30,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/surface-mini.js",
+      "size": 30,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/updates.js",
+      "size": 6974,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/InGamePanels/FSCameraStudio/version.js",
+      "size": 38,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/Textures/Menu/toolbar/ICON_TOOLBAR_FSCS_CAMERA_MINI.svg",
+      "size": 327,
+      "date": 134385494190000000
+    },
+    {
+      "path": "html_ui/Textures/Menu/toolbar/ICON_TOOLBAR_FSCS_CAMERA_STUDIO.svg",
+      "size": 343,
+      "date": 134385494190000000
+    },
+    {
+      "path": "InGamePanels/fscs-camera-mini.spb",
+      "size": 824,
+      "date": 134385199250000002
+    },
+    {
+      "path": "InGamePanels/fscs-camera-studio.spb",
+      "size": 719,
+      "date": 134385199250000002
+    },
+    {
+      "path": "modules/FSCameraStudio.wasm",
+      "size": 4035855,
+      "date": 134385493630000000
+    }
+  ]
 }

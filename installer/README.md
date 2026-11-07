@@ -14,16 +14,16 @@ configuration are included. Setup works offline, per user, without the MSFS SDK 
 
 ```powershell
 tools\get-installer-compiler.ps1
-python tools/diagnostics/stage-v0.5.py --freeze
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.5.0
-tools\package.ps1 -Compile -Wasm build/wasm/release-0.5.0/FSCameraStudio.wasm -OutputDirectory build/release-0.5.0-compile
-python tools/diagnostics/stage-v0.5.py --host build/release-0.5.0-compile/Packages/fs-camera-studio
-python tools/diagnostics/stage-v0.5.py
+python tools/diagnostics/stage-v0.5.1.py --freeze
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.5.1
+tools\package.ps1 -Compile -Wasm build/wasm/release-0.5.1/FSCameraStudio.wasm -OutputDirectory build/release-0.5.1-compile
+python tools/diagnostics/stage-v0.5.1.py --host build/release-0.5.1-compile/Packages/fs-camera-studio
+python tools/diagnostics/stage-v0.5.1.py
 cmake -S . -B build-xp -G "Visual Studio 17 2022" -A x64 -DFSCS_BUILD_XPLANE=ON
 cmake --build build-xp --config Release --target xpcs_plugin
 node tools/capture-manual.cjs
 python tools/build-manual.py
-python tools/build-installer.py --version 0.5.0 --package build/release/0.5.0/fs-camera-studio --receipt build/release/0.5.0/staged.json --xplane build-xp/XPCameraStudio
+python tools/build-installer.py --version 0.5.1 --package build/release/0.5.1/fs-camera-studio --receipt build/release/0.5.1/staged.json --xplane build-xp/XPCameraStudio
 ```
 
 Both simulator payloads must be built at the same version. The plugin takes its version from `ui/version.js`, and
@@ -107,6 +107,6 @@ movement, mounted cam, binoculars, glance views), cinematic mode, temporary airp
 cameras with gamepad control, traffic spotting, Pop out and the mini Traffic tab. Profiles saved by 0.4.0 use
 schema 4 and cannot be read by 0.3.0. See `doc/test-evidence/2026-11-07-v0.4.0.md`.
 
-For 0.5.0, the isolated harness passed all 17 scenarios; see the
-[release validation record and live checklist](../doc/test-evidence/2026-11-07-v0.5.0.md).
-The user installed and tested 0.5.0 successfully in both simulators and approved publication on November 7, 2026.
+For 0.5.1, the isolated harness passed all 17 scenarios; see the
+[release validation record and live checklist](../doc/test-evidence/2026-11-07-v0.5.1.md).
+The user installed and tested 0.5.1 successfully in both simulators and approved publication on November 7, 2026.

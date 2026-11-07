@@ -475,7 +475,7 @@ std::optional<Result> convert(const Source& source, std::string* error) {
     if (duplicateIds)
         r.notes.push_back(plural(duplicateIds, "view ID was used twice; the later camera has none.", "view IDs were used twice; the later cameras have none."));
     if (worldFixed) r.notes.push_back(plural(worldFixed, "camera fixed to a spot in the world was", "cameras fixed to a spot in the world were") + " left out.");
-    if (overflow) r.notes.push_back(plural(overflow, "camera was", "cameras were") + " left out: a profile holds at most 500.");
+    if (overflow) r.notes.push_back(plural(overflow, "camera was", "cameras were") + " left out: a profile holds at most 2000.");
     if (unreadable) r.notes.push_back(plural(unreadable, "row could not be read and was", "rows could not be read and were") + " skipped.");
     r.profile = std::move(doc);
     return r;

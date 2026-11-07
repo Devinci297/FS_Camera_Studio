@@ -1485,7 +1485,7 @@ TEST_CASE("spotting coordinator: without a camera profile - chase takes control 
     json active;
     for (const auto& [n, p] : r.events) if (n == "ActiveCameraChanged") active = p;
     CHECK(active["cameraId"].is_null());
-    // Fly-by and Next target work the same way; binoculars still zoom; glance is refused; mouse look is harmless.
+    // Fly-by and Next target work the same way; binoculars zoom and mouse look adjusts the spot without a profile.
     CHECK_EQ(r.c.spotTarget(7, tr::SpotView::Flyby, r.t), std::string());
     r.advance(1);
     CHECK(r.c.spotOverlay());
@@ -1500,7 +1500,13 @@ TEST_CASE("spotting coordinator: without a camera profile - chase takes control 
     json triggered;
     for (const auto& [n, p] : r.events) if (n == "BindingTriggered") triggered = p;
     CHECK(!js::str(triggered, "result").empty());
-    CHECK_EQ(status(r.send("MouseLookDelta", {{"headingDeg", 2}, {"pitchDeg", 1}})), std::string("Rejected"));
+    r.advance(1);  // let the released binoculars finish easing before checking unscaled mouse angles
+    CHECK_EQ(status(r.send("MouseLookDelta", {{"headingDeg", 2}, {"pitchDeg", 1}})), std::string("Completed"));
+    r.advance(.1);
+    const auto adjustedAim = tr::aim(r.camera(), r.c.spotPose().position);
+    CHECK(adjustedAim.has_value());
+    CHECK_NEAR(core::wrapDeg(r.looking().headingDeg - adjustedAim->headingDeg), 2, .01);
+    r.send("RecenterLook");
     r.c.onBackendEvent(be::NativeMouseButton{true}, r.t);
     r.c.onBackendEvent(be::NativeMouseAxis{true, 4000}, r.t);
     r.advance(.5);
@@ -2019,4 +2025,106 @@ TEST_CASE("module: saved spots persist at once without a camera profile, never a
         CHECK_EQ(js::str(again[0], "id"), std::string("s1"));
         CHECK_EQ(js::str(again[0], "name"), std::string("North fence"));
     }
+}
+
+
+TEST_CASE("spotting controls: move look and zoom affect the shown traffic camera without editing its base") {
+    for (const bool withProfile : {false, true}) {
+        for (const auto view : {tr::SpotView::Chase, tr::SpotView::Flyby}) {
+            SpotRig r(false, withProfile);
+            r.truth = [](double) { return std::vector<be::TrafficAircraft>{plane(7, 0, 0, 300, 90, 0)}; };
+            r.advance(.1);
+            CHECK(r.c.spotTarget(7, view, r.t).empty()); r.acquire(); r.advance(.5);
+            const auto base = r.c.engine().sample();
+            const auto before = r.camera(); const double beforeFov = r.shown().fovRad;
+            core::ManualInput in; in.moveRight = 1; in.moveUp = 1; in.lookRight = .25; in.lookUp = .1; in.zoomIn = .1;
+            r.c.setManualInput(in); r.advance(.5); r.c.setManualInput({}); r.advance(2);
+            CHECK(r.c.spotting()); CHECK_EQ(r.c.spotTargetId(), 7u);
+            CHECK(ap::local(before, r.camera()).length() > .1);
+            CHECK(r.camera().altitude > before.altitude);
+            const auto aim = tr::aim(r.camera(), r.c.spotPose().position); CHECK(aim.has_value());
+            CHECK(core::wrapDeg(r.looking().headingDeg - aim->headingDeg) > 5);
+            CHECK(r.looking().pitchDeg > aim->pitchDeg + 1);
+            CHECK(r.shown().fovRad < beforeFov);
+            if (withProfile) {
+                const auto after = r.c.engine().sample();
+                CHECK_NEAR((after.pose.positionFRD - base.pose.positionFRD).length(), 0, 1e-9);
+                CHECK_NEAR(after.pose.orientation.toPbh().headingDeg, base.pose.orientation.toPbh().headingDeg, 1e-9);
+                CHECK_NEAR(after.pose.fovRad, base.pose.fovRad, 1e-9);
+            }
+            CHECK_EQ(js::str(r.send("RecenterLook"), "status"), std::string("Completed")); r.advance(.1);
+            r.checkAimed(); CHECK_NEAR(ap::local(before, r.camera()).length(), 0, .01);
+            CHECK_NEAR(r.shown().fovRad, beforeFov, .01);
+        }
+    }
+}
+
+TEST_CASE("spotting controls: native mouse and panel deltas work without a profile and retain rotation on release") {
+    SpotRig r(false, false);
+    r.truth = [](double) { return std::vector<be::TrafficAircraft>{plane(7, 0, 0, 300, 90, 0)}; };
+    r.advance(.1); CHECK(r.c.spotTarget(7, tr::SpotView::Chase, r.t).empty()); r.acquire();
+    r.c.onBackendEvent(be::NativeMouseMapping{true}, r.t);
+    r.c.onBackendEvent(be::NativeMouseButton{true}, r.t);
+    r.c.onBackendEvent(be::NativeMouseAxis{true, 32768}, r.t); r.advance(.3);
+    const auto rotated = r.looking(); CHECK(rotated.headingDeg > 90.5);
+    r.c.onBackendEvent(be::NativeMouseButton{false}, r.t); r.advance(.2);
+    CHECK_NEAR(r.looking().headingDeg, rotated.headingDeg, .01);
+    const auto old = r.camera();
+    CHECK_EQ(js::str(r.send("MouseLookDelta", {{"headingDeg", 10}, {"pitchDeg", 5}, {"rightMeters", .5}}), "status"), std::string("Completed"));
+    r.advance(.1); CHECK(ap::local(old, r.camera()).length() > .4);
+    CHECK(r.looking().headingDeg > rotated.headingDeg + 9);
+    r.c.setMouseInputBlocked(true);
+    core::ManualInput in; in.moveForward = 1; in.lookRight = 1; r.c.setManualInput(in);
+    const auto blocked = r.shown(); r.advance(.4);
+    CHECK_NEAR(r.shown().headingDeg, blocked.headingDeg, .01);
+    CHECK_NEAR(ap::local({blocked.x, blocked.y, blocked.z}, r.camera()).length(), 0, .01);
+    r.c.setManualInput({}); r.c.setMouseInputBlocked(false);
+    r.c.stopSpotting("test", r.t); CHECK(!r.c.spotting());
+    CHECK_EQ(js::str(r.send("MouseLookDelta", {{"headingDeg", 5}}), "status"), std::string("Rejected"));
+}
+
+TEST_CASE("spotting controls: saved tower view remains unchanged and adjustments reset for a new target") {
+    SpotRig r;
+    r.truth = [](double) { return std::vector<be::TrafficAircraft>{plane(7, 0, 0, 100, 90, 0), plane(8, 0, 200, 100, 90, 0)}; };
+    r.advance(.1); CHECK(r.c.spotTarget(7, tr::SpotView::Tower, r.t).empty()); r.acquire(); r.advance(3);
+    CHECK(!r.c.spotOverlay());
+    const auto base = r.c.engine().sample(); const auto position = r.camera();
+    CHECK_EQ(js::str(r.send("MouseLookDelta", {{"headingDeg", 15}, {"pitchDeg", 3}, {"upMeters", .5}}), "status"), std::string("Completed"));
+    r.advance(.1);
+    CHECK_NEAR(r.camera().altitude, position.altitude + .5, .01);
+    const auto aim = tr::aim(r.camera(), r.c.spotPose().position); CHECK(aim.has_value());
+    CHECK_NEAR(core::wrapDeg(r.looking().headingDeg - aim->headingDeg), 15, .01);
+    CHECK_NEAR((r.c.engine().sample().pose.positionFRD - base.pose.positionFRD).length(), 0, 1e-9);
+    CHECK(r.c.spotTarget(8, tr::SpotView::Tower, r.t).empty()); r.advance(.2);
+    CHECK_NEAR(r.camera().altitude, position.altitude, .01); r.checkAimed();
+}
+
+
+TEST_CASE("module: manually framing traffic stops auto-spot but keeps following the same aircraft") {
+    SpotModule m;
+    m.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, 0, -6000 + 70 * t, 300, 90, 70, -4)}; };
+    m.seconds(2);
+    CHECK_EQ(status(m.panel("SetAutoSpot", {{"enabled", true}})), std::string("Completed")); m.seconds(2);
+    CHECK(m.app.coordinator().spotting()); CHECK(m.snapshot()["spotting"]["autoSpot"].get<bool>());
+    const auto target = m.app.coordinator().spotTargetId();
+    CHECK_EQ(status(m.panel("MouseLookDelta", {{"headingDeg", 10}, {"rightMeters", .5}})), std::string("Completed"));
+    m.seconds(.5);
+    CHECK(!m.snapshot()["spotting"]["autoSpot"].get<bool>());
+    CHECK(m.app.coordinator().spotting()); CHECK_EQ(m.app.coordinator().spotTargetId(), target);
+    m.seconds(12); CHECK_EQ(m.app.coordinator().spotTargetId(), target);
+}
+
+TEST_CASE("spotting controls: adjusted chase follows a moving target and holds through a stalled input frame") {
+    SpotRig r(false, false);
+    r.truth = [](double t) { return std::vector<be::TrafficAircraft>{plane(7, 0, -6000 + 70 * t, 300, 90, 70)}; };
+    r.advance(.1); CHECK(r.c.spotTarget(7, tr::SpotView::Chase, r.t).empty()); r.acquire(); r.advance(2);
+    r.send("MouseLookDelta", {{"headingDeg", 20}, {"upMeters", .5}}); r.advance(.1);
+    const auto before = r.camera(); r.advance(2);
+    CHECK(ap::local(before, r.camera()).length() > 130);
+    const auto aim = tr::aim(r.camera(), r.c.spotPose().position); CHECK(aim.has_value());
+    CHECK_NEAR(core::wrapDeg(r.looking().headingDeg - aim->headingDeg), 20, .01);
+    core::ManualInput in; in.lookRight = 1; r.c.setManualInput(in);
+    r.t += .25; r.c.tick(r.t); r.c.setManualInput({}); r.advance(.1);
+    const auto after = tr::aim(r.camera(), r.c.spotPose().position); CHECK(after.has_value());
+    CHECK_NEAR(core::wrapDeg(r.looking().headingDeg - after->headingDeg), 20, .01);
 }

@@ -18,6 +18,7 @@ std::string choose(const json& candidates, const std::string& current, const std
 // Generated spotting views and the virtual tower fallback, in meters.
 constexpr double kFenceBehindMeters = 150;          // behind the threshold, on the extended centerline side
 constexpr double kFenceSideMeters = 80;             // to the right of the landing direction
+constexpr std::size_t kMaxGeneratedCameras = 500; // leave capacity for personal views
 constexpr double kApproachDistanceMeters = 1852;    // 1 NM out on the extended centerline
 constexpr double kGlidepathDeg = 3;
 constexpr double kApproachBelowGlidepathMeters = 90;

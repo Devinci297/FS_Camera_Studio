@@ -71,7 +71,7 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
  std::set<std::string> generatedIds;
  auto add=[&](std::string group,std::string key,std::string name,core::Vec3 pos,core::Vec3 target,double minimumMeters=-1) {
    // Tower is generated last, but must survive large airports reaching the limit.
-   if(doc["cameras"].size()>=kMaxCameras-(towerPending?1:0)) return;
+   if(doc["cameras"].size()>=kMaxGeneratedCameras-(towerPending?1:0)) return;
    const std::string heightCategory=group=="Runways"||group=="Spotting"?"runways":group=="Gates"?"gates":group=="Apron"?"apron":group=="Tower"?"tower":"taxi";
    const double minimum=minimumMeters>=0?minimumMeters:key.find(":approach")!=std::string::npos?15:key.find(":overview")!=std::string::npos?25:0;
    const double baseAltitude=group=="Tower"?origin.altitude:origin.altitude-target.z;
@@ -117,7 +117,7 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
      add("Spotting","spot:"+name+":final",name+" approach, 1 NM",threshold-landing*kApproachDistanceMeters,threshold,finalHeight);
    }
  }
- if(js::boolean(o,"parking",true)){const auto& stands=js::array(f,"parking");for(const auto index:spreadParking(stands,static_cast<std::size_t>(std::clamp<std::int64_t>(js::integer(o,"parkingLimit",0),0,static_cast<std::int64_t>(kMaxCameras))))) {
+ if(js::boolean(o,"parking",true)){const auto& stands=js::array(f,"parking");for(const auto index:spreadParking(stands,static_cast<std::size_t>(std::clamp<std::int64_t>(js::integer(o,"parkingLimit",0),0,static_cast<std::int64_t>(kMaxGeneratedCameras))))) {
    const auto& p=stands[index];const double n=js::num(p,"north",NAN),e=js::num(p,"east",NAN);
    const double h=js::num(p,"heading",0)*core::kDegToRad;core::Vec3 target{n,e,0};auto name=js::str(p,"name","Parking");
    add(js::boolean(p,"gate",false)?"Gates":"Apron","parking:"+js::str(p,"key",name),name,target+core::Vec3{std::cos(h)*offset,std::sin(h)*offset,-height},target);
@@ -170,7 +170,7 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
  }
  if(doc["cameras"].empty()){notes.push_back("No usable selected scenery features.");return nullptr;}
  doc["defaultCameraId"]=doc["cameras"][0]["id"];
- if(doc["cameras"].size()==kMaxCameras)notes.push_back("Limited to 500 cameras; select fewer feature groups for larger airports.");
+ if(doc["cameras"].size()==kMaxGeneratedCameras)notes.push_back("Limited to 500 cameras; select fewer feature groups for larger airports.");
  auto validation=validateProfile(doc);if(!validation.ok()){notes.push_back(validation.summary());return nullptr;}return doc;
 }
 json merge(const json& saved,const json& generated,bool replace) {

@@ -26,6 +26,7 @@ public:
     enum Surface { Main = 0, Mini = 1 };
     // `uiIndexUrl`: file URL of ui/index.html, without a query.
     // `inbound(surface, frame)`: a frame from a page, called inside the X-Plane callback; the host queues it.
+    std::function<std::string(const std::string&)> nativeKeys;
     void init(std::string uiIndexUrl, std::function<void(Surface, std::string)> inbound);
     void show(Surface s, bool visible);
     // Open again at startup, as it was when X-Plane last closed: a mini starts hidden, in hover mode, until its page
@@ -70,6 +71,7 @@ private:
     static const char* onPanelHover(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanelPopOut(XPLMWindowID window, const char* json, void* refcon);
     void create(Surface s);
+    static const char* onKeys(XPLMWindowID window, const char* json, void* refcon);
     static const char* onFrame(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanel(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanelSize(XPLMWindowID window, const char* json, void* refcon);

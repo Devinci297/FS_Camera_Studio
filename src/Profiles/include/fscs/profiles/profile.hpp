@@ -19,7 +19,7 @@ using json = nlohmann::json;
 
 constexpr int kSchemaVersion = 4;
 constexpr std::size_t kMaxProfileBytes = 10u << 20;
-constexpr std::size_t kMaxCameras = 500;
+constexpr std::size_t kMaxCameras = 2000;
 constexpr std::size_t kMaxCategories = 100;
 constexpr int kMaxViewId = 2147483647;
 

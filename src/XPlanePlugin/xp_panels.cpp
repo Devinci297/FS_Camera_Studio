@@ -87,6 +87,7 @@ void PanelWindows::create(Surface s) {
     XPLMSetWindowTitle(w.id, s == Main ? "XP Camera Studio" : "XP Camera Studio Mini");
     if (s == Main) XPLMSetWindowResizingLimits(w.id, width * 58 / 100, height * 45 / 100, width, height);
     else XPLMSetWindowResizingLimits(w.id, 320, 120, width, height);
+    XPLMWindowAddBrowserFunction(w.id, "fscsKeys", &PanelWindows::onKeys, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscs", &PanelWindows::onFrame, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanel", &PanelWindows::onPanel, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanelSize", &PanelWindows::onPanelSize, &w);
@@ -253,6 +254,14 @@ const char* PanelWindows::onFrame(XPLMWindowID, const char* text, void* refcon) 
     }
     if (ok && w && w->owner && w->owner->inbound_) w->owner->inbound_(w->surface, arg.is_string() ? arg.get<std::string>() : raw);
     return XPLMReturnString(ok ? "true" : "false");
+}
+
+const char* PanelWindows::onKeys(XPLMWindowID, const char* text, void* refcon) {
+    auto* w=static_cast<Win*>(refcon);
+    if(!w || !w->owner || !w->owner->nativeKeys)
+        return XPLMReturnString("{\"ok\":false,\"error\":\"Native key service is unavailable.\"}");
+    const auto result=w->owner->nativeKeys(text?text:"");
+    return XPLMReturnString(result.c_str());
 }
 
 const char* PanelWindows::onPanel(XPLMWindowID, const char* text, void* refcon) {
