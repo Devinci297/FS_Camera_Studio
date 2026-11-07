@@ -66,6 +66,23 @@ Spotting traffic is read from X-Plane's TCAS targets (`sim/cockpit2/tcas/targets
 aircraft and multiplayer or traffic plugins put theirs. Each aircraft is known by its mode S id; its callsign is the
 `flight_id` and its type the `icao_type`.
 
+## Importing X-Camera cameras
+
+Profiles > Import lists X-Camera's camera files under **X-Camera views**: each aircraft's `X-Camera_<acf>.csv` (in
+`Aircraft/`, two folder levels deep), community sets in `Resources/plugins/X-Camera/CommunityAircraftCameras` named
+for the loaded aircraft's .acf, and `.csv` files copied into the imports folder (taken as the loaded aircraft's).
+Import converts the chosen file into a new profile for that aircraft; X-Camera's files are only read.
+
+- X, Y, Z are aircraft body axes from the reference point (`pilots_head_x/y/z`). Cockpit cameras become cockpit views
+  relative to the eyepoint, read from the .acf (`acf/_pe_xyz` less `acf/_cgY` and `_cgZ`, in feet); without one they
+  are measured from X-Camera's pilot view. Exterior cameras become exterior views relative to the aircraft.
+- A camera path (the hidden rows after a camera) that circles the aircraft becomes an orbit (distance, height, lap
+  time); one that runs from ahead to behind becomes a fly-by; others keep their first point as a still view.
+- Kept: names, categories, view IDs (the second use of an ID is dropped), FOV and zoom, smooth or cut transitions,
+  head shake (motion effects), level camera (horizon) and retained mouse look. Cameras fixed in the world are left out.
+
+`xpcs_xcamera_convert <X-Plane folder> <output folder>` writes the same conversions as profile files.
+
 ## How the UI connects
 
 The plugin opens `ui/index.html?surface=main|mini&host=xplane`. `ui/bridge.js` sees `host=xplane` and sends frames

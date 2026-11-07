@@ -131,6 +131,15 @@ public:
     int writes = 0;
     std::map<std::string, std::string> preparedExports;
     void prepareProfileExports(std::map<std::string, std::string> files) override { preparedExports = std::move(files); }
+    // X-Camera files offered by Profiles > Import (only X-Plane's storage has any).
+    std::vector<profiles::xcamera::File> xcameraFiles;
+    std::map<std::string, profiles::xcamera::Source> xcameraSources;
+    void listXCameraFiles(std::function<void(std::vector<profiles::xcamera::File>)> done) override { done(xcameraFiles); }
+    void readXCameraFile(const std::string& id, std::function<void(std::optional<profiles::xcamera::Source>, std::string)> done) override {
+        const auto it = xcameraSources.find(id);
+        if (it == xcameraSources.end()) done(std::nullopt, "gone");
+        else done(it->second, {});
+    }
 
     void writeFile(const std::string& path, std::string bytes, std::function<void(bool, std::string)> done) override {
         auto op = [this, path, bytes = std::move(bytes), done]() mutable {

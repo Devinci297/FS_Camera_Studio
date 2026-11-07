@@ -421,6 +421,7 @@ bool startHost() {
     g->xplaneRoot = xplane::pathFromUtf8(systemPath);
     const fs::path storageRoot = folderOf(prefsPath) / "XPCameraStudio";
     g->storage = std::make_unique<xplane::XPStorage>(storageRoot);
+    g->storage->setXPlane(g->xplaneRoot, [] { return g ? g->aircraftPath : std::string(); });
     log("profiles folder " + toUtf8(storageRoot));
 
     g->pausedRef = XPLMFindDataRef("sim/time/paused");

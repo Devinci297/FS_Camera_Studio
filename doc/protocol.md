@@ -353,6 +353,7 @@ Rules:
 | `StartControllerCapture` / `StopControllerCapture` | `deviceId`, `captureId` / — | Selected controller buttons 1–32 and first POV; capture completes on release/center, times out after 20 s; ordinary actions suppressed while listening |
 | `StartAxisCapture` / `StopAxisCapture` | `deviceId`, `function` (a `host.gamepadAxes` motion), `captureId` / — | Settings > Gamepad: listens to every axis of the selected controller; each axis's first sample is its rest, and the first axis moved at least 16384 from it completes with `full` at the end of travel in that direction (the far end for a trigger resting near one end). Times out after 15 s; the gamepad sticks are off meanwhile |
 | `ListImportFiles` / `ImportProfileFile` | — / `filename` | Enumerates the module imports folder / imports a selected file as a copy |
+| `ImportXCameraFile` | `id` (from `ListImportFiles` `xcamera`) | X-Plane: converts an X-Camera camera file into a new profile; the report has `source: "xcamera"` and notes on how camera paths were converted |
 | `TestInput` | `input` | Temporarily maps the input; reports `InputTest` down/up events for 15 s |
 | `TestBinding` | `binding` | Dispatches the action once; reply distinguishes dispatch from visible recall |
 | `RelaySurface` | `target` (`main`\|`mini`), `op` (`expand`\|`compact`\|`show`) | Broadcast `SurfaceRequest`; e.g. mini "Edit" → main expands on Cameras |

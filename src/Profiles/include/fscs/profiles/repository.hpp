@@ -6,6 +6,7 @@
 // profile, settings and bindings together, so a partial write can never publish half a transaction.
 
 #include "fscs/profiles/profile.hpp"
+#include "fscs/profiles/xcamera.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -30,6 +31,18 @@ public:
     // Nonrecursive JSON candidates from the dedicated persistent import folder.
     virtual void listImportFiles(std::function<void(std::vector<std::string>, std::string)> done) {
         done({}, "Folder listing is unavailable in this host.");
+    }
+    // Where the user puts files for listImportFiles, as shown in the import dialog.
+    virtual std::string importFolderLabel() const {
+        return "%APPDATA%\\Microsoft Flight Simulator 2024\\WASM\\MSFS2024\\fs-camera-studio\\work\\imports";
+    }
+    // X-Camera camera files the host can find (X-Plane only): every aircraft's own, community sets for the loaded
+    // aircraft and .csv files in the imports folder. Ids are valid until the next listing.
+    virtual void listXCameraFiles(std::function<void(std::vector<xcamera::File>)> done) { done({}); }
+    // One listed file with its aircraft's eyepoint; `done(nullopt, error)` when it is gone or unreadable.
+    virtual void readXCameraFile(const std::string& id, std::function<void(std::optional<xcamera::Source>, std::string)> done) {
+        (void)id;
+        done(std::nullopt, "X-Camera files can only be imported in X-Plane.");
     }
     // Creates/truncates and writes the whole file; `done(ok, error)` after the file is written and closed.
     virtual void writeFile(const std::string& path, std::string bytes, std::function<void(bool, std::string)> done) = 0;
@@ -128,5 +141,8 @@ struct ImportReport {
 };
 // Returns nullopt with a plain-language `error` when the code is not importable.
 std::optional<ImportReport> importProfileCode(const std::string& code, std::string* error);
+// An X-Camera camera file (xcamera.hpp), converted, validated and reported like a profile code. Its notes say how
+// camera paths were converted.
+std::optional<ImportReport> importXCamera(const xcamera::Source& source, std::string* error);
 
 }  // namespace fscs::profiles
