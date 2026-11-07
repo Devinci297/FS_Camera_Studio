@@ -1,6 +1,8 @@
 """Exercise the shipping setup EXE in an isolated fake Community folder and a fake X-Plane 12 folder.
 
-Requires Windows, MSFS and X-Plane closed, and no existing installer-managed FS Camera Studio.
+Shipping EXE: requires Windows, MSFS and X-Plane closed, and no existing installer-managed FS Camera Studio.
+--test-harness: the harness setup has its own app ID and folder (%LOCALAPPDATA%\\FS Camera Studio Installer Test),
+so it runs beside a real installation, with the simulators open or closed.
 Never changes the real Community package, the real X-Plane folder or MSFS profile storage.
 """
 import argparse
@@ -16,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument('--version', default='0.4.0')
+parser.add_argument('--version', default='0.5.0')
 parser.add_argument('--live-receipt', default='build/review/hat-release/installed.json')
 parser.add_argument('--test-harness', action='store_true')
 args = parser.parse_args()
@@ -24,9 +26,11 @@ VERSION = args.version
 HARNESS = args.test_harness
 SETUP = ROOT / (f'build/installer-harness/{VERSION}/FS-Camera-Studio-{VERSION}-Setup.exe' if HARNESS else f'dist/{VERSION}/FS-Camera-Studio-{VERSION}-Setup.exe')
 INFO = json.loads((SETUP.parent / 'BUILD-INFO.json').read_text(encoding='utf-8'))
-CONTROL = Path(os.environ['LOCALAPPDATA']) / 'FS Camera Studio'
+CONTROL = Path(os.environ['LOCALAPPDATA']) / ('FS Camera Studio Installer Test' if HARNESS else 'FS Camera Studio')
 assert not CONTROL.exists(), 'Existing setup support directory: do not run isolated integration tests over it.'
 live_package = ROOT / 'build/package/Packages/fs-camera-studio'
+# A development package and its receipt, when this clone has them: proof that the tests never write the live package.
+LIVE_CHECK = live_package.is_dir() and (ROOT / args.live_receipt).is_file()
 
 
 def inventory(path):
@@ -34,8 +38,11 @@ def inventory(path):
             for p in path.rglob('*') if p.is_file()}
 
 
-baseline = inventory(live_package)
-assert baseline == json.loads((ROOT/args.live_receipt).read_text(encoding='utf-8'))['files']
+baseline = inventory(live_package) if LIVE_CHECK else None
+if LIVE_CHECK:
+    assert baseline == json.loads((ROOT/args.live_receipt).read_text(encoding='utf-8'))['files']
+else:
+    print('No development package receipt here: skipping the live-package check.')
 test = ROOT / 'build/installer-tests' / str(uuid.uuid4())
 community = test / 'Packages/Community'
 community.mkdir(parents=True)
@@ -188,13 +195,15 @@ try:
     finally:
         fake.terminate()
         fake.wait(timeout=10)
-    assert inventory(live_package) == baseline, 'Live package changed!'
+    if LIVE_CHECK:
+        assert inventory(live_package) == baseline, 'Live package changed!'
     # Preserve test evidence; relocate only the support directory created by this test.
-    assert CONTROL.resolve() == (Path(os.environ['LOCALAPPDATA']) / 'FS Camera Studio').resolve()
+    assert CONTROL.resolve() == (Path(os.environ['LOCALAPPDATA']) / CONTROL.name).resolve()
     assert not (CONTROL / 'Installer/unins000.exe').exists()
     shutil.move(str(CONTROL), str(test / 'installer-support-after-uninstall'))
     (test / 'results.json').write_text(json.dumps({'passed': True, 'testHarness': HARNESS, 'checks': results,
-        'livePackageUnchanged': True, 'profileFixtureUnchanged': True}, indent=2), encoding='utf-8')
+        'livePackageUnchanged': True if LIVE_CHECK else 'not checked', 'profileFixtureUnchanged': True}, indent=2),
+        encoding='utf-8')
     print('PASS:', len(results), 'installer scenarios. Evidence:', test)
 except Exception:
     print('FAILED: evidence at', test, '; any installed test copy is at', target)

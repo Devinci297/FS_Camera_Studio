@@ -17,6 +17,15 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[1]
 
 
+# The installer-test harness: test process names for the guards, and its own app ID, name and folder, so it can run
+# beside a real installation without touching its registration, backups or start-menu entries.
+HARNESS_DEFINES = ('#define SimulatorProcessName "FSCS-Installer-Test-Sim.exe"\n'
+                   '#define XPlaneProcessName "FSCS-Installer-Test-XPlane.exe"\n'
+                   '#define SetupAppId "{{5E0B1C3A-7A51-4C8E-9E51-2F0C7B9A11D4}"\n'
+                   '#define SetupName "FS Camera Studio (Installer test)"\n'
+                   '#define ControlFolder "FS Camera Studio Installer Test"\n')
+
+
 def inventory(folder):
     return {p.relative_to(folder).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in sorted(folder.rglob('*')) if p.is_file()}
@@ -113,8 +122,7 @@ def build(args):
     (stage / 'release.iss').write_text(
         f'#define ReleaseVersion "{args.version}"\n#define NumericVersion "{numeric}"\n'
         f'#define ReleaseOutput "{output}"\n#define StageRoot "{stage}"\n' +
-        ('#define SimulatorProcessName "FSCS-Installer-Test-Sim.exe"\n#define XPlaneProcessName "FSCS-Installer-Test-XPlane.exe"\n'
-         if args.test_harness else ''), encoding='utf-8-sig')
+        (HARNESS_DEFINES if args.test_harness else ''), encoding='utf-8-sig')
     entries, verifies, xverifies = [], [], []
     for name, sha in actual.items():
         relative = name.replace('/', '\\')
@@ -156,9 +164,9 @@ def build(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='0.4.0')
-    parser.add_argument('--package', default='build/release/0.4.0/fs-camera-studio')
-    parser.add_argument('--receipt', default='build/release/0.4.0/staged.json')
+    parser.add_argument('--version', default='0.5.0')
+    parser.add_argument('--package', default='build/release/0.5.0/fs-camera-studio')
+    parser.add_argument('--receipt', default='build/release/0.5.0/staged.json')
     parser.add_argument('--xplane', default='build-xp/XPCameraStudio', help='The built X-Plane plugin folder (win_x64 and ui).')
     parser.add_argument('--compiler', default='build/installer-tools/inno/ISCC.exe')
     parser.add_argument('--test-harness', action='store_true', help='Internal lifecycle test build, always under build/, never dist/. Uses a named test process guard.')

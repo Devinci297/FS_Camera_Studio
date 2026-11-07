@@ -131,26 +131,31 @@ The app bar displays the version; click it for update detection and the installe
 Close MSFS before installing an update. Saved airport cameras load automatically within the configured radius
 (25 NM by default); other airports get a temporary set until you save it. Auto switch is a separate viewpoint control.
 
-### Reproduce version 0.4.0
+### Reproduce version 0.5.0
 
 The reviewed simulator host is frozen in `package/validated-host`, with hashes in
-`package/validated-host.json`. For 0.4.0 it is refreshed from the compiled package of the release commit, the same
-`tools\package.ps1 -Compile` build that was flown during testing. Close MSFS before the compile step.
+`package/validated-host.json`. It is refreshed from the compiled package of the release commit, the same
+`tools\package.ps1 -Compile` build that is flown during testing. Close MSFS before the compile step. The X-Plane
+plugin is built at the same version and goes into the same setup.
 
 ```powershell
-python tools/diagnostics/stage-v0.4.py --freeze
+python tools/diagnostics/stage-v0.5.py --freeze
 cmake --preset tests; cmake --build --preset tests; ctest --preset tests
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.4.0
-tools\package.ps1 -Compile -Wasm build/wasm/release-0.4.0/FSCameraStudio.wasm -OutputDirectory build/release-0.4.0-compile
-python tools/diagnostics/stage-v0.4.py --host build/release-0.4.0-compile/Packages/fs-camera-studio
-python tools/diagnostics/stage-v0.4.py
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.5.0
+tools\package.ps1 -Compile -Wasm build/wasm/release-0.5.0/FSCameraStudio.wasm -OutputDirectory build/release-0.5.0-compile
+python tools/diagnostics/stage-v0.5.py --host build/release-0.5.0-compile/Packages/fs-camera-studio
+python tools/diagnostics/stage-v0.5.py
+cmake -S . -B build-xp -G "Visual Studio 17 2022" -A x64 -DFSCS_BUILD_XPLANE=ON
+cmake --build build-xp --config Release --target xpcs_plugin
 node tools/capture-manual.cjs
 python tools/build-manual.py
-python tools/build-installer.py --version 0.4.0 --package build/release/0.4.0/fs-camera-studio --receipt build/release/0.4.0/staged.json
+python tools/build-installer.py --version 0.5.0 --package build/release/0.5.0/fs-camera-studio --receipt build/release/0.5.0/staged.json --xplane build-xp/XPCameraStudio
+python tools/build-installer.py --test-harness --version 0.5.0 --package build/release/0.5.0/fs-camera-studio --receipt build/release/0.5.0/staged.json --xplane build-xp/XPCameraStudio
+python tools/test-installer.py --test-harness --version 0.5.0
 ```
 
-See [release notes](doc/releases/0.4.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
-and the bundled illustrated manual. [Release evidence and live checks](doc/test-evidence/2026-11-07-v0.4.0.md)
+See [release notes](doc/releases/0.5.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
+and the bundled illustrated manual. [0.4.0 release evidence and live checks](doc/test-evidence/2026-11-07-v0.4.0.md)
 separate automated verification from simulator acceptance. Earlier tester recipes remain available in their Git tags.
 
 Install ReportLab for manual generation and obtain Inno Setup with `tools/get-installer-compiler.ps1`.

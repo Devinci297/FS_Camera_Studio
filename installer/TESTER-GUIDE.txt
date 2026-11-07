@@ -1,4 +1,4 @@
-FS CAMERA STUDIO - VERSION 0.4.0
+FS CAMERA STUDIO - VERSION 0.5.0
 Microsoft Flight Simulator 2024 and X-Plane 12 | Windows 11 x64
 
 INSTALL
@@ -142,6 +142,22 @@ INCLUDED FEATURES
   then Refresh, select a file and Import. Pasting profile code is also supported.
 - Successful saves request a native confirmation chime. Settings > Test sound
   checks the simulator UI sound route; spoken WAV is browser-only.
+
+NEW IN VERSION 0.5.0
+- X-Plane 12 support: XP Camera Studio, the same editor, mini panel, cameras,
+  airport cameras and spotting as a native X-Plane 12 plugin (12.4.4 or newer).
+  See INSTALL FOR X-PLANE 12 above.
+- One setup for both simulators: choose MSFS 2024, X-Plane 12 or both.
+- In X-Plane every action is an xpcs/ command; the Bindings tab lists them with
+  Copy. Airports come from X-Plane's apt.dat scenery, traffic from X-Plane's
+  TCAS targets, and Profiles > Import converts X-Camera camera files.
+- MSFS: messages and update hints name the simulator in use. No other MSFS
+  behavior changes; 0.5.0 reads and writes the same schema 4 profiles as 0.4.0.
+
+Please check in 0.5.0 (X-Plane): setup finds your X-Plane 12 folder; the editor
+and mini panel open; cockpit and exterior views; airport cameras at your home
+airport; spotting AI or multiplayer traffic; assigning xpcs/ commands to keys;
+X-Camera import if you use X-Camera; uninstall leaves other plugins alone.
 
 NEW IN VERSION 0.4.0
 - Camera feel: per-camera Follow horizon slider (0 follows bank, 1 stays level),

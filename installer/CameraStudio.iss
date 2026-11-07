@@ -6,24 +6,34 @@
 #ifndef XPlaneProcessName
   #define XPlaneProcessName "X-Plane.exe"
 #endif
+; The installer-test harness overrides these, so it never shares the real setup's registration or folders.
+#ifndef SetupAppId
+  #define SetupAppId "{{8C662A8B-F01B-43BE-9104-2D63CA78C921}"
+#endif
+#ifndef SetupName
+  #define SetupName "FS Camera Studio (Tester)"
+#endif
+#ifndef ControlFolder
+  #define ControlFolder "FS Camera Studio"
+#endif
 
 [Setup]
-AppId={{8C662A8B-F01B-43BE-9104-2D63CA78C921}
-AppName=FS Camera Studio (Tester)
+AppId={#SetupAppId}
+AppName={#SetupName}
 AppVersion={#ReleaseVersion}
 AppVerName=FS Camera Studio {#ReleaseVersion}
 AppPublisher=Devinci
 VersionInfoVersion={#NumericVersion}
 VersionInfoDescription=FS Camera Studio tester setup for MSFS 2024 and X-Plane 12
-DefaultDirName={localappdata}\FS Camera Studio\Unselected
+DefaultDirName={localappdata}\{#ControlFolder}\Unselected
 UsePreviousAppDir=no
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 MinVersion=10.0.22000
-UninstallFilesDir={localappdata}\FS Camera Studio\Installer
-UninstallDisplayName=FS Camera Studio (Tester)
+UninstallFilesDir={localappdata}\{#ControlFolder}\Installer
+UninstallDisplayName={#SetupName}
 OutputDir={#ReleaseOutput}
 OutputBaseFilename=FS-Camera-Studio-{#ReleaseVersion}-Setup
 Compression=lzma2
@@ -53,15 +63,15 @@ Type: filesandordirs; Name: "{code:XPlaneDir}"; Components: xplane
 
 [Files]
 #include "payload.iss"
-Source: "{#StageRoot}\TESTER-GUIDE.txt"; DestDir: "{localappdata}\FS Camera Studio"; Flags: ignoreversion
-Source: "{#StageRoot}\THIRD-PARTY-NOTICES.txt"; DestDir: "{localappdata}\FS Camera Studio"; Flags: ignoreversion
-Source: "{#StageRoot}\BUILD-INFO.json"; DestDir: "{localappdata}\FS Camera Studio"; Flags: ignoreversion
-Source: "{#StageRoot}\FS-Camera-Studio-Manual.pdf"; DestDir: "{localappdata}\FS Camera Studio"; Flags: ignoreversion
+Source: "{#StageRoot}\TESTER-GUIDE.txt"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
+Source: "{#StageRoot}\THIRD-PARTY-NOTICES.txt"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
+Source: "{#StageRoot}\BUILD-INFO.json"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
+Source: "{#StageRoot}\FS-Camera-Studio-Manual.pdf"; DestDir: "{localappdata}\{#ControlFolder}"; Flags: ignoreversion
 
 [Icons]
-Name: "{userprograms}\FS Camera Studio\Tester guide"; Filename: "{localappdata}\FS Camera Studio\TESTER-GUIDE.txt"
-Name: "{userprograms}\FS Camera Studio\User manual"; Filename: "{localappdata}\FS Camera Studio\FS-Camera-Studio-Manual.pdf"
-Name: "{userprograms}\FS Camera Studio\Uninstall"; Filename: "{uninstallexe}"
+Name: "{userprograms}\{#ControlFolder}\Tester guide"; Filename: "{localappdata}\{#ControlFolder}\TESTER-GUIDE.txt"
+Name: "{userprograms}\{#ControlFolder}\User manual"; Filename: "{localappdata}\{#ControlFolder}\FS-Camera-Studio-Manual.pdf"
+Name: "{userprograms}\{#ControlFolder}\Uninstall"; Filename: "{uninstallexe}"
 
 [Code]
 var
@@ -335,7 +345,7 @@ end;
 { Without MSFS, the app folder is setup's own folder (guide, manual, build info): nothing goes to a Community folder. }
 procedure UseControlFolderWithoutMsfs;
 begin
-  if not MsfsSelected then WizardForm.DirEdit.Text := ExpandConstant('{localappdata}\FS Camera Studio');
+  if not MsfsSelected then WizardForm.DirEdit.Text := ExpandConstant('{localappdata}\{#ControlFolder}');
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -377,7 +387,7 @@ procedure NewBackupDir;
 var Base: String; Suffix: Integer;
 begin
   if BackupDir <> '' then exit;
-  Base := ExpandConstant('{localappdata}\FS Camera Studio\Backups\')+GetDateTimeString('yyyymmdd-hhnnss','-',':');
+  Base := ExpandConstant('{localappdata}\{#ControlFolder}\Backups\')+GetDateTimeString('yyyymmdd-hhnnss','-',':');
   BackupDir := Base; Suffix := 0;
   while DirExists(BackupDir) do begin Suffix := Suffix+1; BackupDir := Base+'-'+IntToStr(Suffix); end;
 end;
@@ -451,7 +461,7 @@ begin
   if CurStep = ssPostInstall then begin
     VerifyPayload;
     if BackupDir <> '' then
-      SaveStringToFile(ExpandConstant('{localappdata}\FS Camera Studio\LAST-BACKUP.txt'),BackupDir+#13#10,False);
+      SaveStringToFile(ExpandConstant('{localappdata}\{#ControlFolder}\LAST-BACKUP.txt'),BackupDir+#13#10,False);
   end;
 end;
 
@@ -469,6 +479,6 @@ begin
   Result := Result+
     'Existing package or plugin: backed up before replacement.'+NewLine+
     'Saved aircraft/airport cameras, settings and bindings: preserved.'+NewLine+
-    'Uninstall: Windows Settings > Apps > FS Camera Studio (Tester).'+NewLine+NewLine+
+    'Uninstall: Windows Settings > Apps > {#SetupName}.'+NewLine+NewLine+
     'Close the simulator before installing. This is a tester build; live flight verification is ongoing.';
 end;

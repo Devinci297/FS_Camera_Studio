@@ -23,7 +23,7 @@ def start(title,subtitle,sim='MSFS 2024'):
  c.setFillColor(colors.HexColor('#67dbc5'));c.setFont('Helvetica-Bold',10);c.drawString(38,H-29,'FS CAMERA STUDIO  /  '+sim)
  c.setFillColor(colors.white);c.setFont('Helvetica-Bold',24);c.drawString(38,H-62,title)
  c.setFont('Helvetica',10);c.drawString(38,H-83,subtitle)
- c.setFillColor(GRAY);c.setFont('Helvetica',8);c.drawString(38,23,'Version 0.4.0  |  7 November 2026');c.drawRightString(W-38,23,str(page))
+ c.setFillColor(GRAY);c.setFont('Helvetica',8);c.drawString(38,23,'Version 0.5.0  |  November 2026');c.drawRightString(W-38,23,str(page))
  c.bookmarkPage('page'+str(page));c.addOutlineEntry(title,'page'+str(page),0)
  y=H-126
 def text(value,caption=False):
@@ -43,7 +43,7 @@ def end():c.showPage()
 
 start('Your cameras, your flight','Illustrated user manual - installation, everyday controls and airport views')
 image('editor.png',450)
-text('Build a camera library for each aircraft, adjust views in the simulator, and generate reusable airport cameras from scenery. This guide covers version 0.4 and its default controls.')
+text('Build a camera library for each aircraft, adjust views in the simulator, and generate reusable airport cameras from scenery. This guide covers version 0.5 and its default controls.')
 text('<b>Inside:</b> Setup 2 · Camera editing 3 · Movement 4 · Bindings 5 · Motion and behavior 6 · Airport creation 7 · Arrival and mini panel 8 · Profiles 9 · Updates 10 · Sharing and A320 starters 11 · Motion and panels 12 · Airport defaults 13 · Controller bindings 14 · Import and adapt 15 · Camera feel 16 · Cinematic and drones 17 · Spotting traffic 18 · Mini traffic and gamepad 19 · X-Plane 12 20.')
 text('Images are captured from the release UI in a browser test environment. Example aircraft, values and airport selections illustrate the controls; they are not evidence of a live simulator test.',True)
 end()
