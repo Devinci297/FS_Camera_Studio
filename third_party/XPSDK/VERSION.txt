@@ -1,0 +1,5 @@
+X-Plane SDK 4.4.0-r1 (release candidate 1), 2026-10-29, for X-Plane 12.4.4 and newer.
+Source: https://github.com/X-Plane/xpsdk tag xpsdk_4.4.0-r1 (commit 0329ead).
+Kept: CHeaders/XPLM, CHeaders/Widgets, Libraries/Win, license.txt, README.txt.
+Left out until needed: CHeaders/Wrappers, Delphi, Documentation, XLua_glue, Mac frameworks (Mac support comes later),
+Linux libraries (Linux plugins resolve XPLM symbols at load time).

@@ -6,6 +6,9 @@
  *   module > panel   listener.on("FSCS_HOST_TO_UI", jsonText)
  * Messages longer than 4000 characters travel as { part, of, msgId, chunk } frames in both directions.
  *
+ * X-Plane (XP Camera Studio): the page runs in an X-Plane 12.4.4 browser window opened with ?host=xplane. Frames
+ * go out through the plugin's browser function xplane.fscs(text) and arrive as FSCXPlaneReceive(text) calls.
+ *
  * Demo mode: when RegisterCommBusListener is undefined (plain browser) an in-memory module that follows
  * protocol v2 is used, so the preview exercises the real message flow. Nothing touches disk or network.
  *
@@ -108,6 +111,110 @@
     onMessage(cb) { this.handlers.push(cb); }
   }
 
+  /** XP Camera Studio: X-Plane 12.4.4 browser windows. The plugin registers xplane.fscs / xplane.fscsPanel on each
+   *  window and delivers module frames by injecting FSCXPlaneReceive(frame). The xplane namespace may appear after
+   *  this script runs, so it is looked up on every send; Hello simply retries until it does. */
+  class XPlaneTransport {
+    constructor() { this.handlers = []; this.closing = false; }
+    static available() { return /[?&]host=xplane\b/.test((root.location && root.location.search) || ''); }
+    start(onOpen) {
+      const close = () => { this.closing = true; };
+      if (typeof root.addEventListener === 'function') ['pagehide', 'beforeunload', 'unload'].forEach(name => root.addEventListener(name, close, true));
+      root.FSCXPlaneReceive = frame => { if (!this.closing && typeof frame === 'string') setTimeout(() => this.handlers.forEach(cb => cb(frame)), 0); };
+      setTimeout(onOpen, 0);
+    }
+    send(frame) {
+      const api = root.xplane;
+      if (this.closing || !api || typeof api.fscs !== 'function') return false;
+      try {
+        const reply = api.fscs(frame);
+        if (reply && typeof reply.catch === 'function') reply.catch(error => console.warn('X-Plane send failed', error));
+        return true;
+      } catch (error) { console.warn('X-Plane send failed', error); return false; }
+    }
+    onMessage(cb) { this.handlers.push(cb); }
+  }
+  // The editor's open/close buttons (app.js) call fscsSetPanelOpen; in X-Plane the plugin owns the windows.
+  if (XPlaneTransport.available()) {
+    root.fscsSetPanelOpen = (surface, open) => {
+      const api = root.xplane;
+      if (!api || typeof api.fscsPanel !== 'function') return false;
+      try { api.fscsPanel({ surface, open: Boolean(open) }); return true; } catch (error) { return false; }
+    };
+    // X-Plane draws no frame around the windows: dragging the editor's header (or an empty part of the mini dock) moves
+    // the window. The plugin follows the mouse between start and end, so page coordinates never matter.
+    const INTERACTIVE = 'button,input,textarea,select,a,summary,label,[contenteditable],[role="button"],[role="slider"],[draggable="true"],.mc-sb,.mc-dialog';
+    const surfaceName = /[?&]surface=mini\b/.test((root.location && root.location.search) || '') ? 'mini' : 'main';
+    let dragging = false;
+    const drag = phase => {
+      const api = root.xplane;
+      if (!api || typeof api.fscsPanelDrag !== 'function') return;
+      try { const r = api.fscsPanelDrag({ surface: surfaceName, phase }); if (r && typeof r.catch === 'function') r.catch(() => {}); } catch (error) { /* older plugin */ }
+    };
+    const endDrag = () => { if (dragging) { dragging = false; drag('end'); } };
+    if (root.document && typeof root.document.addEventListener === 'function') {
+      root.document.addEventListener('mousedown', event => {
+        if (event.button !== 0 || !event.target || !event.target.closest) return;
+        const zone = event.target.closest(surfaceName === 'mini' ? '#mc-mini-panel' : '#mc-drag-header');
+        if (!zone || event.target.closest(INTERACTIVE)) return;
+        dragging = true;
+        drag('start');
+        event.preventDefault();
+      }, true);
+      root.document.addEventListener('mouseup', endDrag, true);
+      root.document.addEventListener('mousemove', event => { if (dragging && event.buttons === 0) endDrag(); }, true);
+      if (typeof root.addEventListener === 'function') root.addEventListener('blur', endDrag);
+    }
+    // The mini window fits its content: the dock, plus room above it while a dialog or menu is open. app.js calls
+    // fscsUpdateMiniRect whenever the dock or a mini dialog changes; the plugin keeps the window's bottom edge.
+    if (/[?&]surface=mini\b/.test((root.location && root.location.search) || '')) {
+      let sentHeight = 0;
+      // A dialog's CSS caps it at the window height, which squeezes its body to nothing in a short window: measure it
+      // as it would be with room to spare.
+      const naturalHeight = dialog => {
+        const cap = dialog.style.maxHeight;
+        dialog.style.maxHeight = 'none';
+        const body = dialog.querySelector('.mc-dialog-body');
+        const height = dialog.offsetHeight + (body ? Math.max(0, body.scrollHeight - body.clientHeight) : 0);
+        dialog.style.maxHeight = cap;
+        return height;
+      };
+      // After the window grows, put a dialog that app.js placed in the short window back just above the dock.
+      const placeDialog = () => {
+        const doc = root.document, shade = doc.getElementById('mc-dialog-shade'), dock = doc.getElementById('mc-mini-panel');
+        const dialog = shade && !shade.hidden && shade.querySelector('.mc-dialog');
+        if (!dialog || !dock || !dialog.style.top) return;
+        dialog.style.top = Math.max(8, dock.getBoundingClientRect().top - dialog.offsetHeight - 8) + 'px';
+      };
+      if (typeof root.addEventListener === 'function') root.addEventListener('resize', () => setTimeout(placeDialog, 0));
+      const fitMini = () => {
+        const api = root.xplane, doc = root.document, dock = doc && doc.getElementById && doc.getElementById('mc-mini-panel');
+        if (!api || typeof api.fscsPanelSize !== 'function' || !dock) return;
+        let height = dock.getBoundingClientRect().height + 8;
+        const shade = doc.getElementById('mc-dialog-shade'), dialog = shade && !shade.hidden && shade.querySelector('.mc-dialog');
+        if (dialog) {
+          // A context menu is fixed above the dock; other dialogs sit in the shade's padded column.
+          const css = root.getComputedStyle ? root.getComputedStyle(shade) : null;
+          const fixed = root.getComputedStyle && root.getComputedStyle(dialog).position === 'fixed';
+          height += naturalHeight(dialog) + (fixed || !css ? 16 : (parseFloat(css.paddingTop) || 0) + (parseFloat(css.paddingBottom) || 0));
+        }
+        height = Math.ceil(height);
+        if (height < 40 || Math.abs(height - sentHeight) < 3) return;
+        sentHeight = height;
+        try { const r = api.fscsPanelSize({ surface: 'mini', height }); if (r && typeof r.catch === 'function') r.catch(() => {}); } catch (error) { /* older plugin */ }
+      };
+      root.fscsUpdateMiniRect = () => (typeof root.requestAnimationFrame === 'function' ? root.requestAnimationFrame(fitMini) : setTimeout(fitMini, 16));
+      const watch = () => {
+        const doc = root.document, dock = doc && doc.getElementById && doc.getElementById('mc-mini-panel'), shade = doc && doc.getElementById && doc.getElementById('mc-dialog-shade');
+        if (dock && typeof root.ResizeObserver === 'function') new root.ResizeObserver(root.fscsUpdateMiniRect).observe(dock);
+        if (shade && typeof root.MutationObserver === 'function') new root.MutationObserver(root.fscsUpdateMiniRect).observe(shade, { attributes: true, attributeFilter: ['hidden'] });
+        root.fscsUpdateMiniRect();
+      };
+      if (root.document && root.document.readyState === 'loading') root.document.addEventListener('DOMContentLoaded', watch);
+      else if (root.document && root.document.getElementById) watch();
+    }
+  }
+
   /** In-browser stand-in with the same shape; frames are real JSON text so chunking is exercised too. */
   class DemoTransport {
     constructor() {
@@ -122,7 +229,7 @@
   /* ------------- Bridge ------------- */
   function create(options) {
     const surface = (options && options.surface) || 'main';
-    const transport = CommBusTransport.available() ? new CommBusTransport() : new DemoTransport();
+    const transport = XPlaneTransport.available() ? new XPlaneTransport() : CommBusTransport.available() ? new CommBusTransport() : new DemoTransport();
     const uiInstanceId = surface + '-' + randomHex(12);
     const context = { moduleBootId: null, sessionEpoch: null, draftRevision: null };
     const listeners = { event: [], ack: [] };
@@ -171,7 +278,7 @@
     }
 
     return {
-      mode: transport instanceof CommBusTransport ? 'commbus' : 'demo',
+      mode: transport instanceof XPlaneTransport ? 'xplane' : transport instanceof CommBusTransport ? 'commbus' : 'demo',
       surface,
       uiInstanceId,
       context,
