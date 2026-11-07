@@ -24,6 +24,7 @@
 #include <dlfcn.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -31,6 +32,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 using json = nlohmann::json;
@@ -58,7 +60,7 @@ int g_paused = 0;
 const char* kUiName = "Cessna 172 SP";
 
 // Datarefs by name; the plugin finds what it needs and the test reads and sets values.
-struct Ref { std::string name; std::vector<double> v = std::vector<double>(1, 0.0); };
+struct Ref { std::string name; std::vector<double> v = std::vector<double>(1, 0.0); std::string bytes; };
 std::map<std::string, Ref*> g_refs;
 Ref* ref(const std::string& name) {
     auto& r = g_refs[name];
@@ -184,6 +186,13 @@ void XPLMSetDataf(XPLMDataRef r, float value) {
                                                             {"sim/graphics/view/pilots_head_z", "sim/aircraft/view/acf_peZ"}};
     if (const auto it = follows.find(ref->name); it != follows.end()) dr(it->second) = value;
 }
+int XPLMGetDatavi(XPLMDataRef r, int* values, int offset, int max) {
+    const auto& v = static_cast<Ref*>(r)->v;
+    if (!values) return static_cast<int>(v.size());
+    int n = 0;
+    for (int i = offset; i < static_cast<int>(v.size()) && n < max; ++i) values[n++] = static_cast<int>(v[i]);
+    return n;
+}
 int XPLMGetDatavf(XPLMDataRef r, float* values, int offset, int max) {
     const auto& v = static_cast<Ref*>(r)->v;
     if (!values) return static_cast<int>(v.size());
@@ -245,11 +254,14 @@ XPLMProbeResult XPLMProbeTerrainXYZ(XPLMProbeRef, float x, float, float z, XPLMP
     info->locationZ = z;
     return xplm_ProbeHitTerrain;
 }
-int XPLMGetDatab(XPLMDataRef, void* value, int offset, int max) {
-    const int n = static_cast<int>(std::strlen(kUiName));
+// Byte datarefs: the test's bytes, else the aircraft's name (acf_ui_name).
+int XPLMGetDatab(XPLMDataRef r, void* value, int offset, int max) {
+    const std::string& b = static_cast<Ref*>(r)->bytes;
+    const char* data = b.empty() ? kUiName : b.data();
+    const int n = b.empty() ? static_cast<int>(std::strlen(kUiName)) : static_cast<int>(b.size());
     if (!value) return n;
     const int count = std::max(0, std::min(max, n - offset));
-    std::memcpy(value, kUiName + offset, static_cast<std::size_t>(count));
+    std::memcpy(value, data + offset, static_cast<std::size_t>(count));
     return count;
 }
 void XPLMGetNthAircraftModel(int, char* file, char* path) {
@@ -430,6 +442,48 @@ bool command(const std::string& name, XPLMCommandPhase phase) {
     return false;
 }
 bool press(const std::string& name) { return command(name, xplm_CommandBegin) && command(name, xplm_CommandEnd); }
+
+// Scenery for the airport checks: a Custom Scenery pack that overrides LSZX, a disabled pack, and Global Airports
+// with its own LSZX, a nearby LSZW, a heliport and a far airport. Around 47 N 8 E, where the aircraft stands.
+void writeFile(const fs::path& p, const std::string& text) {
+    fs::create_directories(p.parent_path());
+    FILE* f = std::fopen(p.c_str(), "wb");
+    std::fputs(text.c_str(), f);
+    std::fclose(f);
+}
+void writeScenery(const fs::path& root) {
+    const fs::path custom = root / "Custom Scenery";
+    writeFile(custom / "scenery_packs.ini",
+              "I\r\n1000 Version\r\nSCENERY_PACK Custom Scenery/LSZX Custom/\r\n"
+              "SCENERY_PACK_DISABLED Custom Scenery/Disabled Pack/\r\nSCENERY_PACK *GLOBAL_AIRPORTS*\r\n");
+    writeFile(custom / "LSZX Custom" / "Earth nav data" / "apt.dat",
+              "I\r\n1200 Version - test\r\n\r\n"
+              "1 1312 0 0 LSZX Test Field Custom\r\n"
+              "1302 datum_lat 47.010000\r\n1302 datum_lon 8.010000\r\n1302 region_code LS\r\n"
+              "100 30.00 1 0 0.25 0 2 1 09 47.01000000 7.99800000 0 0 3 0 0 0 27 47.01000000 8.02200000 0 0 3 0 0 0\r\n"
+              "14 47.01200000 8.01000000 50 0 Tower\r\n"
+              "1300 47.00900000 8.00500000 0.00 gate jets|turboprops A1\r\n1301 C airline\r\n"
+              "1300 47.00900000 8.00600000 180.00 tie_down props Ramp 1\r\n"
+              "1201 47.00950000 8.00000000 both 0 a\r\n1201 47.00950000 8.01000000 both 1 b\r\n"
+              "1201 47.00950000 8.02000000 both 2 c\r\n1201 47.00900000 8.01000000 both 3 d\r\n"
+              "1201 47.01000000 8.01000000 both 4 e\r\n"
+              "1202 0 1 twoway taxiway_C A\r\n1202 1 2 twoway taxiway_C A\r\n1202 1 3 twoway taxiway B\r\n"
+              "1202 1 4 twoway runway 09/27\r\n"
+              "20 47.00960000 8.00900000 90.0 0 2 {@Y}A{@R}09-27\r\n"
+              "99\r\n");
+    writeFile(custom / "Disabled Pack" / "Earth nav data" / "apt.dat",
+              "I\n1200 Version\n1 1300 0 0 LSZY Disabled Field\n1302 datum_lat 47.0\n1302 datum_lon 8.0\n99\n");
+    writeFile(root / "Global Scenery" / "Global Airports" / "Earth nav data" / "apt.dat",
+              "I\n1200 Version\n"
+              "1 1300 0 0 LSZX Global LSZX\n1302 datum_lat 47.010000\n1302 datum_lon 8.010000\n"
+              "100 30.00 1 0 0.25 0 2 1 18 47.02000000 8.01000000 0 0 3 0 0 0 36 47.00000000 8.01000000 0 0 3 0 0 0\n"
+              "17 1300 0 0 LSZV Helipad\n102 H1 47.00100000 8.00100000 0 20 20 1 0 0 0.25 0\n"
+              // No datum: placed at its runway's middle.
+              "1 1400 0 0 LSZW West Field\n"
+              "100 25.00 1 0 0.25 0 2 1 05 47.04000000 8.04000000 0 0 3 0 0 0 23 47.06000000 8.06000000 0 0 3 0 0 0\n"
+              "1 1400 0 0 LSZG Far Field\n1302 datum_lat 49.000000\n1302 datum_lon 8.000000\n"
+              "99\n");
+}
 
 FakeWindow* openEditor() {
     for (Command* c : g_commands)
@@ -773,7 +827,8 @@ int main(int argc, char** argv) {
     page.send("TextFocus", {{"focused", false}});
     check(g_keyboard == nullptr, "losing text focus gives the keyboard back");
 
-    // Disable and enable: the profile is read back from the files.
+    // Disable and enable: the profile is read back from the files (and the plugin indexes the scenery below).
+    writeScenery(g_root);
     plugin.disable();
     check(g_windows.empty(), "XPluginDisable closes the windows");
     check(plugin.enable() == 1, "XPluginEnable again");
@@ -784,6 +839,94 @@ int main(int argc, char** argv) {
     msgs = again.drain();
     const std::string reloaded = again.find(msgs, "Snapshot").dump();
     check(reloaded.find("XP Captain") != std::string::npos, "after a restart the saved profile is loaded with the renamed camera");
+    // Airports from apt.dat: indexed in the background, then the nearby list and a temporary airport set, as the
+    // module does for MSFS scenery.
+    {
+        json state = json::object();
+        for (int i = 0; i < 600; ++i) {
+            frames(2);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            for (const auto& m : again.drain())
+                if (m.value("name", "") == "AirportsChanged") state = m["payload"];
+            if (state.is_object() && state.value("loaded", "") == "LSZX") break;
+        }
+        std::vector<std::string> codes;
+        for (const auto& a : state.value("facilities", json::array())) codes.push_back(a.value("icao", ""));
+        auto has = [&](const char* c) { return std::find(codes.begin(), codes.end(), c) != codes.end(); };
+        check(has("LSZX") && has("LSZW") && !has("LSZY") && !has("LSZV") && !has("LSZG"),
+              "nearby airports: LSZX and LSZW, not a disabled pack, a heliport or a far airport: " + json(codes).dump());
+        check(state.value("loaded", "") == "LSZX" && state.value("transient", false) &&
+                  state.value("loadedName", "") == "Test Field Custom",
+              "the aircraft's airport gets a temporary set from the Custom Scenery LSZX (it wins over Global Airports)");
+
+        const std::string preview = again.send("PreviewAirports", {{"codes", {"LSZX", "NOPE"}},
+            {"options", {{"runways", true}, {"spotting", true}, {"parking", true}, {"taxi", true}, {"tower", true}}}});
+        json lszx, nope;
+        for (int i = 0; i < 300 && (lszx.is_null() || nope.is_null()); ++i) {
+            frames(1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            for (const auto& m : again.drain())
+                if (m.value("name", "") == "AirportPreview") (m["payload"].value("icao", "") == "LSZX" ? lszx : nope) = m["payload"];
+        }
+        std::map<std::string, std::string> cams;  // name -> category name
+        std::map<std::string, std::string> catNames;
+        if (lszx.contains("profile") && lszx["profile"].is_object()) {
+            for (const auto& c : lszx["profile"]["categories"]) catNames[c.value("id", "")] = c.value("name", "");
+            for (const auto& c : lszx["profile"]["cameras"]) cams[c.value("name", "")] = catNames[c.value("categoryId", "")];
+        }
+        std::string names;
+        for (const auto& [n, c] : cams) names += n + " (" + c + "), ";
+        check(cams["09 threshold"] == "Runways" && cams["27 approach"] == "Runways" && cams["09 fence line"] == "Spotting",
+              "the preview has both runway ends: " + names);
+        check(cams["A1"] == "Gates" && cams["Ramp 1"] == "Apron" && cams["Tower overview"] == "Tower",
+              "a gate, a tie-down on the apron and the real tower");
+        check(cams["Sign A 09-27"] == "Taxi signs", "and the taxi sign, by its text");
+        if (!nope.is_object()) nope = json::object();
+        check(nope.value("error", "").find("NOPE") != std::string::npos, "an unknown code says so: " + nope.dump());
+    }
+
+    // Traffic from the TCAS targets: index 0 is the user, 1 an airliner 1 km north at 700 m, 2 one 300 km away.
+    {
+        auto arr = [](const char* name, std::vector<double> v) {
+            v.resize(64, 0.0);
+            ref(name)->v = v;
+        };
+        dr("sim/cockpit2/tcas/indicators/tcas_num_acf") = 3;
+        arr("sim/cockpit2/tcas/targets/position/x", {0, 600, 300000});
+        arr("sim/cockpit2/tcas/targets/position/y", {kTerrain + 1, 700, 3000});
+        arr("sim/cockpit2/tcas/targets/position/z", {0, -1000, 0});
+        arr("sim/cockpit2/tcas/targets/position/psi", {0, 90, 0});
+        arr("sim/cockpit2/tcas/targets/position/vx", {0, 60, 0});
+        arr("sim/cockpit2/tcas/targets/position/vy", {0, 2, 0});
+        arr("sim/cockpit2/tcas/targets/modeS_id", {0x111111, 0xABCDEF, 0x222222});
+        std::string flight(512, '\0'), type(512, '\0');
+        flight.replace(8, 6, "DLH4AB");
+        type.replace(8, 4, "A320");
+        ref("sim/cockpit2/tcas/targets/flight_id")->bytes = flight;
+        ref("sim/cockpit2/tcas/targets/icao_type")->bytes = type;
+        json list;
+        for (int i = 0; i < 300 && list.is_null(); ++i) {
+            frames(2);
+            for (const auto& m : again.drain())
+                if (m.value("name", "") == "TrafficChanged" && m["payload"].dump().find("DLH4AB") != std::string::npos) list = m["payload"];
+        }
+        const std::string text = list.dump();
+        check(text.find("A320") != std::string::npos && text.find(std::to_string(0xABCDEF)) != std::string::npos &&
+                  text.find(std::to_string(0x222222)) == std::string::npos,
+              "TrafficChanged lists DLH4AB (A320) by its mode S id, not the far one: " + text.substr(0, 400));
+        const std::string spot = again.send("SpotTarget", {{"objectId", 0xABCDEF}, {"view", "chase"}});
+        frames(120);
+        json ack = again.ack(again.drain(), spot);
+        if (!ack.is_object()) ack = json::object();
+        XPLMCameraPosition_t cp{};
+        XPLMReadCameraPosition(&cp);
+        const double dist = std::hypot(cp.x - 600, cp.y - 700, cp.z + 1000);
+        check(ack.value("status", "") == "Completed" && g_camera && dist < 300,
+              "spotting it puts a chase camera on it: " + ack.value("status", std::string("?")) + ", " + std::to_string(dist) + " m");
+        again.send("StopSpotting");
+        frames(30);
+    }
+
     if (argc > 3) {  // optional: keep the reloaded Snapshot, e.g. to render it in the real page
         if (FILE* f = std::fopen(argv[3], "wb")) {
             std::fputs(again.find(msgs, "Snapshot").dump().c_str(), f);

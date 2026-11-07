@@ -3,12 +3,14 @@
 // the camera through the pilot's head datarefs and XPLMControlCamera (xp_camera.hpp).
 
 #include "module_app.hpp"
+#include "xp_airports.hpp"
 #include "xp_backends.hpp"
 #include "xp_camera.hpp"
 #include "xp_geometry.hpp"
 #include "xp_mouse.hpp"
 #include "xp_panels.hpp"
 #include "xp_storage.hpp"
+#include "xp_traffic.hpp"
 #include "fscs/profiles/profile.hpp"
 
 #include <XPLMDataAccess.h>
@@ -78,6 +80,10 @@ struct Host {
     std::unique_ptr<xplane::XPStorage> storage;
     xplane::PanelWindows panels;
     std::unique_ptr<xplane::MouseLook> mouse;
+    xplane::apt::Database airports;
+    bool airportsLogged = false;
+    double airportsStarted = 0;
+    std::unique_ptr<xplane::TrafficSource> traffic;
     std::unique_ptr<host::ModuleApp> app;
     std::deque<std::pair<xplane::PanelWindows::Surface, std::string>> inbound;
     fs::path xplaneRoot;
@@ -323,6 +329,7 @@ void publishTelemetry() {
     if (!t.lat || !t.lon) return;
     const double lat = d(t.lat), lon = d(t.lon), elevation = d(t.elevation);
     deliver(be::AircraftPosition{lat, lon, elevation, f(t.truePsi)});
+    g->services.setPosition(lat, lon);
     host::backend_event::MotionTelemetry m;
     m.motion.onGround = t.onGround && XPLMGetDatai(t.onGround) != 0 ? 1 : 0;
     m.motion.groundSpeed = f(t.groundSpeed);
@@ -368,6 +375,14 @@ float flightLoop(float elapsedSinceLastCall, float, int, void*) {
         }
     }
     publishTelemetry();
+    if (!g->airportsLogged && g->airports.ready()) {
+        g->airportsLogged = true;
+        char took[32];
+        std::snprintf(took, sizeof(took), "%.1f", g->now - g->airportsStarted);
+        log("airports: " + std::to_string(g->airports.airports()) + " from " + std::to_string(g->airports.files()) +
+            " apt.dat files in " + took + " s");
+    }
+    g->traffic->frame();
     std::vector<BackendEvent> events;
     g->services.dispatch([&](BackendEvent e) { events.push_back(std::move(e)); });
     g->camera.dispatch([&](BackendEvent e) { events.push_back(std::move(e)); });
@@ -418,6 +433,11 @@ bool startHost() {
     g->services.toPanels = [](const std::string& text) { if (g) g->panels.post(text); };
     g->mouse = std::make_unique<xplane::MouseLook>([](BackendEvent e) { if (g) g->services.stage(std::move(e)); });
     g->services.onNativeMouse = [](bool on) { if (g && g->mouse) g->mouse->setEnabled(on); };
+    // apt.dat is indexed in the background: nearby airports are answered once it is done.
+    g->airports.start(g->xplaneRoot);
+    g->services.airports = &g->airports;
+    g->traffic = std::make_unique<xplane::TrafficSource>([](BackendEvent e) { if (g) g->services.stage(std::move(e)); });
+    g->services.traffic = g->traffic.get();
 
     g->app = std::make_unique<host::ModuleApp>(g->camera, g->services, *g->storage, bootId(), XPCS_VERSION);
     g->app->start(0.0);
@@ -433,6 +453,10 @@ void stopHost() {
     if (!g) return;
     if (g->app) g->app->shutdown(g->now);
     g->services.onNativeMouse = nullptr;
+    g->services.airports = nullptr;
+    g->services.traffic = nullptr;
+    g->airports.stop();
+    if (g->traffic) g->traffic->destroy();
     if (g->mouse) g->mouse->destroy();
     g->panels.destroy();
     delete g;

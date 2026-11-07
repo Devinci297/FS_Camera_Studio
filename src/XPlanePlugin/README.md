@@ -53,6 +53,19 @@ the key or button is down.
 | `xpcs/cinematic`, `xpcs/auto_spot` | int | 1 while cinematic mode / automatic spotting runs |
 | `xpcs/editor_open`, `xpcs/mini_open` | int | 1 while that window is shown |
 
+## Airports and spotting
+
+Airport cameras come from X-Plane's own scenery files. At start the plugin indexes every `Earth nav data/apt.dat` of
+the enabled packs in `Custom Scenery/scenery_packs.ini` plus `Global Scenery/Global Airports` (where
+`*GLOBAL_AIRPORTS*` is listed), on a worker thread; the first pack to list an airport wins, as in X-Plane. An airport
+gives runways (rows 100 and 101), the tower viewpoint (14), startup locations as gates and parking (1300 and 1301, or
+older 15 rows), the taxi network (1201 and 1202) and taxi signs (20, labelled by their text). The log says
+`airports: N from M apt.dat files` when the index is ready.
+
+Spotting traffic is read from X-Plane's TCAS targets (`sim/cockpit2/tcas/targets/...`), where X-Plane puts its AI
+aircraft and multiplayer or traffic plugins put theirs. Each aircraft is known by its mode S id; its callsign is the
+`flight_id` and its type the `icao_type`.
+
 ## How the UI connects
 
 The plugin opens `ui/index.html?surface=main|mini&host=xplane`. `ui/bridge.js` sees `host=xplane` and sends frames
@@ -63,5 +76,6 @@ are the same protocol v2 JSON as the MSFS CommBus. `xplane.fscsPanel({surface, o
 
 `xpcs_fake_xplane` (`tests/fake_xplane.cpp`) is a stand-in X-Plane: it implements the XPLM calls the plugin uses,
 loads the built `.xpl` and plays a browser window (Hello and Snapshot, create, edit and save a profile, reload after
-disable and enable, keyboard focus, window fit and drag, cockpit and exterior cameras, commands and datarefs). It runs with `ctest` in a Linux build with `-DFSCS_BUILD_XPLANE=ON`.
+disable and enable, keyboard focus, window fit and drag, cockpit and exterior cameras, commands and datarefs,
+nearby airports and an airport preview from test scenery, TCAS traffic and spotting it). It runs with `ctest` in a Linux build with `-DFSCS_BUILD_XPLANE=ON`.
 `node ui/tests/xplane-bridge.test.mjs` checks the UI side of the connection.

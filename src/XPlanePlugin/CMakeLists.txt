@@ -11,8 +11,10 @@ set(XPCS_VERSION "0.1.0" CACHE STRING "XP Camera Studio version")
 # The module libraries are linked into a shared plugin.
 set_target_properties(fscs_core fscs_profiles fscs_protocol fscs_modulelib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-add_library(xpcs_plugin MODULE plugin_main.cpp xp_camera.cpp xp_mouse.cpp xp_panels.cpp xp_storage.cpp)
-target_link_libraries(xpcs_plugin PRIVATE fscs_modulelib fscs_json)
+add_library(xpcs_plugin MODULE plugin_main.cpp xp_airports.cpp xp_camera.cpp xp_mouse.cpp xp_panels.cpp xp_storage.cpp
+    xp_traffic.cpp)
+find_package(Threads REQUIRED)  # the apt.dat index runs on a worker thread
+target_link_libraries(xpcs_plugin PRIVATE fscs_modulelib fscs_json Threads::Threads)
 target_include_directories(xpcs_plugin SYSTEM PRIVATE "${FSCS_XPSDK_DIR}/CHeaders/XPLM")
 target_compile_definitions(xpcs_plugin PRIVATE XPCS_VERSION="${XPCS_VERSION}"
     # Every API level up to 4.4.0 (the macros are not cumulative).
