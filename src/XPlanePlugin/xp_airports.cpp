@@ -253,13 +253,15 @@ std::vector<fs::path> sceneryFiles(const fs::path& root) {
     return out;
 }
 
-void index(const fs::path& path, std::uint32_t file, std::vector<Entry>& out) {
+void index(const fs::path& path, std::uint32_t file, std::vector<Entry>& out, const std::atomic<bool>* stop) {
     LineReader reader(path);
     if (!reader.ok()) return;
     Pending p;
     std::string_view line;
     std::uint64_t offset = 0;
+    std::uint32_t lines = 0;
     while (reader.next(line, offset)) {
+        if (stop && (++lines & 0xffff) == 0 && stop->load()) return;  // X-Plane is quitting: never hold it up
         const int code = rowCode(line);
         if (code < 0) continue;
         if (header(code)) {
@@ -299,9 +301,10 @@ void index(const fs::path& path, std::uint32_t file, std::vector<Entry>& out) {
 }
 
 std::string signLabel(std::string_view text) {
-    // The front of the sign only ("front|back"); {..} are colour and glyph instructions, the rest is printed.
-    const auto bar = text.find('|');
-    if (bar != std::string_view::npos) text = text.substr(0, bar);
+    // The front of the sign only ({@@} starts the back); {..} are colour and glyph instructions, the rest is printed
+    // ("|" is a divider bar).
+    const auto back = text.find("{@@}");
+    if (back != std::string_view::npos) text = text.substr(0, back);
     std::string out;
     bool inBrace = false;
     for (const char c : text) {
@@ -311,7 +314,7 @@ std::string signLabel(std::string_view text) {
         } else if (c == '}') {
             inBrace = false;
         } else if (!inBrace) {
-            out.push_back(c);
+            out.push_back(c == '|' ? ' ' : c);
         }
     }
     std::string squeezed;
@@ -351,7 +354,7 @@ json facility(const fs::path& path, const Entry& entry, bool summary) {
         keys.insert(key);
         const auto at = local(lat, lon);
         json stand = {{"name", name.substr(0, 60)}, {"key", key}, {"gate", gate}, {"type", type}, {"number", number},
-                      {"nameCode", 0}, {"suffixCode", 0}, {"heading", std::isfinite(heading) ? heading : 0.0},
+                      {"nameCode", 0}, {"suffixCode", 0}, {"heading", std::isfinite(heading) ? std::fmod(std::fmod(heading, 360.0) + 360.0, 360.0) : 0.0},
                       {"radius", heavy ? 32.5 : jets ? 18.0 : 9.0}, {"east", at.y}, {"north", at.x}};
         into.push_back(std::move(stand));
     };
@@ -429,14 +432,17 @@ json facility(const fs::path& path, const Entry& entry, bool summary) {
             const auto r = fields(line, 7);
             if (r.size() < 7) continue;
             const double lat = num(r[1]), lon = num(r[2]), heading = num(r[3], 0);
-            const std::string label = signLabel(rest(line, 6));
+            const std::string text = rest(line, 6);
+            if (text.rfind("{@B}", 0) == 0) continue;  // runway distance remaining boards: dozens, all alike
+            const std::string label = signLabel(text);
             if (!validLatLon(lat, lon) || label.empty()) continue;
             char key[48];
             std::snprintf(key, sizeof(key), "xp:%.6f,%.6f", lat, lon);
             // X-Plane gives the heading of someone reading the sign; the generator stands 90 degrees off its value,
             // so this puts the camera in front of the sign, looking at it.
             f["signs"].push_back({{"lat", lat}, {"lon", lon}, {"altitude", entry.elevation},
-                                  {"heading", std::fmod(heading + 90.0, 360.0)}, {"key", key}, {"label", "Sign " + label}});
+                                  {"heading", std::fmod(std::fmod(heading + 90.0, 360.0) + 360.0, 360.0)}, {"key", key},
+                                  {"label", "Sign " + label}});
         }
     }
     // Older scenery: row-15 startup locations, when there are no 1300 rows.
@@ -467,7 +473,7 @@ void Database::stop() {
 
 void Database::run(fs::path root) {
     files_ = sceneryFiles(root);
-    for (std::uint32_t i = 0; i < files_.size() && !stopping_; ++i) index(files_[i], i, entries_);
+    for (std::uint32_t i = 0; i < files_.size() && !stopping_; ++i) index(files_[i], i, entries_, &stopping_);
     // The first file to list an airport wins: Custom Scenery before Global Airports.
     for (std::size_t i = 0; i < entries_.size(); ++i) byId_.emplace(entries_[i].id, i);
     ready_ = true;

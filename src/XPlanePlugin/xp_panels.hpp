@@ -59,7 +59,9 @@ private:
         bool autoHide = false;  // hover mode, set by the page
         bool revealed = false;  // hover mode: the mouse brought it up
         double leftAt = -1;     // hover mode: when the mouse left it
+        int pendingPop = 0;     // the page asked to pop out (1) or dock (-1): done in update(), never in its call
     };
+    void applyPop(Win& w);
     void apply(Win& w);
     void updateHover(Win& w, double now);
     static const char* onPanelHover(XPLMWindowID window, const char* json, void* refcon);

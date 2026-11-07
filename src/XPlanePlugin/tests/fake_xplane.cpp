@@ -469,7 +469,8 @@ void writeScenery(const fs::path& root) {
               "1201 47.01000000 8.01000000 both 4 e\r\n"
               "1202 0 1 twoway taxiway_C A\r\n1202 1 2 twoway taxiway_C A\r\n1202 1 3 twoway taxiway B\r\n"
               "1202 1 4 twoway runway 09/27\r\n"
-              "20 47.00960000 8.00900000 90.0 0 2 {@Y}A{@R}09-27\r\n"
+              "20 47.00960000 8.00900000 90.0 0 2 {@Y}A{@R}09-27{@@}{@L}A\r\n"
+              "20 47.00970000 8.01500000 -90.0 0 4 {@B}1{@@}10\r\n"
               "99\r\n");
     writeFile(custom / "Disabled Pack" / "Earth nav data" / "apt.dat",
               "I\n1200 Version\n1 1300 0 0 LSZY Disabled Field\n1302 datum_lat 47.0\n1302 datum_lon 8.0\n99\n");
@@ -620,10 +621,19 @@ int main(int argc, char** argv) {
     if (win->functions.count("fscsPanelPopOut")) {
         auto [popFn, popRefcon] = win->functions.at("fscsPanelPopOut");
         const int left = win->params.left, top = win->params.top;
-        check(std::string(popFn(win, R"({"surface":"main"})", popRefcon)) == "out" && win->mode == xplm_WindowPopOut, "fscsPanelPopOut pops the editor out");
-        check(std::string(popFn(win, R"({"surface":"main"})", popRefcon)) == "in" && win->mode == xplm_WindowPositionFree &&
-                  win->params.left == left && win->params.top == top,
+        // Never inside the page's own call (X-Plane hung rebuilding the view while the page waited): on the next frame.
+        const std::string answer = popFn(win, R"({"surface":"main"})", popRefcon);
+        check(answer == "out" && win->mode == xplm_WindowPositionFree, "fscsPanelPopOut answers out and leaves the move for the flight loop");
+        frames(1);
+        check(win->mode == xplm_WindowPopOut, "the next frame pops the editor out");
+        check(std::string(popFn(win, R"({"surface":"main"})", popRefcon)) == "in", "a second click answers in");
+        frames(1);
+        check(win->mode == xplm_WindowPositionFree && win->params.left == left && win->params.top == top,
               "and docks it back where it was");
+        popFn(win, R"({"surface":"main"})", popRefcon);
+        popFn(win, R"({"surface":"main"})", popRefcon);
+        frames(1);
+        check(win->mode == xplm_WindowPositionFree, "two clicks before a frame cancel out");
     } else {
         check(false, "the editor registers fscsPanelPopOut");
     }
@@ -880,7 +890,10 @@ int main(int argc, char** argv) {
               "the preview has both runway ends: " + names);
         check(cams["A1"] == "Gates" && cams["Ramp 1"] == "Apron" && cams["Tower overview"] == "Tower",
               "a gate, a tie-down on the apron and the real tower");
-        check(cams["Sign A 09-27"] == "Taxi signs", "and the taxi sign, by its text");
+        int signs = 0;
+        for (const auto& [n, c] : cams) signs += c == "Taxi signs";
+        check(cams["Sign A 09-27"] == "Taxi signs" && signs == 1,
+              "and the taxi sign by its front text, without the distance-remaining board");
         if (!nope.is_object()) nope = json::object();
         check(nope.value("error", "").find("NOPE") != std::string::npos, "an unknown code says so: " + nope.dump());
     }

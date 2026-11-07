@@ -56,8 +56,9 @@ private:
 
 // apt.dat files in priority order.
 std::vector<std::filesystem::path> sceneryFiles(const std::filesystem::path& xplaneRoot);
-// Every airport header in one file.
-void index(const std::filesystem::path& path, std::uint32_t file, std::vector<Entry>& out);
+// Every airport header in one file (stops early once *stop is set).
+void index(const std::filesystem::path& path, std::uint32_t file, std::vector<Entry>& out,
+           const std::atomic<bool>* stop = nullptr);
 // One airport's block as facility JSON (summary: without the taxi network and signs); null when it is not there.
 nlohmann::json facility(const std::filesystem::path& path, const Entry& entry, bool summary);
 // A taxi sign's text without its markup: "{@Y}A{@R}16R-34L" reads "A 16R-34L".

@@ -166,7 +166,28 @@ void PanelWindows::updateHover(Win& w, double now) {
     apply(w);
 }
 
+// Popping out moves the browser into a desktop window of its own. X-Plane hung doing that inside the page's own
+// xplane.fscsPanelPopOut call (the page waits for the answer while its view is rebuilt), so it happens here, in the
+// flight loop, after the page has its answer.
+void PanelWindows::applyPop(Win& w) {
+    const int pop = w.pendingPop;
+    w.pendingPop = 0;
+    if (!w.id || !pop) return;
+    const bool out = pop > 0;
+    if (out == (XPLMWindowIsPoppedOut(w.id) != 0)) return;
+    if (out) {
+        XPLMGetWindowGeometry(w.id, &w.left, &w.top, &w.right, &w.bottom);  // to dock it back there
+        XPLMSetWindowPositioningMode(w.id, xplm_WindowPopOut, -1);
+    } else {
+        // Back inside X-Plane, where it was before it popped out.
+        XPLMSetWindowPositioningMode(w.id, xplm_WindowPositionFree, -1);
+        if (w.left < w.right && w.bottom < w.top) XPLMSetWindowGeometry(w.id, w.left, w.top, w.right, w.bottom);
+    }
+    log(std::string("editor ") + (out ? "popped out" : "docked"));
+}
+
 void PanelWindows::update(double now) {
+    for (Win& w : wins_) applyPop(w);
     for (Win& w : wins_) updateHover(w, now);
     for (Win& w : wins_) {
         if (!w.dragging) continue;
@@ -202,6 +223,7 @@ void PanelWindows::destroy() {
         w.dragging = false;
         w.wanted = w.revealed = w.autoHide = false;
         w.leftAt = -1;
+        w.pendingPop = 0;
     }
     outbox_.clear();
 }
@@ -259,18 +281,12 @@ const char* PanelWindows::onPanelHover(XPLMWindowID, const char* text, void* ref
 const char* PanelWindows::onPanelPopOut(XPLMWindowID, const char* text, void* refcon) {
     auto* w = static_cast<Win*>(refcon);
     if (!w || !w->id || w->surface != Main) return XPLMReturnString("in");
-    const bool out = !XPLMWindowIsPoppedOut(w->id);
+    // The state it will have once update() has moved it (a second click before that undoes the first).
+    const bool now = w->pendingPop ? w->pendingPop > 0 : XPLMWindowIsPoppedOut(w->id) != 0;
+    const bool out = !now;
     w->dragging = false;
-    if (out) {
-        XPLMGetWindowGeometry(w->id, &w->left, &w->top, &w->right, &w->bottom);  // to dock it back there
-        XPLMSetWindowPositioningMode(w->id, xplm_WindowPopOut, -1);
-    } else {
-        // Back inside X-Plane, where it was before it popped out.
-        XPLMSetWindowPositioningMode(w->id, xplm_WindowPositionFree, -1);
-        if (w->left < w->right && w->bottom < w->top) XPLMSetWindowGeometry(w->id, w->left, w->top, w->right, w->bottom);
-    }
+    w->pendingPop = out ? 1 : -1;
     (void)text;
-    log(std::string("editor ") + (out ? "popped out" : "docked"));
     return XPLMReturnString(out ? "out" : "in");
 }
 
