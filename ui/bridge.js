@@ -6,6 +6,9 @@
  *   module > panel   listener.on("FSCS_HOST_TO_UI", jsonText)
  * Messages longer than 4000 characters travel as { part, of, msgId, chunk } frames in both directions.
  *
+ * X-Plane (XP Camera Studio): the page runs in an X-Plane 12.4.4 browser window opened with ?host=xplane. Frames
+ * go out through the plugin's browser function xplane.fscs(text) and arrive as FSCXPlaneReceive(text) calls.
+ *
  * Demo mode: when RegisterCommBusListener is undefined (plain browser) an in-memory module that follows
  * protocol v2 is used, so the preview exercises the real message flow. Nothing touches disk or network.
  *
@@ -108,6 +111,38 @@
     onMessage(cb) { this.handlers.push(cb); }
   }
 
+  /** XP Camera Studio: X-Plane 12.4.4 browser windows. The plugin registers xplane.fscs / xplane.fscsPanel on each
+   *  window and delivers module frames by injecting FSCXPlaneReceive(frame). The xplane namespace may appear after
+   *  this script runs, so it is looked up on every send; Hello simply retries until it does. */
+  class XPlaneTransport {
+    constructor() { this.handlers = []; this.closing = false; }
+    static available() { return /[?&]host=xplane\b/.test((root.location && root.location.search) || ''); }
+    start(onOpen) {
+      const close = () => { this.closing = true; };
+      if (typeof root.addEventListener === 'function') ['pagehide', 'beforeunload', 'unload'].forEach(name => root.addEventListener(name, close, true));
+      root.FSCXPlaneReceive = frame => { if (!this.closing && typeof frame === 'string') setTimeout(() => this.handlers.forEach(cb => cb(frame)), 0); };
+      setTimeout(onOpen, 0);
+    }
+    send(frame) {
+      const api = root.xplane;
+      if (this.closing || !api || typeof api.fscs !== 'function') return false;
+      try {
+        const reply = api.fscs(frame);
+        if (reply && typeof reply.catch === 'function') reply.catch(error => console.warn('X-Plane send failed', error));
+        return true;
+      } catch (error) { console.warn('X-Plane send failed', error); return false; }
+    }
+    onMessage(cb) { this.handlers.push(cb); }
+  }
+  // The editor's open/close buttons (app.js) call fscsSetPanelOpen; in X-Plane the plugin owns the windows.
+  if (XPlaneTransport.available()) {
+    root.fscsSetPanelOpen = (surface, open) => {
+      const api = root.xplane;
+      if (!api || typeof api.fscsPanel !== 'function') return false;
+      try { api.fscsPanel({ surface, open: Boolean(open) }); return true; } catch (error) { return false; }
+    };
+  }
+
   /** In-browser stand-in with the same shape; frames are real JSON text so chunking is exercised too. */
   class DemoTransport {
     constructor() {
@@ -122,7 +157,7 @@
   /* ------------- Bridge ------------- */
   function create(options) {
     const surface = (options && options.surface) || 'main';
-    const transport = CommBusTransport.available() ? new CommBusTransport() : new DemoTransport();
+    const transport = XPlaneTransport.available() ? new XPlaneTransport() : CommBusTransport.available() ? new CommBusTransport() : new DemoTransport();
     const uiInstanceId = surface + '-' + randomHex(12);
     const context = { moduleBootId: null, sessionEpoch: null, draftRevision: null };
     const listeners = { event: [], ack: [] };
@@ -171,7 +206,7 @@
     }
 
     return {
-      mode: transport instanceof CommBusTransport ? 'commbus' : 'demo',
+      mode: transport instanceof XPlaneTransport ? 'xplane' : transport instanceof CommBusTransport ? 'commbus' : 'demo',
       surface,
       uiInstanceId,
       context,
