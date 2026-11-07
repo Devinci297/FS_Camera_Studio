@@ -37,6 +37,7 @@ private:
 class XPServices final : public host::IModuleServices {
 public:
     std::function<void(const std::string&)> toPanels;
+    std::function<void(const std::string&)> log;  // to X-Plane's Log.txt
 
     void stage(BackendEvent ev) { queue_.stage(std::move(ev)); }
     void dispatch(const std::function<void(BackendEvent)>& sink) {
@@ -45,8 +46,11 @@ public:
                 nearbyPending_ = false;
                 queue_.stage(host::backend_event::AirportList{airports->nearby(lat_, lon_, kNearbyRadiusNm, kNearbyLimit), true});
             }
-            for (auto& r : airports->take())
+            for (auto& r : airports->take()) {
+                if (log && r.error.empty() && r.facility.is_object())
+                    log("airport " + r.facility.value("icao", std::string()) + " from " + r.source);
                 queue_.stage(host::backend_event::AirportFacility{r.requestId, std::move(r.facility), std::move(r.error)});
+            }
         }
         queue_.drain(sink);
     }

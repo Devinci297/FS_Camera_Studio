@@ -70,6 +70,7 @@ public:
         std::uint32_t requestId = 0;
         nlohmann::json facility;
         std::string error;
+        std::string source;  // the scenery pack folder it came from (UTF-8)
     };
 
     ~Database() { stop(); }
@@ -78,6 +79,7 @@ public:
     bool ready() const { return ready_.load(); }
     std::size_t airports() const { return ready() ? byId_.size() : 0; }
     std::size_t files() const { return ready() ? files_.size() : 0; }
+    double seconds() const { return ready() ? seconds_ : 0; }  // how long the index took
     // AirportList entries within radiusNm, nearest first (heliports left out). Only once ready().
     nlohmann::json nearby(double lat, double lon, double radiusNm, std::size_t limit) const;
     void request(std::string code, std::uint32_t requestId, bool summary);
@@ -97,6 +99,7 @@ private:
     std::vector<std::filesystem::path> files_;
     std::vector<Entry> entries_;
     std::unordered_map<std::string, std::size_t> byId_;
+    double seconds_ = 0;
     std::mutex mutex_;
     std::condition_variable wake_;
     std::deque<Job> jobs_;

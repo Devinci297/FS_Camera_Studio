@@ -82,7 +82,6 @@ struct Host {
     std::unique_ptr<xplane::MouseLook> mouse;
     xplane::apt::Database airports;
     bool airportsLogged = false;
-    double airportsStarted = 0;
     std::unique_ptr<xplane::TrafficSource> traffic;
     std::unique_ptr<host::ModuleApp> app;
     std::deque<std::pair<xplane::PanelWindows::Surface, std::string>> inbound;
@@ -378,7 +377,7 @@ float flightLoop(float elapsedSinceLastCall, float, int, void*) {
     if (!g->airportsLogged && g->airports.ready()) {
         g->airportsLogged = true;
         char took[32];
-        std::snprintf(took, sizeof(took), "%.1f", g->now - g->airportsStarted);
+        std::snprintf(took, sizeof(took), "%.1f", g->airports.seconds());
         log("airports: " + std::to_string(g->airports.airports()) + " from " + std::to_string(g->airports.files()) +
             " apt.dat files in " + took + " s");
     }
@@ -436,6 +435,7 @@ bool startHost() {
     // apt.dat is indexed in the background: nearby airports are answered once it is done.
     g->airports.start(g->xplaneRoot);
     g->services.airports = &g->airports;
+    g->services.log = [](const std::string& text) { log(text); };
     g->traffic = std::make_unique<xplane::TrafficSource>([](BackendEvent e) { if (g) g->services.stage(std::move(e)); });
     g->services.traffic = g->traffic.get();
 

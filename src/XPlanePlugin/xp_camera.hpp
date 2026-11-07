@@ -15,6 +15,7 @@
 #include <XPLMScenery.h>
 #include <XPLMUtilities.h>
 
+#include <cmath>
 #include <optional>
 #include <vector>
 
@@ -35,6 +36,7 @@ public:
     bool release(const std::string& definitionName) override;
     bool submitPose(const host::SdkPose& pose) override;
     bool setFlag(host::CameraFlag flag, bool enabled) override;
+    void setGroundBase(double baseAltitudeMeters) override { groundBase_ = baseAltitudeMeters; }
     bool requestCameraData(host::Referential ref) override;
     bool enumerateDefinitions() override;
     bool setUsingDefinition(const std::string&) override { return false; }
@@ -79,6 +81,8 @@ private:
     Saved saved_;
     std::optional<host::SdkPose> pose_;  // the last submitted pose
     bool aboveGround_ = false;
+    // Airport cameras: their height's ground altitude, and how far the terrain under the camera lifts it above that.
+    double groundBase_ = NAN, lift_ = 0;
     int viewType_ = 0, settleFrames_ = 0;
     bool releasingControl_ = false;
     std::vector<host::BackendEvent> staged_;

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -29,7 +30,8 @@ constexpr std::size_t kMaxRunways = 100, kMaxParking = 3000, kMaxPoints = 10000,
 
 std::FILE* openRead(const fs::path& path) {
 #ifdef _WIN32
-    return _wfopen(path.c_str(), L"rb");
+    std::FILE* f = nullptr;
+    return _wfopen_s(&f, path.c_str(), L"rb") == 0 ? f : nullptr;
 #else
     return std::fopen(path.c_str(), "rb");
 #endif
@@ -348,7 +350,10 @@ json facility(const fs::path& path, const Entry& entry, bool summary) {
         const int type = gate ? (heavy ? 10 : jets ? 9 : 8) : xpType == "tie_down" ? 2 : 1;
         const std::uint32_t number = static_cast<std::uint32_t>(into.size() + 1);
         name = trim(name);
-        if (name.empty()) name = (gate ? "Gate " : "Parking ") + std::to_string(number);
+        // A bare stand code ("12", "A1", "GA3") reads better with its kind; names with words ("Hold 34R") stay.
+        const char* kind = gate ? "Gate " : xpType == "hangar" ? "Hangar " : xpType == "tie_down" ? "Tie-down " : "Parking ";
+        if (name.empty()) name = kind + std::to_string(number);
+        else if (name.size() <= 6 && name.find(' ') == std::string::npos) name = kind + name;
         std::string key = "xp:" + name;
         for (int n = 2; keys.count(key); ++n) key = "xp:" + name + "#" + std::to_string(n);
         keys.insert(key);
@@ -391,7 +396,8 @@ json facility(const fs::path& path, const Entry& entry, bool summary) {
             if (r.size() < 4 || f.contains("tower")) continue;
             const double lat = num(r[1]), lon = num(r[2]), height = num(r[3], 0);
             if (validLatLon(lat, lon) && (lat != 0 || lon != 0))
-                f["tower"] = {{"lat", lat}, {"lon", lon}, {"altitude", entry.elevation + height * kFeet}};
+                f["tower"] = {{"lat", lat}, {"lon", lon}, {"altitude", entry.elevation + height * kFeet},
+                              {"viewHeightMeters", std::max(0.0, height * kFeet)}};
         } else if (code == 1300) {
             const auto r = fields(line, 6);
             if (r.size() < 6) continue;
@@ -472,10 +478,12 @@ void Database::stop() {
 }
 
 void Database::run(fs::path root) {
+    const auto started = std::chrono::steady_clock::now();
     files_ = sceneryFiles(root);
     for (std::uint32_t i = 0; i < files_.size() && !stopping_; ++i) index(files_[i], i, entries_, &stopping_);
     // The first file to list an airport wins: Custom Scenery before Global Airports.
     for (std::size_t i = 0; i < entries_.size(); ++i) byId_.emplace(entries_[i].id, i);
+    seconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     ready_ = true;
     for (;;) {
         Job job;
@@ -493,6 +501,8 @@ void Database::run(fs::path root) {
             r.error = "No airport " + job.code + " in X-Plane's scenery.";
         } else {
             const Entry& e = entries_[it->second];
+            const auto pack = files_[e.file].parent_path().parent_path().filename().u8string();  // <pack>/Earth nav data/apt.dat
+            r.source.assign(pack.begin(), pack.end());
             r.facility = facility(files_[e.file], e, job.summary);
             if (!r.facility.is_object()) r.error = "Could not read the scenery data for " + job.code + ".";
         }

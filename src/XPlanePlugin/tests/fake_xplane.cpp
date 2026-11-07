@@ -248,9 +248,11 @@ void XPLMReadCameraPosition(XPLMCameraPosition_t* p) {
 }
 XPLMProbeRef XPLMCreateProbe(XPLMProbeType) { return reinterpret_cast<XPLMProbeRef>(5); }
 void XPLMDestroyProbe(XPLMProbeRef) {}
+// Flat at 400 m, except a slope that rises 1 m in 10 west of x = -50 (under the test airport's runway 09 end).
+double terrainAt(double x) { return kTerrain + (x < -50 ? (-50 - x) * 0.1 : 0.0); }
 XPLMProbeResult XPLMProbeTerrainXYZ(XPLMProbeRef, float x, float, float z, XPLMProbeInfo_t* info) {
     info->locationX = x;
-    info->locationY = static_cast<float>(kTerrain);
+    info->locationY = static_cast<float>(terrainAt(x));
     info->locationZ = z;
     return xplm_ProbeHitTerrain;
 }
@@ -461,7 +463,7 @@ void writeScenery(const fs::path& root) {
               "1 1312 0 0 LSZX Test Field Custom\r\n"
               "1302 datum_lat 47.010000\r\n1302 datum_lon 8.010000\r\n1302 region_code LS\r\n"
               "100 30.00 1 0 0.25 0 2 1 09 47.01000000 7.99800000 0 0 3 0 0 0 27 47.01000000 8.02200000 0 0 3 0 0 0\r\n"
-              "14 47.01200000 8.01000000 50 0 Tower\r\n"
+              "14 47.01200000 8.01000000 400 0 Tower\r\n"
               "1300 47.00900000 8.00500000 0.00 gate jets|turboprops A1\r\n1301 C airline\r\n"
               "1300 47.00900000 8.00600000 180.00 tie_down props Ramp 1\r\n"
               "1201 47.00950000 8.00000000 both 0 a\r\n1201 47.00950000 8.01000000 both 1 b\r\n"
@@ -888,18 +890,43 @@ int main(int argc, char** argv) {
         for (const auto& [n, c] : cams) names += n + " (" + c + "), ";
         check(cams["09 threshold"] == "Runways" && cams["27 approach"] == "Runways" && cams["09 fence line"] == "Spotting",
               "the preview has both runway ends: " + names);
-        check(cams["A1"] == "Gates" && cams["Ramp 1"] == "Apron" && cams["Tower overview"] == "Tower",
-              "a gate, a tie-down on the apron and the real tower");
+        check(cams["Gate A1"] == "Gates" && cams["Ramp 1"] == "Apron" && cams["Tower overview"] == "Tower",
+              "a gate (stand code A1 named Gate A1), a tie-down on the apron and the real tower");
+        double towerUp = 0;
+        if (lszx.contains("profile") && lszx["profile"].is_object())
+            for (const auto& c : lszx["profile"]["cameras"])
+                if (c.value("name", "") == "Tower overview") towerUp = -c["positionMetersFRD"][2].get<double>();
+        check(std::abs(towerUp - 400 * 0.3048) < 0.5,
+              "the tower camera is at X-Plane's tower viewpoint (400 ft), not inside the tower at 35 m: " + std::to_string(towerUp) + " m");
         int signs = 0;
         for (const auto& [n, c] : cams) signs += c == "Taxi signs";
         check(cams["Sign A 09-27"] == "Taxi signs" && signs == 1,
               "and the taxi sign by its front text, without the distance-remaining board");
         if (!nope.is_object()) nope = json::object();
         check(nope.value("error", "").find("NOPE") != std::string::npos, "an unknown code says so: " + nope.dump());
+
+        // The 09 threshold camera stands where the ground has risen about 10 m above the field: it keeps its 3 m.
+        std::string thresholdId;
+        if (lszx.contains("profile") && lszx["profile"].is_object())
+            for (const auto& c : lszx["profile"]["cameras"])
+                if (c.value("name", "") == "09 threshold") thresholdId = c.value("id", "");
+        const std::string act = again.send("ActivateCamera", {{"cameraId", thresholdId}});
+        frames(120);
+        json actAck = again.ack(again.drain(), act);
+        if (!actAck.is_object()) actAck = json::object();
+        XPLMCameraPosition_t cp{};
+        XPLMReadCameraPosition(&cp);
+        const double above = cp.y - terrainAt(cp.x);
+        check(actAck.value("status", "") == "Accepted" && g_camera && cp.x < -140 && std::abs(above - 3) < 1.0,
+              "an airport camera on rising ground stays 3 m above it: x " + std::to_string(cp.x) + ", " +
+                  std::to_string(above) + " m above the terrain (" + actAck.value("status", std::string("?")) + ")");
+        again.send("ReleaseCamera");
+        frames(30);
     }
 
     // Traffic from the TCAS targets: index 0 is the user, 1 an airliner 1 km north at 700 m, 2 one 300 km away.
     {
+        again.send("RenewLease", {{"visible", true}});  // the page's lease, as its timer would
         auto arr = [](const char* name, std::vector<double> v) {
             v.resize(64, 0.0);
             ref(name)->v = v;

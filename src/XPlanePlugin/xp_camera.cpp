@@ -23,6 +23,8 @@ const host::AdapterContract kContract{};
 constexpr int kSettleFrames = 5;
 // Lowest a world camera goes above the terrain under it while the above-ground flag is set (meters).
 constexpr double kGroundClearance = 1.0;
+// Most an airport camera is lifted over terrain above its field (meters): beyond that it is not the same ground.
+constexpr double kMaxGroundLift = 500.0;
 
 const char* const kHeadRefs[6] = {"sim/graphics/view/pilots_head_x",   "sim/graphics/view/pilots_head_y",
                                   "sim/graphics/view/pilots_head_z",   "sim/graphics/view/pilots_head_psi",
@@ -245,6 +247,21 @@ bool XPCamera::cameraFor(XPLMCameraPosition_t& out) {
         double x = 0, y = 0, z = 0;
         XPLMWorldToLocal(pose_->x, pose_->y, pose_->z, &x, &y, &z);
         c.gl = {x, y, z};
+        lift_ = 0;
+        // Generated airport heights are measured from the field's elevation. X-Plane does not lift cameras over its
+        // terrain (MSFS does), so where the ground under the camera is higher than that (a sloping strip, a hill
+        // past the threshold) the camera goes up by the difference.
+        if (aboveGround_ && std::isfinite(groundBase_) && probe_) {
+            XPLMProbeInfo_t info{};
+            info.structSize = sizeof(info);
+            if (XPLMProbeTerrainXYZ(probe_, static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), &info) ==
+                xplm_ProbeHitTerrain) {
+                double lat = 0, lon = 0, ground = 0;
+                XPLMLocalToWorld(info.locationX, info.locationY, info.locationZ, &lat, &lon, &ground);
+                if (ground > groundBase_ && ground - groundBase_ < kMaxGroundLift) lift_ = ground - groundBase_;
+            }
+            c.gl.y += lift_;
+        }
         double pitch = 0, heading = 0;
         if (pose_->trackUserAircraft && geo::aim(c.gl, a.gl, pitch, heading)) {
             c.pitchDeg = pitch;
@@ -314,7 +331,7 @@ std::optional<SdkPose> XPCamera::currentPose(Referential ref) {
         sdk = host::toSdk(pose, kContract, ref);
         sdk.x = lat;
         sdk.y = lon;
-        sdk.z = alt;
+        sdk.z = alt - (mode_ == Mode::Control ? lift_ : 0.0);  // as the module placed it, before the terrain lift
         return sdk;
     }
     const geo::Aircraft a{{getd(local_[0]), getd(local_[1]), getd(local_[2])},

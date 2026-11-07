@@ -60,6 +60,11 @@ double effectsScaleFor(profiles::CameraMode mode) {
 bool headModelFor(profiles::CameraMode mode) { return mode == profiles::CameraMode::AircraftCockpit; }
 // Free cameras fly with their own integrator (Coordinator::updateFreeCamera); the engine keeps look and zoom.
 core::ManualInput lookOnly(core::ManualInput in) { in.moveForward = in.moveRight = in.moveUp = 0; return in; }
+// A generated airport camera's height is measured from this ground altitude (ICameraBackend::setGroundBase).
+double groundBaseFor(const profiles::CameraEntry* cam) {
+    if (!cam || cam->mode != profiles::CameraMode::Airport || cam->airportHeightCategory.empty()) return NAN;
+    return cam->airportHeightBaseAltitudeMeters;
+}
 
 
 }  // namespace
@@ -641,6 +646,7 @@ void Coordinator::startTransition(const CameraEntry& cam, bool cut) {
     lookOwner_ = cam.id;
     backend_.setFlag(CameraFlag::Interaction, cam.interaction);
     backend_.setFlag(CameraFlag::AboveGround, cam.mode==profiles::CameraMode::Airport || cam.mode==profiles::CameraMode::Free);
+    backend_.setGroundBase(groundBaseFor(&cam));
     core::TransitionSpec spec = cam.transition;
     if (cinematicTransition_) spec = *cinematicTransition_;
     if (cut || cam.mode == profiles::CameraMode::Flyby) spec.easing = core::Easing::Cut;
@@ -1797,6 +1803,7 @@ void Coordinator::glanceTransition(const CameraEntry& cam, const core::CameraPos
     effects_.reset();
     backend_.setFlag(CameraFlag::Interaction, cam.interaction);
     backend_.setFlag(CameraFlag::AboveGround, false);
+    backend_.setGroundBase(NAN);
     engine_.select(target, {core::Easing::Smoothstep3, kGlanceTransitionSeconds, 0.0}, true);
     activeCameraId_ = cam.id;
     lookOwner_ = cam.id;
@@ -2442,6 +2449,7 @@ void Coordinator::endSpot(const std::string& reason, bool manual, bool released)
     if (aboveGround && state_ == Ownership::Active) {
         const auto* cam = activeEntry();
         backend_.setFlag(CameraFlag::AboveGround, cam && (cam->mode == profiles::CameraMode::Airport || cam->mode == profiles::CameraMode::Free));
+        backend_.setGroundBase(groundBaseFor(cam));
     }
     emit_("SpotStopped", {{"reason", reason}, {"manual", manual}, {"released", released}});
     emitActiveCamera();
@@ -2564,6 +2572,7 @@ void Coordinator::submitSpotOverlay() {
     if (!s.position.valid() || !s.target.valid()) return;
     if (!s.aboveGround) {
         backend_.setFlag(CameraFlag::AboveGround, true);
+        backend_.setGroundBase(NAN);
         s.aboveGround = true;
     }
     SdkPose sdk;
