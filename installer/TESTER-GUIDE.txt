@@ -1,4 +1,4 @@
-FS CAMERA STUDIO - VERSION 0.3.0
+FS CAMERA STUDIO - VERSION 0.4.0
 Microsoft Flight Simulator 2024 | Windows 11 x64
 
 INSTALL
@@ -73,6 +73,8 @@ LAST-BACKUP.txt in that folder's parent identifies the latest backup. Re-running
 setup repairs the shipped package files. Profiles, airports, settings and
 bindings are stored by MSFS outside the installed package and are not removed.
 Export valuable profiles using Profiles > Export profile before testing.
+Version 0.4.0 saves profiles in schema 4, which 0.3.0 cannot read. Export
+profiles BEFORE upgrading if you might roll back to 0.3.0.
 
 Only install ONE copy. A package managed by Addons Linker or a development
 junction must be disabled/removed as a link before using this installer.
@@ -120,6 +122,38 @@ INCLUDED FEATURES
   then Refresh, select a file and Import. Pasting profile code is also supported.
 - Successful saves request a native confirmation chime. Settings > Test sound
   checks the simulator UI sound route; spoken WAV is browser-only.
+
+NEW IN VERSION 0.4.0
+- Camera feel: per-camera Follow horizon slider (0 follows bank, 1 stays level),
+  flight effects on exterior and orbit views at half strength with Off / Subtle /
+  Realistic / Action presets, cockpit head movement (lag, turn lean, taxi bob,
+  optional idle sway) and a Mounted action cam mode with gimbal and vibration.
+- New default keys (all Ctrl+Alt): X panic release, Z hold for binoculars,
+  G hold to glance / I next glance / U return, K cinematic mode, T / Y next and
+  previous traffic target, O return to own aircraft, J auto-spot. Existing custom
+  bindings are kept; check Bindings if a new default is missing.
+- Cinematic mode picks views by flight phase and holds each 8-20 s (Settings).
+- Nearby airports without saved cameras get temporary tower, runway, stand and
+  spotting views. Use Save in the library to keep them.
+- Drop drone here creates a world-fixed free camera. Fly it with the movement
+  keys or an Xbox-style gamepad (left stick moves, right stick looks, triggers
+  climb/descend). Settings > Gamepad assigns other axes. Throttles, sticks and
+  pedals are never picked automatically.
+- Traffic tab and mini Traffic tab: follow AI / FSLTL / VATSIM / IVAO /
+  SayIntentions traffic from tower, runway, chase, fly-by, track or saved spots.
+  Tower and runway views need no airport cameras or profile. The mini tab has
+  All / Departures / Arrivals / On ground / Cruise filters and a search box.
+  MSFS's own multiplayer aircraft are not visible to add-ons.
+- Pop out (beside Compact) moves the editor to its own window for another
+  monitor, when the simulator allows it. Dock brings it back.
+- Click the mini panel's category divider to show categories as icons only.
+
+Please check in 0.4.0: head movement strength; mounted cam pitch direction;
+binoculars; cinematic phase changes; temporary airport views; drone flight and
+terrain floor; gamepad detection and that the aircraft ignores the sticks only
+while a drone is shown; chase / fly-by smoothness on moving traffic; runway end
+choice for arrivals and departures; editing and saving spots; Pop out; the mini
+Traffic filters.
 
 NEW IN VERSION 0.3.0
 - Clear category headers, indented compact camera rows and inline shortcut badges.

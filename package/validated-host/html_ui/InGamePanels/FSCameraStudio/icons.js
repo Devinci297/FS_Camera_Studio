@@ -40,8 +40,13 @@
     'view-tail': [P('M12 3V20M12 9L4 16H20ZM9 20H15')],
     'view-front': [P('M3 13H21M12 5V19M8 19H16'), C(12,12,3)],
     'view-orbit': [C(12,12,3), P('M20 8A9 9 0 1 0 20 16M20 3V8H15')],
+    'view-walkaround': [C(13,4.5,2), P('M10 21L12 15L9.5 12.5L11 8L15 10.5L18 11.5M12 15L15 18L15.5 21M11 8L7.5 10.5L6.5 13.5')],
+    'view-flyby': [P('M10 12.5L21 5L18 19L14 15ZM14 15L21 5M2 9H6M3 13H7M2 17H9')],
+    'view-cinematic': [R(3,9,12,10,2), C(6.5,5.5,2.5), C(12,5.5,2.5), P('M15 12L21 9V19L15 16')],
+    'view-spotting': [C(6.5,16.5,3.5), C(17.5,16.5,3.5), P('M3.5 15L6 5H9.5L10 15M20.5 15L18 5H14.5L14 15M10 13H14')],
     'view-window': [R(5,3,14,18,5), P('M5 12H19M12 3V21')],
     'view-wheel': [C(12,16,5), C(12,16,1), P('M12 11V3M8 3H16')],
+    'view-drone': [C(5,5,2.5), C(19,5,2.5), C(5,19,2.5), C(19,19,2.5), R(9.5,9.5,5,5,1), P('M7 7L9.5 9.5M17 7L14.5 9.5M7 17L9.5 14.5M17 17L14.5 14.5')],
     aperture: [C(12, 12, 9.5), P('M15.64 14.1 6.22 19.54M12 16.2 2.58 10.76M8.36 14.1V3.22M8.36 9.9l9.42-5.44M12 7.8l9.42 5.44M15.64 9.9v10.88')],
     plane: [P('M12 2.5c.9 0 1.5 1 1.5 2.2v4.8l7.5 4.5v2l-7.5-2.2V18l2.5 2v1.5L12 20.6l-4 .9V20l2.5-2v-4.2L3 16v-2l7.5-4.5V4.7c0-1.2.6-2.2 1.5-2.2z')],
     map: [P('M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z'), P('M9 4v13.5M15 6.5V20')],
@@ -73,6 +78,8 @@
     check: [P('M5 12.5 9.5 17 19 7.5')],
     'check-circle-2': [C(12, 12, 9.5), P('m8 12.4 2.8 2.8 5.7-5.9')],
     pin: [P('M9 3h6M10 3v6l-3.5 4.2h11L14 9V3M12 13.2V21')],
+    'pop-out': [P('M14 3H21V10M21 3L11 13'), P('M19 14V19A2 2 0 0 1 17 21H5A2 2 0 0 1 3 19V7A2 2 0 0 1 5 5H10')],
+    'pop-in': [R(3, 3, 18, 18, 2), P('M17 7L10 14M10 9V14H15')],
     'panel-top-open': [R(3, 3.5, 18, 17, 2.5), P('M3 9h18'), P('m9 15.5 3-3 3 3')],
     'map-pin': [P('M12 21.5s-7-6.1-7-11.5a7 7 0 0 1 14 0c0 5.4-7 11.5-7 11.5z'), C(12, 10, 2.5)],
     download: [P('M12 3.5v11'), P('m7.5 10.5 4.5 4.5 4.5-4.5'), P('M4 16.5v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2')],
@@ -93,7 +100,7 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
-  const PICKER_NAMES = ["camera", "view-cockpit", "view-instrument", "view-controls", "view-seat", "view-window", "view-front", "plane", "view-wing", "view-tail", "view-wheel", "view-orbit", "view-runway", "view-gate", "view-apron", "view-taxiway", "view-tower", "map-pin", "view-move-horizontal", "view-move-vertical", "view-move-depth", "view-pitch", "view-yaw", "view-roll", "save", "copy", "paste", "rotate-ccw", "plus", "star", "keyboard", "mouse", "head-tracking", "aircraft-tracking", "auto-switch", "settings-2"];
+  const PICKER_NAMES = ["camera", "view-cockpit", "view-instrument", "view-controls", "view-seat", "view-window", "view-front", "plane", "view-wing", "view-tail", "view-wheel", "view-orbit", "view-walkaround", "view-flyby", "view-cinematic", "view-spotting", "view-runway", "view-gate", "view-apron", "view-taxiway", "view-tower", "map-pin", "view-move-horizontal", "view-move-vertical", "view-move-depth", "view-pitch", "view-yaw", "view-roll", "save", "copy", "paste", "rotate-ccw", "plus", "star", "keyboard", "mouse", "head-tracking", "aircraft-tracking", "auto-switch", "settings-2"];
   // SVGs inherit the exact camera/category color and remain sharp at mini-panel sizes.
   function tint(svg, color) { if(svg)svg.style.color=color || ''; }
 
