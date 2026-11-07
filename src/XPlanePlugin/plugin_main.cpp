@@ -5,6 +5,7 @@
 #include "module_app.hpp"
 #include "xp_backends.hpp"
 #include "xp_camera.hpp"
+#include "xp_mouse.hpp"
 #include "xp_panels.hpp"
 #include "xp_storage.hpp"
 #include "fscs/profiles/profile.hpp"
@@ -76,6 +77,7 @@ struct Host {
     xplane::XPServices services;
     std::unique_ptr<xplane::XPStorage> storage;
     xplane::PanelWindows panels;
+    std::unique_ptr<xplane::MouseLook> mouse;
     std::unique_ptr<host::ModuleApp> app;
     std::deque<std::pair<xplane::PanelWindows::Surface, std::string>> inbound;
     fs::path xplaneRoot;
@@ -408,6 +410,8 @@ bool startHost() {
     const std::string index = toUtf8(xplane::pathFromUtf8(g_pluginFolder) / "ui" / "index.html");
     g->panels.init(xplane::fileUrl(index), &onInbound);
     g->services.toPanels = [](const std::string& text) { if (g) g->panels.post(text); };
+    g->mouse = std::make_unique<xplane::MouseLook>([](BackendEvent e) { if (g) g->services.stage(std::move(e)); });
+    g->services.onNativeMouse = [](bool on) { if (g && g->mouse) g->mouse->setEnabled(on); };
 
     g->app = std::make_unique<host::ModuleApp>(g->camera, g->services, *g->storage, bootId(), XPCS_VERSION);
     g->app->start(0.0);
@@ -422,6 +426,8 @@ bool startHost() {
 void stopHost() {
     if (!g) return;
     if (g->app) g->app->shutdown(g->now);
+    g->services.onNativeMouse = nullptr;
+    if (g->mouse) g->mouse->destroy();
     g->panels.destroy();
     delete g;
     g = nullptr;

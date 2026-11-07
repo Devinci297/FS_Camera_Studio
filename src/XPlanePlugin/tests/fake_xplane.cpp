@@ -647,6 +647,32 @@ int main(int argc, char** argv) {
         check(headAt(0.25, 0.8, -0.9), "an offset cockpit view puts the head 0.5 m right, 0.1 m down, 0.3 m forward: " + headText);
         frames(120);
         check(headAt(0.25, 0.8, -0.9), "and the head stays there (no drift)");
+
+        // Mouse look: a right-button drag on the transparent overlay turns the head; left clicks pass through.
+        FakeWindow* overlay = nullptr;
+        for (FakeWindow* w : g_windows)
+            if (w->params.layer == xplm_WindowLayerFlightOverlay) overlay = w;
+        check(overlay && overlay->visible && overlay->params.decorateAsFloatingWindow == xplm_WindowDecorationNone,
+              "with a camera active, the mouse-look overlay is up");
+        if (overlay) {
+            auto right = overlay->params.handleRightClickFunc;
+            auto left = overlay->params.handleMouseClickFunc;
+            check(left && left(overlay, 500, 500, xplm_MouseDown, overlay->params.refcon) == 0, "left clicks pass through it");
+            const double psi0 = dr("sim/graphics/view/pilots_head_psi"), the0 = dr("sim/graphics/view/pilots_head_the");
+            check(right && right(overlay, 500, 500, xplm_MouseDown, overlay->params.refcon) == 1, "it takes the right button");
+            frames(2);
+            for (int i = 1; i <= 10; ++i) {
+                right(overlay, 500 + 10 * i, 500 - 5 * i, xplm_MouseDrag, overlay->params.refcon);
+                frames(1);
+            }
+            right(overlay, 600, 450, xplm_MouseUp, overlay->params.refcon);
+            frames(30);
+            const double psi1 = dr("sim/graphics/view/pilots_head_psi"), the1 = dr("sim/graphics/view/pilots_head_the");
+            check(psi1 > psi0 + 3 && the1 < the0 - 1, "dragging right and down looks right and down: psi " + std::to_string(psi0) + " -> " +
+                      std::to_string(psi1) + ", pitch " + std::to_string(the0) + " -> " + std::to_string(the1));
+            page.send("RecenterLook");
+            frames(30);
+        }
         page.send("ActivateCamera", {{"cameraId", chase["id"]}});
         frames(120);
 
@@ -707,6 +733,10 @@ int main(int argc, char** argv) {
         press("xpcs/release_camera");
         frames(30);
         check(state() == "Observing" && pubi("xpcs/camera_active") == 0, "xpcs/release_camera gives it back");
+        bool overlayUp = false;
+        for (FakeWindow* w : g_windows)
+            if (w->params.layer == xplm_WindowLayerFlightOverlay && w->visible) overlayUp = true;
+        check(!overlayUp, "and the mouse-look overlay goes away");
         int viewCommands = 0;
         for (Command* c : g_commands)
             if (c->handler && (c->name.rfind("xpcs/view_", 0) == 0 || c->name.rfind("xpcs/peek_", 0) == 0)) ++viewCommands;

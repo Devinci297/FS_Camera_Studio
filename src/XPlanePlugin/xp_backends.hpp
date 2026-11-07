@@ -46,7 +46,11 @@ public:
         return true;
     }
     bool mapTestInput(const std::string&) override { return true; }
-    void setNativeMouseEnabled(bool) override {}
+    // Mouse look (xp_mouse.hpp): the host turns its right-drag window on and off.
+    std::function<void(bool)> onNativeMouse;
+    void setNativeMouseEnabled(bool enabled) override {
+        if (onNativeMouse) onNativeMouse(enabled);
+    }
     bool enumerateControllers() override {
         queue_.stage(host::backend_event::ControllersList{});
         return true;
