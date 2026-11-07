@@ -30,7 +30,8 @@
       const control = event.target.closest && event.target.closest(interactive);
       if (control) control.classList.add('nodrag');
     };
-    const down = event => { mark(event); if (event.button === 0) handler.startDrag(event); };
+    // A popped-out editor is moved by its desktop window frame; the in-sim drag handler has nothing to move.
+    const down = event => { mark(event); if (event.button === 0 && !panel.classList.contains('extern')) handler.startDrag(event); };
     const over = event => { mark(event); handler.checkCanDrag(event); };
     const blur = () => { handler.leaveDrag(); if (panel.isDragging && handler.dragEnd) handler.dragEnd(); };
     window.addEventListener('blur', blur);
@@ -44,6 +45,41 @@
       editor.removeEventListener('mouseleave', handler.leaveDrag);
     };
     editor.fscsDragHandler = handler;
+  }
+
+  // Pop out: MSFS can move a toolbar window into its own desktop window, which can then be dragged to another
+  // monitor. The stock header's "external window" button does it with ingame-ui.toggleExternPanel(), which sends
+  // TOOLBAR_BUTTON_EXTERN. The editor hides the stock header, so its own header offers the same call.
+  // Right Alt + click on the editor (the simulator's own shortcut) also works and is reflected here.
+  function popOutAvailable(panel) {
+    return typeof panel.toggleExternPanel === 'function' && panel.isExternalizable !== false;
+  }
+  root.fscsTogglePopOut = () => {
+    const panel = document.querySelector('ingame-ui');
+    if (!panel || panel.id !== 'FSCSMain' || !popOutAvailable(panel)) return false;
+    panel.toggleExternPanel(!panel.classList.contains('extern'));
+    return true;
+  };
+  function popOutControl(panel) {
+    const editor = document.getElementById('mc-sim');
+    const button = document.getElementById('mc-pop-out');
+    if (!editor || !button) return;
+    const out = panel.classList.contains('extern');
+    const state = (popOutAvailable(panel) || out ? 'on' : 'off') + (out ? ':out' : ':in');
+    if (button.fscsPopOutState === state) return;
+    button.fscsPopOutState = state;
+    editor.dataset.popOut = out ? 'true' : 'false';
+    button.hidden = !popOutAvailable(panel) && !out;
+    const text = out ? 'Dock' : 'Pop out';
+    if (typeof button.setAttribute === 'function') {
+      button.setAttribute('aria-label', out ? 'Dock the editor back into the simulator window' : 'Pop out the editor into its own window');
+    }
+    const label = document.getElementById('mc-pop-out-label');
+    if (label) label.textContent = text;
+    if (!button.fscsPopOutBound) {
+      button.addEventListener('click', () => { root.fscsTogglePopOut(); hostReady(); });
+      button.fscsPopOutBound = true;
+    }
   }
 
   function miniHitArea(panel) {
@@ -140,6 +176,7 @@
     }
     if (panel.id === 'FSCSMain') {
       editorDrag(panel);
+      popOutControl(panel);
       if (root.FSCApp && root.FSCApp.state.snapshot) {
         const visible = Boolean(panel.active && panel.visible);
         if (visible && !panel.fscsWasVisible) root.FSCApp.bridge.send('RelaySurface', {target:'mini',op:'stopMouseLook'});
