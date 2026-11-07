@@ -5,15 +5,16 @@ profiles, organised views, precise editing, smooth transitions and shortcuts —
 mini control panel at the bottom of the screen.
 
 **Status: in-sim testing, with a new build awaiting live verification.** The module and panels have run in MSFS;
-version 0.3.0 includes the latest controller hat-release correction and is built with SDK 1.7.3.
+version 0.4.0 adds camera feel, cinematic mode, world and drone cameras, traffic spotting and gamepad drones, and is
+built with SDK 1.8.1.
 Automated checks and installed-file verification are separate from live controller and scenery acceptance.
 Camera axes, template poses and hosting behaviour still require live qualification — see
 [`doc/qualification.md`](doc/qualification.md).
 
-[Download 0.3.0](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.3.0)
+[Download 0.4.0](https://github.com/Devinci297/FS_Camera_Studio/releases/tag/v0.4.0)
 for the Windows installer, illustrated manual, example profile and checksums.
 
-![Camera Studio 0.3.0 editor](doc/manual/images/editor.png)
+![Camera Studio editor](doc/manual/images/editor.png)
 
 ![Wide bottom mini panel](doc/manual/images/airport-controls-mini.png)
 
@@ -87,35 +88,40 @@ The app bar displays the version; click it for update detection and the installe
 Close MSFS before installing an update. Saved airport cameras load automatically within the configured radius
 (25 NM by default); other airports get a temporary set until you save it. Auto switch is a separate viewpoint control.
 
-### Reproduce version 0.3.0
+### Reproduce version 0.4.0
 
 The reviewed simulator host is frozen in `package/validated-host`, with hashes in
-`package/validated-host.json`. This preserves the native pointer routing used by the installed build.
+`package/validated-host.json`. For 0.4.0 it is refreshed from the compiled package of the release commit, the same
+`tools\package.ps1 -Compile` build that was flown during testing. Close MSFS before the compile step.
 
 ```powershell
-python tools/diagnostics/stage-v0.3.py --freeze
-tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.3.0
-python tools/diagnostics/stage-v0.3.py
+python tools/diagnostics/stage-v0.4.py --freeze
+cmake --preset tests; cmake --build --preset tests; ctest --preset tests
+tools\build.ps1 -ModuleOnly -OutputDirectory build/wasm/release-0.4.0
+tools\package.ps1 -Compile -Wasm build/wasm/release-0.4.0/FSCameraStudio.wasm -OutputDirectory build/release-0.4.0-compile
+python tools/diagnostics/stage-v0.4.py --host build/release-0.4.0-compile/Packages/fs-camera-studio
+python tools/diagnostics/stage-v0.4.py
+node tools/capture-manual.cjs
 python tools/build-manual.py
-python tools/build-installer.py --version 0.3.0 --package build/release/0.3.0/fs-camera-studio --receipt build/release/0.3.0/staged.json
+python tools/build-installer.py --version 0.4.0 --package build/release/0.4.0/fs-camera-studio --receipt build/release/0.4.0/staged.json
 ```
 
-See [release notes](doc/releases/0.3.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
-and the bundled illustrated manual. [Release evidence and live checks](doc/test-evidence/2026-10-11-v0.3.0.md)
+See [release notes](doc/releases/0.4.0.md), [A320 starter guidance](doc/A320-starter-profile.md)
+and the bundled illustrated manual. [Release evidence and live checks](doc/test-evidence/2026-11-07-v0.4.0.md)
 separate automated verification from simulator acceptance. Earlier tester recipes remain available in their Git tags.
 
 Install ReportLab for manual generation and obtain Inno Setup with `tools/get-installer-compiler.ps1`.
 `package/validated-host` freezes the reviewed toolbar host, including compiled panel definitions;
 its receipt is `package/validated-host.json`. The release stage uses this reviewed host, current version metadata and the rebuilt module.
-This intentionally preserves the known-loading host while broader `ui/` host changes still need flight-loading
-qualification. Do not replace the release host wholesale with the development panel. The generated receipt,
+Refresh the host only from a compiled package that has been loaded in a flight, and commit the refreshed host and
+receipt with the release. The generated receipt,
 installer and PDF are under `build/release`, `dist` and `output/pdf` respectively. Nothing is installed by these commands.
 
 For a shareable Windows tester setup, see [`installer/README.md`](installer/README.md).
 The installer packages an explicitly verified build, detects the MSFS Community folder, supports upgrades and
 uninstall, and preserves saved camera profiles. Testers do not need the SDK or developer tools.
 
-Requirements: Windows 11 x64, the MSFS 2024 SDK (`MSFS2024_SDK` set; 1.7.3 is the baseline), PowerShell. For the
+Requirements: Windows 11 x64, the MSFS 2024 SDK (`MSFS2024_SDK` set; 1.8.1 is the baseline), PowerShell. For the
 native tests: Visual Studio 2022 Build Tools and CMake 3.25+.
 
 ```powershell
