@@ -273,6 +273,11 @@ int XPCamera::onCamera(XPLMCameraPosition_t* out, int losing, void* refcon) {
     return 1;
 }
 
+double XPCamera::fovDeg() const {
+    if (mode_ != Mode::None && pose_ && std::isfinite(pose_->fovRad)) return pose_->fovRad * core::kRadToDeg;
+    return getf(fov_);
+}
+
 std::optional<SdkPose> XPCamera::currentPose(Referential ref) {
     XPLMCameraPosition_t cp{};
     XPLMReadCameraPosition(&cp);

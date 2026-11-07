@@ -56,6 +56,11 @@ public:
     static constexpr double kAutoSpotCheckSeconds = .5;
     static constexpr double kAutoSpotViewSeconds = 5;       // a status-driven view change at most this often
     bool autoSpotEnabled() const { return autoSpot_; }
+    // A host's own commands (X-Plane's xpcs/ commands): the same actions as bindings, pressed and released by the
+    // simulator rather than mapped inputs. Held actions (look, move, zoom, peek, glance, binoculars) last until the
+    // release; a press of something already held is ignored.
+    void hostAction(profiles::Action action, int viewId, bool pressed, double now);
+    bool hostActionHeld(profiles::Action action, int viewId = 0) const { return hostHeld_.count({action, viewId}) > 0; }
 
 private:
     struct Working {
@@ -173,6 +178,8 @@ private:
     json spottingState() const;
     void emitSpotting(bool force = false);
     bool autoSpot_ = false, pendingSpotReturn_ = false, pendingAutoSpotToggle_ = false;
+    std::map<std::pair<profiles::Action, int>, std::uint64_t> hostHeld_;  // host command holds -> hold id
+    std::uint64_t nextHostHold_ = 1ull << 40;  // apart from the input router's hold ids
     int pendingSpotCycle_ = 0;
     std::string spotReason_, spottingEmitted_;
     double nextTrafficPoll_ = 0, lastTrafficEmit_ = -100, lastAutoSpotCheck_ = -100, autoSpotSince_ = 0, autoSpotViewAt_ = 0;

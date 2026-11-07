@@ -45,6 +45,8 @@ public:
     // The camera X-Plane is drawing now, relative to the aircraft or in the world, as the coordinator reads it.
     std::optional<host::SdkPose> currentPose(host::Referential ref);
     bool controlling() const { return mode_ == Mode::Control; }
+    // The horizontal field of view on screen, degrees: the module's while it drives the camera, else X-Plane's.
+    double fovDeg() const;
     bool acquired() const { return acquired_; }
 
     void stage(host::BackendEvent ev) { staged_.push_back(std::move(ev)); }

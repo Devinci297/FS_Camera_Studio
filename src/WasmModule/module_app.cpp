@@ -53,6 +53,31 @@ core::ManualInput add(core::ManualInput a, const core::ManualInput& b) {
     return a;
 }
 
+// Held host commands as motion, as the input router counts held bindings: each action once.
+core::ManualInput hostManual(const std::map<std::pair<profiles::Action, int>, std::uint64_t>& held) {
+    using profiles::Action;
+    core::ManualInput m;
+    for (const auto& [key, id] : held) {
+        switch (key.first) {
+            case Action::LookLeft: m.lookRight -= 1; break;
+            case Action::LookRight: m.lookRight += 1; break;
+            case Action::LookUp: m.lookUp += 1; break;
+            case Action::LookDown: m.lookUp -= 1; break;
+            case Action::MoveFast: m.fast = true; break;
+            case Action::MoveForward: m.moveForward += 1; break;
+            case Action::MoveBack: m.moveForward -= 1; break;
+            case Action::MoveRight: m.moveRight += 1; break;
+            case Action::MoveLeft: m.moveRight -= 1; break;
+            case Action::MoveUp: m.moveUp += 1; break;
+            case Action::MoveDown: m.moveUp -= 1; break;
+            case Action::ZoomIn: m.zoomIn += 1; break;
+            case Action::ZoomOut: m.zoomIn -= 1; break;
+            default: break;
+        }
+    }
+    return m;
+}
+
 core::ManualInput manualFromJson(const json& j) {
     core::ManualInput m;
     m.lookRight = js::num(j, "lookRight", 0);
@@ -86,6 +111,23 @@ void ModuleApp::start(double now) {
     now_ = now;
     diag("module " + appVersion_ + " boot " + bootId_);
     repo_.load([this](std::vector<std::string> notes) { loadFromRepository(std::move(notes), now_); });
+}
+
+void ModuleApp::hostAction(profiles::Action action, int viewId, bool pressed, double now) {
+    if (!profiles::actionTakesViewId(action)) viewId = 0;
+    const std::pair<profiles::Action, int> key{action, viewId};
+    if (pressed) {
+        if (hostHeld_.count(key)) return;
+        const std::uint64_t id = nextHostHold_++;
+        hostHeld_[key] = id;
+        coord_.onAction({action, viewId, true, id}, now);
+        return;
+    }
+    const auto it = hostHeld_.find(key);
+    if (it == hostHeld_.end()) return;
+    const std::uint64_t id = it->second;
+    hostHeld_.erase(it);
+    coord_.onAction({action, viewId, false, id}, now);
 }
 
 void ModuleApp::shutdown(double now) {
@@ -137,7 +179,7 @@ void ModuleApp::update(double now) {
     }
     // UI gesture leases: expiry neutralises motion only, never releases the camera.
     for (auto it = gestures_.begin(); it != gestures_.end();) it = now > it->second.expires ? gestures_.erase(it) : std::next(it);
-    core::ManualInput manual = router_.manualInput();
+    core::ManualInput manual = add(router_.manualInput(), hostManual(hostHeld_));
     for (const auto& [token, g] : gestures_) manual = add(manual, g.input);
     updateGamepad(manual);
     coord_.setManualInput(manual);

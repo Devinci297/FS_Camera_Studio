@@ -66,6 +66,33 @@ Ref* ref(const std::string& name) {
 }
 double& dr(const std::string& name) { return ref(name)->v[0]; }
 
+// Datarefs the plugin publishes, read the way another plugin would.
+struct Published {
+    std::string name;
+    XPLMDataTypeID type;
+    XPLMGetDatai_f geti;
+    XPLMGetDataf_f getf;
+    XPLMGetDatab_f getb;
+    void* refcon;
+};
+std::map<std::string, Published*> g_published;
+int pubi(const std::string& name) {
+    const auto it = g_published.find(name);
+    return it != g_published.end() && it->second->geti ? it->second->geti(it->second->refcon) : -999;
+}
+float pubf(const std::string& name) {
+    const auto it = g_published.find(name);
+    return it != g_published.end() && it->second->getf ? it->second->getf(it->second->refcon) : -999.0f;
+}
+std::string pubs(const std::string& name) {
+    const auto it = g_published.find(name);
+    if (it == g_published.end() || !it->second->getb) return "(none)";
+    const int n = it->second->getb(it->second->refcon, nullptr, 0, 0);
+    std::string s(static_cast<std::size_t>(std::max(n, 0)), '\0');
+    if (n > 0) it->second->getb(it->second->refcon, s.data(), 0, n);
+    return s;
+}
+
 // The world: a flat patch around 47 N 8 E (no grid convergence), terrain at 400 m.
 constexpr double kLat0 = 47, kLon0 = 8, kTerrain = 400;
 constexpr double kMetersPerDegLat = 111000, kMetersPerDegLon = 75700;
@@ -108,6 +135,23 @@ void XPLMRegisterCommandHandler(XPLMCommandRef cmd, XPLMCommandCallback_f handle
     static_cast<Command*>(cmd)->refcon = refcon;
 }
 void XPLMUnregisterCommandHandler(XPLMCommandRef cmd, XPLMCommandCallback_f, int, void*) { static_cast<Command*>(cmd)->handler = nullptr; }
+
+XPLMDataRef XPLMRegisterDataAccessor(const char* name, XPLMDataTypeID type, int, XPLMGetDatai_f geti, XPLMSetDatai_f,
+                                     XPLMGetDataf_f getf, XPLMSetDataf_f, XPLMGetDatad_f, XPLMSetDatad_f,
+                                     XPLMGetDatavi_f, XPLMSetDatavi_f, XPLMGetDatavf_f, XPLMSetDatavf_f,
+                                     XPLMGetDatab_f getb, XPLMSetDatab_f, void* readRefcon, void*) {
+    auto* p = new Published{name, type, geti, getf, getb, readRefcon};
+    g_published[name] = p;
+    return p;
+}
+void XPLMUnregisterDataAccessor(XPLMDataRef r) {
+    for (auto it = g_published.begin(); it != g_published.end(); ++it)
+        if (it->second == r) {
+            delete it->second;
+            g_published.erase(it);
+            return;
+        }
+}
 
 XPLMMenuID XPLMFindPluginsMenu() { return reinterpret_cast<XPLMMenuID>(1); }
 int XPLMAppendMenuItem(XPLMMenuID, const char*, void*, int) { return 0; }
@@ -359,6 +403,17 @@ struct Page {
     }
 };
 
+// A command from X-Plane's keyboard or joystick settings: down, then (unless held) up.
+bool command(const std::string& name, XPLMCommandPhase phase) {
+    for (Command* c : g_commands)
+        if (c->name == name && c->handler) {
+            c->handler(c, phase, c->refcon);
+            return true;
+        }
+    return false;
+}
+bool press(const std::string& name) { return command(name, xplm_CommandBegin) && command(name, xplm_CommandEnd); }
+
 FakeWindow* openEditor() {
     for (Command* c : g_commands)
         if (c->name == "xpcs/toggle_editor" && c->handler) c->handler(c, xplm_CommandBegin, c->refcon);
@@ -535,6 +590,40 @@ int main(int argc, char** argv) {
         check(near(cp.x, -20) && near(cp.z, 0) && near(cp.heading, 90), "turning with the aircraft (now 20 m west, heading east)");
         dr("sim/flightmodel/position/psi") = 0;
 
+        // X-Plane commands and the published datarefs.
+        check(pubi("xpcs/camera_active") == 1 && pubi("xpcs/active_view") == 2 && pubs("xpcs/active_camera") == "XP chase" &&
+                  std::abs(pubf("xpcs/fov_deg") - 62) < 0.05,
+              "xpcs/camera_active, active_view, active_camera and fov_deg describe the chase camera: " +
+                  std::to_string(pubi("xpcs/camera_active")) + " " + std::to_string(pubi("xpcs/active_view")) + " '" +
+                  pubs("xpcs/active_camera") + "' " + std::to_string(pubf("xpcs/fov_deg")));
+        check(pubi("xpcs/editor_open") == 1 && pubi("xpcs/mini_open") == 1 && pubi("xpcs/cinematic") == 0,
+              "xpcs/editor_open, mini_open and cinematic");
+        const int cockpitView = cam.value("viewId", 0);
+        check(cockpitView > 0 && press("xpcs/view_" + std::to_string(cockpitView)), "xpcs/view_" + std::to_string(cockpitView) + " exists");
+        frames(120);
+        check(pubi("xpcs/active_view") == cockpitView && !g_camera && near(dr("sim/graphics/view/pilots_head_x"), -0.25),
+              "xpcs/view_N selects the cockpit view");
+        const double psi0 = dr("sim/graphics/view/pilots_head_psi");
+        command("xpcs/look_right", xplm_CommandBegin);
+        frames(30);
+        const double psiHeld = dr("sim/graphics/view/pilots_head_psi");
+        command("xpcs/look_right", xplm_CommandEnd);
+        frames(60);
+        const double psiReleased = dr("sim/graphics/view/pilots_head_psi");
+        frames(30);
+        check(psiHeld > psi0 + 1 && std::abs(dr("sim/graphics/view/pilots_head_psi") - psiReleased) < 0.5,
+              "holding xpcs/look_right turns the head, letting go stops it: " + std::to_string(psi0) + " -> " +
+                  std::to_string(psiHeld) + " -> " + std::to_string(psiReleased));
+        command("xpcs/peek_2", xplm_CommandBegin);
+        frames(120);
+        check(pubi("xpcs/active_view") == 2 && g_camera, "holding xpcs/peek_2 shows the chase view");
+        command("xpcs/peek_2", xplm_CommandEnd);
+        frames(120);
+        check(pubi("xpcs/active_view") == cockpitView, "letting go of xpcs/peek_2 returns to the cockpit");
+        press("xpcs/view_2");
+        frames(120);
+        check(pubi("xpcs/active_view") == 2 && g_camera, "xpcs/view_2 selects the chase view again");
+
         // The user picks X-Plane's 3D cockpit: control goes back to X-Plane and the module observes.
         XPLMCommandOnce(XPLMFindCommand("sim/view/3d_cockpit_cmnd_look"));
         frames(10);
@@ -549,6 +638,19 @@ int main(int argc, char** argv) {
         check(state() == "Observing" && near(dr("sim/graphics/view/pilots_head_x"), 0.1) &&
                   std::abs(dr("sim/graphics/view/field_of_view_deg") - 70) < 0.01,
               "Release puts the pilot's head and FOV back");
+        check(pubi("xpcs/camera_active") == 0 && pubi("xpcs/active_view") == 0 && pubs("xpcs/active_camera").empty() &&
+                  std::abs(pubf("xpcs/fov_deg") - 70) < 0.01,
+              "after Release the datarefs show X-Plane's own camera");
+        press("xpcs/next_camera");
+        frames(120);
+        check(pubi("xpcs/camera_active") == 1, "xpcs/next_camera takes the camera again");
+        press("xpcs/release_camera");
+        frames(30);
+        check(state() == "Observing" && pubi("xpcs/camera_active") == 0, "xpcs/release_camera gives it back");
+        int viewCommands = 0;
+        for (Command* c : g_commands)
+            if (c->handler && (c->name.rfind("xpcs/view_", 0) == 0 || c->name.rfind("xpcs/peek_", 0) == 0)) ++viewCommands;
+        check(viewCommands == 60, "xpcs/view_1..30 and xpcs/peek_1..30 are registered");
     }
 
     page.send("TextFocus", {{"focused", true}});

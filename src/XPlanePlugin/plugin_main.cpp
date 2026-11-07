@@ -19,7 +19,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <memory>
@@ -96,6 +98,161 @@ Host* g = nullptr;
 XPLMFlightLoopID g_loop = nullptr;
 XPLMCommandRef g_toggleEditor = nullptr, g_toggleMini = nullptr;
 XPLMMenuID g_menu = nullptr;
+
+// xpcs/ commands: every binding action, so X-Plane's keyboard and joystick settings can drive the module. View
+// commands take the view ID in their name (xpcs/view_3 selects view 3, xpcs/peek_3 shows it while held).
+using profiles::Action;
+struct CommandSpec {
+    Action action;
+    const char* name;
+    const char* description;
+};
+constexpr CommandSpec kCommands[] = {
+    {Action::NextCamera, "next_camera", "Next camera"},
+    {Action::PreviousCamera, "previous_camera", "Previous camera"},
+    {Action::NextCategory, "next_category", "Next category"},
+    {Action::ReturnToPilot, "return_to_pilot", "Return to the pilot's view"},
+    {Action::ReleaseCamera, "release_camera", "Give the camera back to X-Plane"},
+    {Action::PanicRelease, "panic_release", "Stop everything and give the camera back to X-Plane"},
+    {Action::RecenterLook, "recenter_look", "Recenter the look"},
+    {Action::ToggleMouseLook, "toggle_mouse_look", "Toggle mouse look"},
+    {Action::LookLeft, "look_left", "Look left (hold)"},
+    {Action::LookRight, "look_right", "Look right (hold)"},
+    {Action::LookUp, "look_up", "Look up (hold)"},
+    {Action::LookDown, "look_down", "Look down (hold)"},
+    {Action::MoveForward, "move_forward", "Move forward (hold)"},
+    {Action::MoveBack, "move_back", "Move back (hold)"},
+    {Action::MoveLeft, "move_left", "Move left (hold)"},
+    {Action::MoveRight, "move_right", "Move right (hold)"},
+    {Action::MoveUp, "move_up", "Move up (hold)"},
+    {Action::MoveDown, "move_down", "Move down (hold)"},
+    {Action::MoveFast, "move_fast", "Move faster (hold)"},
+    {Action::ZoomIn, "zoom_in", "Zoom in (hold)"},
+    {Action::ZoomOut, "zoom_out", "Zoom out (hold)"},
+    {Action::Binoculars, "binoculars", "Binoculars (hold)"},
+    {Action::GlanceHold, "glance_hold", "Glance at an instrument (hold)"},
+    {Action::GlanceNext, "glance_next", "Glance at the next instrument"},
+    {Action::GlanceReturn, "glance_return", "Return from a glance"},
+    {Action::ToggleHeadTracking, "toggle_head_tracking", "Toggle head tracking"},
+    {Action::ToggleAirportAuto, "toggle_airport_auto", "Toggle automatic airport cameras"},
+    {Action::ToggleCinematic, "toggle_cinematic", "Toggle cinematic mode"},
+    {Action::SpotNext, "spot_next", "Spot the next aircraft"},
+    {Action::SpotPrevious, "spot_previous", "Spot the previous aircraft"},
+    {Action::SpotReturn, "spot_return", "Stop spotting"},
+    {Action::ToggleAutoSpot, "toggle_auto_spot", "Toggle automatic spotting"},
+    {Action::SaveViews, "save_views", "Save all changes to the views"},
+};
+constexpr int kViewCommands = 30;  // xpcs/view_1..30 and xpcs/peek_1..30
+
+struct BoundCommand {
+    XPLMCommandRef ref = nullptr;
+    Action action = Action::NextCamera;
+    int viewId = 0;
+};
+std::deque<BoundCommand> g_commands;  // stable addresses: each is its handler's refcon
+
+int onActionCommand(XPLMCommandRef, XPLMCommandPhase phase, void* refcon) {
+    const auto* c = static_cast<const BoundCommand*>(refcon);
+    if (!g || !g->app || phase == xplm_CommandContinue) return 0;
+    g->app->hostAction(c->action, c->viewId, phase == xplm_CommandBegin, g->now);
+    return 0;
+}
+
+void addCommand(Action action, int viewId, const std::string& name, const std::string& description) {
+    BoundCommand& c = g_commands.emplace_back();
+    c.ref = XPLMCreateCommand(("xpcs/" + name).c_str(), ("XP Camera Studio: " + description).c_str());
+    c.action = action;
+    c.viewId = viewId;
+    XPLMRegisterCommandHandler(c.ref, &onActionCommand, 1, &c);
+}
+
+void registerCommands() {
+    for (const auto& s : kCommands) addCommand(s.action, 0, s.name, s.description);
+    for (int v = 1; v <= kViewCommands; ++v) {
+        const std::string n = std::to_string(v);
+        addCommand(Action::SelectView, v, "view_" + n, "Select view " + n);
+        addCommand(Action::PeekView, v, "peek_" + n, "Show view " + n + " while held");
+    }
+}
+
+void unregisterCommands() {
+    for (auto& c : g_commands) XPLMUnregisterCommandHandler(c.ref, &onActionCommand, 1, &c);
+    g_commands.clear();
+}
+
+// Published xpcs/ datarefs (read only), for cockpit builders, FlyWithLua and the like.
+enum class Published { CameraActive, ActiveView, ActiveCamera, FovDeg, Cinematic, AutoSpot, EditorOpen, MiniOpen };
+struct PublishedRef {
+    Published what;
+    const char* name;
+    XPLMDataTypeID type;
+    XPLMDataRef ref = nullptr;
+};
+PublishedRef g_published[] = {
+    {Published::CameraActive, "xpcs/camera_active", xplmType_Int},
+    {Published::ActiveView, "xpcs/active_view", xplmType_Int},
+    {Published::ActiveCamera, "xpcs/active_camera", xplmType_Data},
+    {Published::FovDeg, "xpcs/fov_deg", xplmType_Float},
+    {Published::Cinematic, "xpcs/cinematic", xplmType_Int},
+    {Published::AutoSpot, "xpcs/auto_spot", xplmType_Int},
+    {Published::EditorOpen, "xpcs/editor_open", xplmType_Int},
+    {Published::MiniOpen, "xpcs/mini_open", xplmType_Int},
+};
+
+// The camera the module shows now, or none while X-Plane has the camera.
+const profiles::CameraEntry* activeCamera() {
+    if (!g || !g->app) return nullptr;
+    const auto& c = g->app->coordinator();
+    if (c.ownership() != host::Ownership::Active || !c.profile()) return nullptr;
+    return c.profile()->camera(c.activeCameraId());
+}
+
+int readInt(void* refcon) {
+    if (!g || !g->app) return 0;
+    switch (static_cast<const PublishedRef*>(refcon)->what) {
+        case Published::CameraActive: return activeCamera() ? 1 : 0;
+        case Published::ActiveView: {
+            const auto* cam = activeCamera();
+            return cam ? cam->viewId : 0;
+        }
+        case Published::Cinematic: return g->app->cinematicEnabled() ? 1 : 0;
+        case Published::AutoSpot: return g->app->autoSpotEnabled() ? 1 : 0;
+        case Published::EditorOpen: return g->panels.visible(xplane::PanelWindows::Main) ? 1 : 0;
+        case Published::MiniOpen: return g->panels.visible(xplane::PanelWindows::Mini) ? 1 : 0;
+        default: return 0;
+    }
+}
+
+float readFloat(void*) { return g ? static_cast<float>(g->camera.fovDeg()) : 0.0f; }
+
+// The active camera's name, UTF-8 without a terminator; a null buffer asks for the length.
+int readName(void*, void* out, int offset, int max) {
+    const auto* cam = activeCamera();
+    const std::string name = cam ? cam->name : std::string();
+    const int size = static_cast<int>(name.size());
+    if (!out) return size;
+    if (offset < 0 || offset >= size || max <= 0) return 0;
+    const int n = std::min(max, size - offset);
+    std::memcpy(out, name.data() + offset, static_cast<std::size_t>(n));
+    return n;
+}
+
+void registerDatarefs() {
+    for (auto& p : g_published) {
+        const bool isInt = p.type == xplmType_Int, isFloat = p.type == xplmType_Float, isData = p.type == xplmType_Data;
+        p.ref = XPLMRegisterDataAccessor(p.name, p.type, 0,                         // read only
+                                         isInt ? &readInt : nullptr, nullptr,          // int
+                                         isFloat ? &readFloat : nullptr, nullptr,      // float
+                                         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,  // double, arrays
+                                         isData ? &readName : nullptr, nullptr, &p, &p);
+    }
+}
+
+void unregisterDatarefs() {
+    for (auto& p : g_published)
+        if (p.ref) XPLMUnregisterDataAccessor(p.ref);
+    for (auto& p : g_published) p.ref = nullptr;
+}
 std::string g_pluginFolder;  // the XPCameraStudio folder (UTF-8), holding win_x64/ and ui/
 
 void deliver(const BackendEvent& ev) {
@@ -295,6 +452,8 @@ PLUGIN_API int XPluginStart(char* outName, char* outSig, char* outDesc) {
     g_toggleMini = XPLMCreateCommand("xpcs/toggle_mini", "XP Camera Studio: show or hide the mini panel");
     XPLMRegisterCommandHandler(g_toggleEditor, &onCommand, 1, nullptr);
     XPLMRegisterCommandHandler(g_toggleMini, &onCommand, 1, nullptr);
+    registerCommands();
+    registerDatarefs();
 
     const int item = XPLMAppendMenuItem(XPLMFindPluginsMenu(), "XP Camera Studio", nullptr, 0);
     g_menu = XPLMCreateMenu("XP Camera Studio", XPLMFindPluginsMenu(), item, nullptr, nullptr);
@@ -306,6 +465,8 @@ PLUGIN_API int XPluginStart(char* outName, char* outSig, char* outDesc) {
 PLUGIN_API void XPluginStop(void) {
     if (g_toggleEditor) XPLMUnregisterCommandHandler(g_toggleEditor, &onCommand, 1, nullptr);
     if (g_toggleMini) XPLMUnregisterCommandHandler(g_toggleMini, &onCommand, 1, nullptr);
+    unregisterCommands();
+    unregisterDatarefs();
     if (g_menu) XPLMDestroyMenu(g_menu);
     g_menu = nullptr;
     log("stopped");
