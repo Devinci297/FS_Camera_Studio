@@ -138,6 +138,10 @@ const char* PanelWindows::onFrame(XPLMWindowID, const char* text, void* refcon) 
     const std::string raw = text ? text : "";
     const json arg = json::parse(raw, nullptr, false);
     const bool ok = arg.is_string() || arg.is_object();
+    if (ok && w && !w->heard) {
+        w->heard = true;  // once per page load: proves the page reached the plugin
+        log(std::string(kSurfaceName[w->surface]) + " page connected");
+    }
     if (ok && w && w->owner && w->owner->inbound_) w->owner->inbound_(w->surface, arg.is_string() ? arg.get<std::string>() : raw);
     return XPLMReturnString(ok ? "true" : "false");
 }
@@ -153,8 +157,12 @@ const char* PanelWindows::onPanel(XPLMWindowID, const char* text, void* refcon) 
     return XPLMReturnString("true");
 }
 
-void PanelWindows::onLoaded(XPLMWindowID, const char*, void* refcon) {
-    if (auto* w = static_cast<Win*>(refcon)) w->loaded = true;
+void PanelWindows::onLoaded(XPLMWindowID, const char* url, void* refcon) {
+    auto* w = static_cast<Win*>(refcon);
+    if (!w) return;
+    w->loaded = true;
+    w->heard = false;
+    log(std::string(kSurfaceName[w->surface]) + " page loaded" + (url ? std::string(": ") + url : std::string()));
 }
 
 void PanelWindows::onLoadError(XPLMWindowID, const char* url, const char* error, void* refcon) {

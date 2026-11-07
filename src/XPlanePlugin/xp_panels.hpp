@@ -34,6 +34,7 @@ private:
     struct Win {
         XPLMWindowID id = nullptr;
         bool loaded = false;
+        bool heard = false;  // a frame arrived since the page loaded
         PanelWindows* owner = nullptr;
         Surface surface = Main;
     };
