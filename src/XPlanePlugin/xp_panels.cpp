@@ -61,8 +61,8 @@ void PanelWindows::create(Surface s) {
         p.top = top - height * 7 / 100;
         p.bottom = p.top - height * 86 / 100;
     } else {
-        // The dock: a strip centred above the bottom edge.
-        const int w2 = width * 60 / 100;
+        // The dock: a wide strip centred above the bottom edge.
+        const int w2 = width * 80 / 100;
         p.left = left + (width - w2) / 2;
         p.right = p.left + w2;
         p.bottom = bottom + height * 4 / 100;
