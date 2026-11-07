@@ -92,6 +92,7 @@ void PanelWindows::create(Surface s) {
     XPLMWindowAddBrowserFunction(w.id, "fscsPanelSize", &PanelWindows::onPanelSize, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanelDrag", &PanelWindows::onPanelDrag, &w);
     XPLMWindowAddBrowserFunction(w.id, "fscsPanelHover", &PanelWindows::onPanelHover, &w);
+    XPLMWindowAddBrowserFunction(w.id, "fscsPanelPopOut", &PanelWindows::onPanelPopOut, &w);
     XPLMWindowSetURL(w.id, (url_ + "?surface=" + kSurfaceName[s] + "&host=xplane").c_str());
 }
 
@@ -169,8 +170,8 @@ void PanelWindows::update(double now) {
     for (Win& w : wins_) updateHover(w, now);
     for (Win& w : wins_) {
         if (!w.dragging) continue;
-        if (!w.id || !XPLMGetWindowIsVisible(w.id)) {
-            w.dragging = false;
+        if (!w.id || !XPLMGetWindowIsVisible(w.id) || XPLMWindowIsPoppedOut(w.id)) {
+            w.dragging = false;  // a popped-out window moves with its own desktop frame
             continue;
         }
         int x = 0, y = 0;
@@ -253,6 +254,24 @@ const char* PanelWindows::onPanelHover(XPLMWindowID, const char* text, void* ref
         w->owner->apply(*w);
     }
     return XPLMReturnString("true");
+}
+
+const char* PanelWindows::onPanelPopOut(XPLMWindowID, const char* text, void* refcon) {
+    auto* w = static_cast<Win*>(refcon);
+    if (!w || !w->id || w->surface != Main) return XPLMReturnString("in");
+    const bool out = !XPLMWindowIsPoppedOut(w->id);
+    w->dragging = false;
+    if (out) {
+        XPLMGetWindowGeometry(w->id, &w->left, &w->top, &w->right, &w->bottom);  // to dock it back there
+        XPLMSetWindowPositioningMode(w->id, xplm_WindowPopOut, -1);
+    } else {
+        // Back inside X-Plane, where it was before it popped out.
+        XPLMSetWindowPositioningMode(w->id, xplm_WindowPositionFree, -1);
+        if (w->left < w->right && w->bottom < w->top) XPLMSetWindowGeometry(w->id, w->left, w->top, w->right, w->bottom);
+    }
+    (void)text;
+    log(std::string("editor ") + (out ? "popped out" : "docked"));
+    return XPLMReturnString(out ? "out" : "in");
 }
 
 const char* PanelWindows::onPanelDrag(XPLMWindowID, const char* text, void* refcon) {

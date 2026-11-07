@@ -45,6 +45,7 @@ struct FakeWindow {
     std::string url, title;
     std::map<std::string, std::pair<XPLMBrowserCallback_f, void*>> functions;
     std::vector<std::string> scripts;
+    XPLMWindowPositioningMode mode = xplm_WindowPositionFree;
 };
 std::vector<FakeWindow*> g_windows;
 XPLMWindowID g_keyboard = nullptr;
@@ -271,7 +272,8 @@ void XPLMDestroyWindow(XPLMWindowID id) {
         }
     if (g_keyboard == id) g_keyboard = nullptr;
 }
-void XPLMSetWindowPositioningMode(XPLMWindowID, XPLMWindowPositioningMode, int) {}
+void XPLMSetWindowPositioningMode(XPLMWindowID id, XPLMWindowPositioningMode mode, int) { static_cast<FakeWindow*>(id)->mode = mode; }
+int XPLMWindowIsPoppedOut(XPLMWindowID id) { return static_cast<FakeWindow*>(id)->mode == xplm_WindowPopOut; }
 void XPLMSetWindowTitle(XPLMWindowID id, const char* title) { static_cast<FakeWindow*>(id)->title = title; }
 void XPLMSetWindowResizingLimits(XPLMWindowID, int, int, int, int) {}
 void XPLMSetWindowIsVisible(XPLMWindowID id, int visible) { static_cast<FakeWindow*>(id)->visible = visible != 0; }
@@ -551,6 +553,18 @@ int main(int argc, char** argv) {
         g_mouseX += 100;
         frames(1);
         check(win->params.left == left + 40, "the window stays put after the drag ends");
+    }
+
+    // Pop out: the editor moves into its own desktop window and docks back where it was.
+    if (win->functions.count("fscsPanelPopOut")) {
+        auto [popFn, popRefcon] = win->functions.at("fscsPanelPopOut");
+        const int left = win->params.left, top = win->params.top;
+        check(std::string(popFn(win, R"({"surface":"main"})", popRefcon)) == "out" && win->mode == xplm_WindowPopOut, "fscsPanelPopOut pops the editor out");
+        check(std::string(popFn(win, R"({"surface":"main"})", popRefcon)) == "in" && win->mode == xplm_WindowPositionFree &&
+                  win->params.left == left && win->params.top == top,
+              "and docks it back where it was");
+    } else {
+        check(false, "the editor registers fscsPanelPopOut");
     }
 
     // Hover mode: the page asks for it, the mini hides until the mouse reaches the bottom edge below it.

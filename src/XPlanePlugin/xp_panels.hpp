@@ -8,6 +8,8 @@
 //   page -> plugin   xplane.fscsPanelSize({surface, height})  the mini fits its window to the dock
 //   page -> plugin   xplane.fscsPanelDrag({surface, phase})   "start"/"end": the window follows the mouse between
 //   page -> plugin   xplane.fscsPanelHover({surface, autoHide})  the mini hides until the mouse reaches the bottom edge
+//   page -> plugin   xplane.fscsPanelPopOut({surface})  the editor moves into its own desktop window and back; answers
+//                                                       "out" or "in"
 // The windows are self-decorated: the page draws its own frame, header and close button, as in MSFS.
 // Windows are created the first time they are shown.
 
@@ -61,6 +63,7 @@ private:
     void apply(Win& w);
     void updateHover(Win& w, double now);
     static const char* onPanelHover(XPLMWindowID window, const char* json, void* refcon);
+    static const char* onPanelPopOut(XPLMWindowID window, const char* json, void* refcon);
     void create(Surface s);
     static const char* onFrame(XPLMWindowID window, const char* json, void* refcon);
     static const char* onPanel(XPLMWindowID window, const char* json, void* refcon);

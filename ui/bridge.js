@@ -165,6 +165,34 @@
       root.document.addEventListener('mousemove', event => { if (dragging && event.buttons === 0) endDrag(); }, true);
       if (typeof root.addEventListener === 'function') root.addEventListener('blur', endDrag);
     }
+    // Pop out (as in MSFS): the editor moves into its own desktop window, which can go to another monitor, and docks back.
+    if (surfaceName === 'main' && root.document && typeof root.document.addEventListener === 'function') {
+      const popOut = () => {
+        const doc = root.document, button = doc.getElementById('mc-pop-out'), sim = doc.getElementById('mc-sim');
+        if (!button || !sim || button.fscsXPlanePopOut) return;
+        button.fscsXPlanePopOut = true;
+        const show = out => {
+          sim.dataset.popOut = out ? 'true' : 'false';
+          const label = doc.getElementById('mc-pop-out-label');
+          if (label) label.textContent = out ? 'Dock' : 'Pop out';
+          button.setAttribute('aria-label', out ? 'Dock the editor back into X-Plane' : 'Pop out the editor into its own window');
+          button.title = out ? 'Dock the editor back into the X-Plane window.' : 'Move the editor into its own window that you can drag to another monitor.';
+        };
+        button.hidden = false;
+        show(false);
+        button.addEventListener('click', () => {
+          const api = root.xplane;
+          if (!api || typeof api.fscsPanelPopOut !== 'function') return;
+          try {
+            const r = api.fscsPanelPopOut({ surface: 'main' });
+            if (r && typeof r.then === 'function') r.then(v => show(v === 'out')).catch(() => {});
+            else show(r === 'out');
+          } catch (error) { /* older plugin */ }
+        });
+      };
+      if (root.document.readyState === 'loading') root.document.addEventListener('DOMContentLoaded', popOut);
+      else popOut();
+    }
     // The mini window fits its content: the dock, plus room above it while a dialog or menu is open. app.js calls
     // fscsUpdateMiniRect whenever the dock or a mini dialog changes; the plugin keeps the window's bottom edge.
     if (/[?&]surface=mini\b/.test((root.location && root.location.search) || '')) {
