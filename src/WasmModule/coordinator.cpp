@@ -117,13 +117,19 @@ json Coordinator::ack(const protocol::Command& c, AckStatus s, const std::string
     return protocol::makeAck(c, s, reason);
 }
 
+// The simulator's name for messages: the same module runs in MSFS 2024 and, as XP Camera Studio, in X-Plane 12
+// (whose plugin reports "X-Plane <version>").
+static std::string simNameOf(const std::string& simVersion) {
+    return simVersion.rfind("X-Plane", 0) == 0 ? "X-Plane" : "Microsoft Flight Simulator 2024";
+}
+
 bool Coordinator::epochCommand(const std::string& a) const {
     return a == "ActivateCamera" || a == "BeginPeek" || a == "CycleCamera" || a == "NextCategory" ||
            a == "ReturnToPilot" || a == "CaptureView" || a == "SeedFromDefinition" || a == "BakeTemporaryLook" || a == "MouseLookDelta" || a == "StartWalkaround";
 }
 
 std::string Coordinator::blockReason() const {
-    if (!simConnected_) return "Microsoft Flight Simulator 2024 is not running or not connected.";
+    if (!simConnected_) return simNameOf(simVersion_) + " is not running or not connected.";
     if (!aircraft_.known()) return "Load a flight to use your cameras.";
     if (!profile_) return "No camera profile is open for this aircraft.";
     if (profile_->modelKey != aircraft_.modelKey) return "The open profile belongs to another aircraft.";
@@ -132,7 +138,7 @@ std::string Coordinator::blockReason() const {
 }
 
 std::string Coordinator::spottingBlockReason() const {
-    if (!simConnected_) return "Microsoft Flight Simulator 2024 is not running or not connected.";
+    if (!simConnected_) return simNameOf(simVersion_) + " is not running or not connected.";
     if (!aircraft_.known()) return "Load a flight to use your cameras.";
     if (!qual_.adapterQualified && !settings_.allowUnqualifiedAdapter && !qualificationSession_)
         return "Axis mapping for simulator build " + (simVersion_.empty() ? std::string("(unknown)") : simVersion_) +
@@ -504,7 +510,7 @@ json Coordinator::handle(const protocol::Command& c, double now) {
             emit_("ViewCaptured", payload);
             return ack(c, AckStatus::Completed);
         }
-        if (!simConnected_) return ack(c, AckStatus::Rejected, "Microsoft Flight Simulator 2024 is not connected.");
+        if (!simConnected_) return ack(c, AckStatus::Rejected, simNameOf(simVersion_) + " is not connected.");
         if (readsUnreliable_) {
             emit_("ViewCaptured", {{"ok", false}, {"message", "Reading the simulator's view is unavailable on this connection. "
                                                               "Start from a native camera definition instead."}});
@@ -517,7 +523,7 @@ json Coordinator::handle(const protocol::Command& c, double now) {
     }
     if (c.action == "EnumerateDefinitions") {
         if (!simConnected_ || !backend_.enumerateDefinitions())
-            return ack(c, AckStatus::Rejected, "Microsoft Flight Simulator 2024 is not connected.");
+            return ack(c, AckStatus::Rejected, simNameOf(simVersion_) + " is not connected.");
         return ack(c, AckStatus::Accepted);
     }
     if (c.action == "SeedFromDefinition") {
@@ -923,13 +929,13 @@ void Coordinator::onBackendEvent(const BackendEvent& ev, double now) {
             } else if constexpr (std::is_same_v<T, backend_event::Disconnected>) {
                 const bool wasConnected = simConnected_;
                 traffic_.clear();
-                resetSession(e.reason.empty() ? "Microsoft Flight Simulator 2024 closed the connection." : e.reason, now);
+                resetSession(e.reason.empty() ? simNameOf(simVersion_) + " closed the connection." : e.reason, now);
                 if (wasConnected || aircraft_.known()) {
                     aircraft_ = {};
                     profile_.reset();
                     emit_("AircraftChanged", {{"title", nullptr}, {"aircraftPath", nullptr}, {"modelKey", nullptr}, {"livery", nullptr}});
                 }
-                setState(Ownership::Observing, "Waiting for Microsoft Flight Simulator 2024");
+                setState(Ownership::Observing, "Waiting for " + simNameOf(simVersion_));
                 emitCapabilities();
             } else if constexpr (std::is_same_v<T, backend_event::CameraStatus>) {
                 onStatus(e, now);

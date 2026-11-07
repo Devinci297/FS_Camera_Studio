@@ -1093,6 +1093,12 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim .mc-binding-slot>small{display:block;color:var(--mc-muted);margin-bottom:6px}
 #mc-sim .mc-binding-slot>.mc-binding-input{width:100%;min-width:0;justify-content:flex-start;text-align:left;white-space:normal;overflow-wrap:anywhere}
 #mc-sim .mc-binding-slot .mc-binding-actions{display:flex;justify-content:flex-end;gap:4px;margin-top:5px}
+/* X-Plane: each action shows its xpcs/ command, with Copy */
+#mc-sim .mc-binding-row.mc-binding-xp{grid-template-columns:minmax(150px,1fr) minmax(200px,1fr)}
+#mc-sim .mc-binding-xp .mc-binding-slot{display:flex;flex-wrap:wrap;align-items:center}
+#mc-sim .mc-binding-xp .mc-binding-slot>small{flex-basis:100%}
+#mc-sim .mc-binding-command{flex:1 1 140px;min-width:0;margin-right:6px;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px}
+@media(max-width:620px){#mc-sim .mc-binding-row.mc-binding-xp{grid-template-columns:minmax(0,1fr)}}
 #mc-sim .mc-assign-slots{display:flex;gap:8px;margin:8px 0 12px}
 #mc-sim .mc-assign-slots>button{flex:1;min-width:0;display:block;text-align:left;white-space:normal;padding:9px}
 #mc-sim .mc-assign-slots small{display:block;font-size:11px;color:var(--mc-muted);margin-top:5px;overflow-wrap:anywhere}
