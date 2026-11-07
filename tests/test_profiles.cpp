@@ -131,7 +131,7 @@ TEST_CASE("profile: structural errors are rejected") {
     CHECK(!validateProfile(p).ok());
 
     p = twoCameraProfile();
-    p["schemaVersion"] = 4;
+    p["schemaVersion"] = 5;
     CHECK(!validateProfile(p).ok());
 }
 
@@ -146,7 +146,7 @@ TEST_CASE("profile: schema 1 documents migrate to the current schema") {
     auto r = validateProfile(p);
     CHECK(r.ok());
     CHECK(r.migrated);
-    CHECK_EQ(p["schemaVersion"].get<int>(), 3);
+    CHECK_EQ(p["schemaVersion"].get<int>(), 4);
     CHECK_EQ(p["cameras"][1]["viewId"].get<int>(), 2);
     CHECK_EQ(p["cameras"][0]["transition"]["kind"].get<std::string>(), std::string("smoothstep5"));
     CHECK_EQ(p["cameras"][0]["followHorizon"], json(1.0));
@@ -168,7 +168,7 @@ TEST_CASE("profile: schema 2 levelHorizon migrates to followHorizon") {
     auto r = validateProfile(p);
     CHECK(r.ok());
     CHECK(r.migrated);
-    CHECK_EQ(p["schemaVersion"], json(3));
+    CHECK_EQ(p["schemaVersion"], json(4));
     CHECK_EQ(p["cameras"][0]["followHorizon"], json(0.0));
     CHECK_EQ(p["cameras"][1]["followHorizon"], json(1.0));
     CHECK_EQ(p["cameras"][2]["followHorizon"], json(1.0));
@@ -177,14 +177,14 @@ TEST_CASE("profile: schema 2 levelHorizon migrates to followHorizon") {
     CHECK_NEAR(snap.cameras[0].followHorizon, 0, 1e-12);
     CHECK_NEAR(snap.cameras[1].followHorizon, 1, 1e-12);
 
-    // A v3 document validates unchanged and is not reported as upgraded.
+    // A current (v4) document validates unchanged and is not reported as upgraded.
     json again = p;
     auto r3 = validateProfile(again);
     CHECK(r3.ok());
     CHECK(!r3.migrated);
     CHECK(again == p);
 
-    // Profile codes: a v2 export imports migrated, a v3 export round-trips.
+    // Profile codes: a v2 export imports migrated, a current export round-trips.
     json v2 = twoCameraProfile();
     v2["schemaVersion"] = 2;
     v2["cameras"][0].erase("followHorizon");
@@ -193,7 +193,7 @@ TEST_CASE("profile: schema 2 levelHorizon migrates to followHorizon") {
     auto imported = importProfileCode(exportProfileCode(v2, false), &err);
     CHECK(imported.has_value());
     if (!imported) return;
-    CHECK_EQ(imported->profile["schemaVersion"], json(3));
+    CHECK_EQ(imported->profile["schemaVersion"], json(4));
     CHECK_EQ(imported->profile["cameras"][0]["followHorizon"], json(0.0));
     CHECK(!imported->profile["cameras"][0].contains("levelHorizon"));
     json v3 = twoCameraProfile();
@@ -212,7 +212,7 @@ TEST_CASE("profile: followHorizon must be a finite number from 0 to 1") {
             CHECK(!camera.contains("levelHorizon"));
         }
     const json starter = makeStarterProfile("Starter", "", "");
-    CHECK_EQ(starter["schemaVersion"], json(3));
+    CHECK_EQ(starter["schemaVersion"], json(4));
     for (const json& good : {json(0), json(0.5), json(1)}) {
         json p = twoCameraProfile();
         p["cameras"][0]["followHorizon"] = good;
@@ -227,6 +227,89 @@ TEST_CASE("profile: followHorizon must be a finite number from 0 to 1") {
     p["cameras"][0].erase("followHorizon");
     CHECK(validateProfile(p).ok());
     CHECK_EQ(p["cameras"][0]["followHorizon"], json(1.0));
+}
+
+TEST_CASE("profile: schema 3 documents migrate to 4 without changes") {
+    json p = twoCameraProfile();
+    json expected = p;
+    CHECK(validateProfile(expected).ok());
+    p["schemaVersion"] = 3;
+    auto r = validateProfile(p);
+    CHECK(r.ok());
+    CHECK(r.migrated);
+    CHECK(p == expected);
+    std::string err;
+    auto imported = importProfileCode(exportProfileCode(p, false), &err);
+    CHECK(imported.has_value());
+    if (imported) CHECK_EQ(imported->profile["schemaVersion"], json(4));
+}
+
+TEST_CASE("profile: mounted cameras parse, default, validate and round-trip") {
+    json p = twoCameraProfile();
+    p["cameras"][0]["mode"] = "mounted";
+    p["cameras"][0]["positionMetersFRD"] = {0.5, -5.4, 0.3};
+    auto r = validateProfile(p);
+    CHECK(r.ok());
+    CHECK(!r.migrated);
+    CHECK_EQ(p["cameras"][0]["gimbal"], json("locked"));
+    CHECK_EQ(p["cameras"][0]["mountVibration"], json(fscs::core::kDefaultMountVibration));
+    CHECK(!p["cameras"][1].contains("gimbal"));  // other modes get no mount defaults
+    CHECK(!p["cameras"][1].contains("mountVibration"));
+    auto snap = toSnapshot(p);
+    CHECK(snap.cameras[0].mode == CameraMode::Mounted);
+    CHECK(snap.cameras[0].gimbal == fscs::core::Gimbal::Locked);
+    CHECK_NEAR(snap.cameras[0].mountVibration, .3, 1e-12);
+    CHECK(modeActivatable(CameraMode::Mounted));
+    CHECK_EQ(std::string(toString(CameraMode::Mounted)), std::string("mounted"));
+    CHECK(parseMode("mounted") == CameraMode::Mounted);
+
+    for (const auto& [name, gimbal] : {std::pair{"horizon", fscs::core::Gimbal::Horizon}, std::pair{"yaw", fscs::core::Gimbal::Yaw},
+                                       std::pair{"locked", fscs::core::Gimbal::Locked}}) {
+        json q = p;
+        q["cameras"][0]["gimbal"] = name;
+        q["cameras"][0]["mountVibration"] = 0.75;
+        CHECK(validateProfile(q).ok());
+        snap = toSnapshot(q);
+        CHECK(snap.cameras[0].gimbal == gimbal);
+        CHECK_NEAR(snap.cameras[0].mountVibration, .75, 1e-12);
+        // Profile codes keep the mode and both options.
+        std::string err;
+        auto imported = importProfileCode(exportProfileCode(q, false), &err);
+        CHECK(imported.has_value());
+        if (!imported) continue;
+        CHECK_EQ(imported->unsupportedCount, std::size_t{0});
+        for (const auto& note : imported->notes) CHECK(note.find("cannot be activated") == std::string::npos);
+        const auto& cam = imported->profile["cameras"][0];
+        CHECK_EQ(cam["mode"], json("mounted"));
+        CHECK_EQ(cam["gimbal"], json(name));
+        CHECK_EQ(cam["mountVibration"], json(0.75));
+        json again = imported->profile;
+        CHECK(validateProfile(again).ok());
+        CHECK(again == imported->profile);
+    }
+    for (const json& bad : {json("level"), json(""), json(1), json(true), json(nullptr)}) {
+        json q = p;
+        q["cameras"][0]["gimbal"] = bad;
+        CHECK(!validateProfile(q).ok());
+    }
+    for (const json& bad : {json(-0.01), json(1.01), json(NAN), json(INFINITY), json("0.3"), json(nullptr)}) {
+        json q = p;
+        q["cameras"][0]["mountVibration"] = bad;
+        CHECK(!validateProfile(q).ok());
+    }
+    // Leaving the mounted mode keeps the choices for later; they are still validated.
+    json q = p;
+    q["cameras"][0]["mode"] = "aircraftExterior";
+    q["cameras"][0]["gimbal"] = "yaw";
+    CHECK(validateProfile(q).ok());
+    CHECK_EQ(q["cameras"][0]["gimbal"], json("yaw"));
+    q["cameras"][0]["gimbal"] = "sideways";
+    CHECK(!validateProfile(q).ok());
+    // A mounted camera never inherits aircraft tracking from its saved document.
+    q = p;
+    q["cameras"][0]["aircraftTracking"] = "both";
+    CHECK(validateProfile(q).ok());
+    CHECK_EQ(q["cameras"][0]["aircraftTracking"], json("off"));
 }
 
 TEST_CASE("profile: unknown required feature opens read-only") {
@@ -388,7 +471,7 @@ TEST_CASE("exchange: export/import round trip remaps ids; bad codes are refused"
     auto rep = importProfileCode(exportProfileCode(p, true), &err);
     CHECK(rep.has_value());
     CHECK(rep->profile["profileId"] != p["profileId"]);
-    CHECK_EQ(rep->unsupportedCount, std::size_t{1});
+    CHECK_EQ(rep->unsupportedCount, std::size_t{0});  // free cameras can activate now
     CHECK(!importProfileCode("not json", &err));
     CHECK(!importProfileCode(R"({"schemaVersion": 9})", &err));
     CHECK(!importProfileCode(R"({"format":"fs-camera-studio-profile","profile":[1,2]})", &err));
@@ -559,6 +642,34 @@ TEST_CASE("profiles: camera effects round trip and reject invalid strengths") {
     CHECK_NEAR(profile.cameras[0].effects.turbulence,.5,1e-9);
     doc["cameras"][0]["effects"]["groundRoll"]=2.; CHECK(!validateProfile(doc).ok());
     doc["cameras"][0]["effects"]="invalid"; CHECK(!validateProfile(doc).ok());
+}
+TEST_CASE("profiles: head-model effect strengths are optional, default for older profiles and validated") {
+    auto doc = makeStarterProfile("Head", "test", "Test");
+    // A profile saved before the head model existed: only the original six strengths.
+    doc["cameras"][0]["effects"] = {{"enabled",true},{"intensity",.35},{"turbulence",.5},{"groundRoll",.35},{"touchdown",.5},{"acceleration",.35},{"engine",.2}};
+    CHECK(validateProfile(doc).ok());
+    const auto& fx = doc["cameras"][0]["effects"];
+    CHECK_NEAR(fx["headLag"].get<double>(),.5,1e-12); CHECK_NEAR(fx["turnLean"].get<double>(),.5,1e-12);
+    CHECK_NEAR(fx["taxiBob"].get<double>(),.5,1e-12); CHECK_NEAR(fx["idleSway"].get<double>(),0,1e-12);
+    const fscs::core::EffectsSettings defaults;
+    const auto older = toSnapshot(doc).cameras[0].effects;
+    CHECK_NEAR(older.headLag,defaults.headLag,1e-12); CHECK_NEAR(older.turnLean,defaults.turnLean,1e-12);
+    CHECK_NEAR(older.taxiBob,defaults.taxiBob,1e-12); CHECK_NEAR(older.idleSway,defaults.idleSway,1e-12);
+    CHECK_NEAR(older.engine,.2,1e-12);
+    // Snapshot fallbacks for a document that skipped validation agree with the struct defaults.
+    json bare = doc; bare["cameras"][0]["effects"] = {{"enabled",true}};
+    const auto unvalidated = toSnapshot(bare).cameras[0].effects;
+    CHECK_NEAR(unvalidated.headLag,defaults.headLag,1e-12); CHECK_NEAR(unvalidated.idleSway,defaults.idleSway,1e-12);
+    // Explicit values round trip.
+    doc["cameras"][0]["effects"]["headLag"]=.1; doc["cameras"][0]["effects"]["turnLean"]=0; doc["cameras"][0]["effects"]["taxiBob"]=1; doc["cameras"][0]["effects"]["idleSway"]=.4;
+    CHECK(validateProfile(doc).ok());
+    const auto custom = toSnapshot(doc).cameras[0].effects;
+    CHECK_NEAR(custom.headLag,.1,1e-12); CHECK_NEAR(custom.turnLean,0,1e-12); CHECK_NEAR(custom.taxiBob,1,1e-12); CHECK_NEAR(custom.idleSway,.4,1e-12);
+    for (const char* key : {"headLag","turnLean","taxiBob","idleSway"}) {
+        for (const json bad : {json(1.5), json(-.1), json("high"), json(nullptr)}) {
+            auto copy = doc; copy["cameras"][0]["effects"][key] = bad; CHECK(!validateProfile(copy).ok());
+        }
+    }
 }
 TEST_CASE("profiles: corrected lateral calibration preserves saved physical poses once") {
     StoreState state; state.txn=1;
@@ -796,4 +907,39 @@ TEST_CASE("profiles: airport horizon protection defaults and explicit overrides 
     CHECK(validateProfile(profile).ok());CHECK(!toSnapshot(profile).cameras[0].airportOverrides.trackingHorizonGuard);
     camera["airportOverrides"]["trackingHorizonGuard"]=true;camera["mode"]="aircraftCockpit";
     CHECK(validateProfile(profile).ok());CHECK(!camera.contains("airportOverrides"));
+}
+
+TEST_CASE("settings: binoculars FOV defaults to 10 degrees, clamps to 2-60 and roundtrips") {
+    auto settings = defaultSettingsDocument();
+    CHECK_EQ(settings["host"]["binocularsFovDeg"], json(10.0));
+    CHECK_NEAR(parseHostSettings(json::object()).binocularsFovDeg, 10, 1e-12);  // older settings files
+    for (const auto& [input, expected] : std::vector<std::pair<json, double>>{
+             {json(15), 15}, {json(1), 2}, {json(0.5), 2}, {json(-20), 2}, {json(100), 60}, {json("12"), 10}, {json(nullptr), 10}, {json(true), 10}}) {
+        settings["host"]["binocularsFovDeg"] = input;
+        const auto normalized = normalizeSettings(settings);
+        CHECK_NEAR(normalized["host"]["binocularsFovDeg"].get<double>(), expected, 1e-12);
+        CHECK_NEAR(parseHostSettings(json::parse(normalized.dump())).binocularsFovDeg, expected, 1e-12);
+    }
+    CHECK(fscs::profiles::kBinocularsMinFovDeg < 30);  // may go below the editor's FOV floor
+}
+
+TEST_CASE("bindings: binoculars has a Ctrl+Alt+Z default and saved bindings are not migrated") {
+    const auto doc = defaultBindingsDocument();
+    int found = 0;
+    for (const auto& b : doc["bindings"]) {
+        if (b["action"] == "binoculars") {
+            ++found;
+            CHECK_EQ(b["input"]["definition"].get<std::string>(), std::string("VK_LCONTROL+VK_LMENU+Z"));
+            CHECK_EQ(b["input"]["label"].get<std::string>(), std::string("Ctrl + Alt + Z"));
+        } else {
+            CHECK(b["input"]["definition"] != "VK_LCONTROL+VK_LMENU+Z");
+        }
+    }
+    CHECK_EQ(found, 1);
+    const auto parsed = parseBindings(doc);
+    CHECK(parsed.problems.empty());
+    json saved = {{"schemaVersion", 2}, {"movementDefaultsVersion", 2},
+                  {"bindings", {{{"action", "releaseCamera"}, {"input", {{"kind", "key"}, {"definition", "VK_LCONTROL+VK_LMENU+R"}, {"label", "Ctrl + Alt + R"}}}}}}};
+    const auto upgraded = upgradeMovementBindings(saved);
+    for (const auto& b : upgraded["bindings"]) CHECK(b["action"] != "binoculars");
 }

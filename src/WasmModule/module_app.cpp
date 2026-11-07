@@ -28,8 +28,10 @@ bool isStateEvent(const std::string& n) {
 }
 
 // Pinning the mini panel is a global UI preference, saved on its own and never an unsaved edit (design 2.0 §4.3).
+// Saved at once by UpdateDraft (never left as an unsaved edit): the mini pin and the saved spotting spots.
 json withoutPreferences(json settings) {
     if (settings.is_object() && settings.contains("ui") && settings["ui"].is_object()) settings["ui"].erase("miniPinned");
+    if (settings.is_object() && settings.contains("host") && settings["host"].is_object()) settings["host"].erase("spottingSpots");
     return settings;
 }
 
@@ -37,6 +39,8 @@ json withoutRevision(json doc) {
     if (doc.is_object()) doc.erase("revision");
     return doc;
 }
+
+int pickGamepad(const std::vector<std::pair<int, std::string>>& controllers);  // gamepad sticks, below
 
 core::ManualInput add(core::ManualInput a, const core::ManualInput& b) {
     a.lookRight += b.lookRight;
@@ -120,6 +124,10 @@ void ModuleApp::update(double now) {
             controllerCapturePoll_ = now + 2;
         }
     }
+    if (axisCaptureDevice_ >= 0) {
+        const auto owner = instances_.find(axisCaptureRequester_);
+        if (now > axisCaptureUntil_ || (owner != instances_.end() && now - owner->second.lastRenew > kLeaseSeconds)) stopAxisCapture("timeout");
+    }
     reassembler_.expire(now);
     if(repo_.loaded() && simRunning_ && now-lastAirportRefresh_>2){lastAirportRefresh_=now;refreshAirports(now);}
     for(auto it=airportJobs_.begin();it!=airportJobs_.end();) {if(now>it->second.deadline){emitNow("AirportPreview",{{"icao",it->second.icao},{"error","No scenery data received within 20 seconds."}},it->second.to);it=airportJobs_.erase(it);}else ++it;}
@@ -131,10 +139,13 @@ void ModuleApp::update(double now) {
     for (auto it = gestures_.begin(); it != gestures_.end();) it = now > it->second.expires ? gestures_.erase(it) : std::next(it);
     core::ManualInput manual = router_.manualInput();
     for (const auto& [token, g] : gestures_) manual = add(manual, g.input);
+    updateGamepad(manual);
     coord_.setManualInput(manual);
     if (manual.moveForward || manual.moveRight || manual.moveUp || manual.lookRight || manual.lookUp)
         lastAutoSwitch_ = now; // Manual movement pauses the shared mode; it does not turn it off.
     updateAirportAuto(now);
+    updateCinematic(now, manual.moveForward || manual.moveRight || manual.moveUp || manual.lookRight || manual.lookUp || manual.zoomIn || autoMouseDown_);
+    updateSpotting(now);
 
     if (!testDefinition_.empty() && now > testUntil_) {
         services_.mapTestInput("");
@@ -161,6 +172,7 @@ void ModuleApp::update(double now) {
 
 void ModuleApp::onEvent(const BackendEvent& ev, double now) {
     now_ = now;
+    cinematicEvent(ev, now);
     if(airportEvent(ev,now))return;
     if (const auto* m = std::get_if<backend_event::CommBusMessage>(&ev)) {
         onPanelText(m->data, now);
@@ -185,6 +197,39 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
         }
         return;
     }
+    if (std::holds_alternative<backend_event::Connected>(ev)) {
+        // A new SimConnect connection has no axis mappings yet: map them again (bindings follow their own path).
+        gamepadMapping_.clear();
+        gamepadOn_ = false;
+        configureGamepad(profiles::parseHostSettings(working_.settings));
+    }
+    if (const auto* axis = std::get_if<backend_event::AxisInput>(&ev)) {
+        if (!gamepadOn_) return;
+        gamepad_.onAxis(axis->index, axis->value);
+        if (gamepadSamples_ < 3) {
+            ++gamepadSamples_;
+            diag("gamepad axis " + (axis->index < gamepad_.definitions().size() ? gamepad_.definitions()[axis->index] : std::string("?")) +
+                 " raw=" + std::to_string(axis->value));
+        }
+        return;
+    }
+    if (const auto* sample = std::get_if<backend_event::ControllerAxis>(&ev)) {
+        if (axisCaptureDevice_ < 0 || sample->deviceId != axisCaptureDevice_ || sample->captureGeneration != axisCaptureGeneration_) return;
+        const auto found = axisListener_.onSample(sample->axis, sample->value);
+        if (!found) return;
+        const auto selected = std::find_if(controllers_.begin(), controllers_.end(), [&](const auto& item) { return item.first == axisCaptureDevice_; });
+        std::string name = selected == controllers_.end() ? "Controller" : selected->second;
+        if (name.size() > 100) name.resize(100);
+        while (!name.empty() && !js::validUtf8(name)) name.pop_back();
+        const json axis{{"function", axisCaptureFunction_},
+                        {"definition", "joystick:" + std::to_string(axisCaptureDevice_) + ":" + kGamepadAxisNames[static_cast<std::size_t>(found->axis)]},
+                        {"label", name + " - " + kGamepadAxisLabels[static_cast<std::size_t>(found->axis)]},
+                        {"rest", found->rest}, {"full", found->full}, {"deviceId", axisCaptureDevice_}, {"deviceName", name}};
+        diag("axis capture found " + js::dump(axis));
+        emitNow("ControllerAxisCaptured", {{"axis", axis}, {"captureId", axisCaptureId_}}, axisCaptureRequester_);
+        stopAxisCapture("stopped");
+        return;
+    }
     if (const auto* mapping = std::get_if<backend_event::InputMappingStatus>(&ev)) {
         diag("input mapping result " + js::dump({{"ready", mapping->ready}, {"definitions", mapping->definitions},
              {"failedCalls", mapping->failedCalls}, {"code", mapping->code}}));
@@ -194,6 +239,9 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
         controllers_ = c->controllers;
         if (controllerCaptureDevice_ >= 0 && std::none_of(controllers_.begin(), controllers_.end(),
             [&](const auto& controller) { return controller.first == controllerCaptureDevice_; })) stopControllerCapture("disconnected");
+        if (axisCaptureDevice_ >= 0 && std::none_of(controllers_.begin(), controllers_.end(),
+            [&](const auto& controller) { return controller.first == axisCaptureDevice_; })) stopAxisCapture("disconnected");
+        if (gamepad_.standard() && pickGamepad(controllers_) != gamepadStandardDevice_) configureGamepad(profiles::parseHostSettings(working_.settings));
         json list = json::array();
         for (const auto& [id, name] : controllers_) list.push_back({{"deviceId", id}, {"name", name}});
         emitNow("ControllersListed", {{"controllers", list}});
@@ -237,10 +285,13 @@ void ModuleApp::onEvent(const BackendEvent& ev, double now) {
     }
     if (const auto* r = std::get_if<backend_event::SimRunning>(&ev)) {
         simRunning_ = r->running;
-        if (!simRunning_) stopControllerCapture("stopped");
+        if (!simRunning_) { stopControllerCapture("stopped"); stopAxisCapture("stopped"); }
     }
     if (std::holds_alternative<backend_event::FlightLoaded>(ev) || std::holds_alternative<backend_event::Disconnected>(ev)) {
         stopControllerCapture("disconnected");
+        stopAxisCapture("disconnected");
+        gamepad_.neutral();
+        stopAutoSpot("A new flight was loaded.");
         for (const auto& a : router_.releaseAll()) coord_.onAction(a, now);
     }
     coord_.onBackendEvent(ev, now);
@@ -256,6 +307,97 @@ void ModuleApp::completeControllerCapture(const std::string& suffix, const std::
     if (!pov.empty()) input["pov"] = pov;
     emitNow("ControllerInputCaptured", {{"input", input}, {"captureId", controllerCaptureId_}}, controllerCaptureRequester_);
     stopControllerCapture("stopped");
+}
+
+void ModuleApp::stopAxisCapture(const std::string& state) {
+    if (axisCaptureDevice_ < 0) return;
+    const auto device = axisCaptureDevice_;
+    const auto requester = axisCaptureRequester_;
+    const auto captureId = axisCaptureId_;
+    services_.captureControllerAxes(-1);
+    diag("axis capture " + state + " device=" + std::to_string(device));
+    axisCaptureDevice_ = -1;
+    axisCaptureRequester_.clear(); axisCaptureId_.clear(); axisCaptureFunction_.clear();
+    emitNow("AxisCaptureStatus", {{"state", state}, {"deviceId", device}, {"captureId", captureId}}, requester);
+}
+
+namespace {
+// The controller the standard layout uses: the first that names itself a gamepad, else the first generic controller or
+// pad. Joysticks, yokes, throttles and pedals are never picked: the user assigns those with Listen.
+int pickGamepad(const std::vector<std::pair<int, std::string>>& controllers) {
+    const auto lower = [](std::string s) { for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return s; };
+    const auto has = [](const std::string& s, std::initializer_list<const char*> words) {
+        return std::any_of(words.begin(), words.end(), [&](const char* w) { return s.find(w) != std::string::npos; });
+    };
+    for (int pass = 0; pass < 2; ++pass)
+        for (const auto& [id, raw] : controllers) {
+            const std::string name = lower(raw);
+            if (id < 0 || has(name, {"keyboard", "mouse", "touch", "yoke", "throttle", "pedal", "rudder", "stick", "hotas", "joystick"})) continue;
+            if (pass == 0 ? has(name, {"xbox", "xinput", "gamepad", "game pad", "dualsense", "dualshock", "wireless controller"})
+                          : has(name, {"controller", "pad"}))
+                return id;
+        }
+    return -1;
+}
+}  // namespace
+
+json ModuleApp::gamepadState() const {
+    std::string name;
+    for (const auto& [id, n] : controllers_) if (id == gamepadStandardDevice_) name = n;
+    return {{"mode", gamepad_.standard() ? "standard" : "custom"}, {"deviceId", gamepad_.standard() && gamepadStandardDevice_ >= 0 ? json(gamepadStandardDevice_) : json(nullptr)},
+            {"deviceName", gamepad_.standard() && gamepadStandardDevice_ >= 0 ? json(name) : json(nullptr)}};
+}
+
+void ModuleApp::configureGamepad(const profiles::HostSettings& settings) {
+    gamepadSticksEnabled_ = settings.gamepadSticksEnabled;
+    gamepadBlocksAircraft_ = settings.gamepadBlocksAircraft;
+    // No motion assigned: the standard layout on the gamepad found among the controllers, like the simulator's own
+    // drone camera, with nothing to set up. Any Listen assignment switches to the assigned motions only.
+    const bool standard = settings.gamepadAxes.empty();
+    if (standard) gamepadStandardDevice_ = pickGamepad(controllers_);
+    const auto& definitions = standard ? gamepad_.configureStandard(gamepadStandardDevice_, settings.gamepadDeadzone)
+                                       : gamepad_.configure(settings.gamepadAxes, settings.gamepadDeadzone);
+    const json state = gamepadState();
+    if (state != gamepadStateSent_) {
+        gamepadStateSent_ = state;
+        emitNow("GamepadChanged", state);
+    }
+    std::string key = settings.gamepadBlocksAircraft ? "mask" : "pass";
+    for (const auto& d : definitions) key += "|" + d;
+    gamepadWanted_ = key;
+    // The mapping itself waits for the first drone view (updateGamepad): no input subscriptions while the
+    // simulator starts or loads a flight. A changed mapping turns the current one off until then.
+    if (key != gamepadMapping_ && gamepadOn_) {
+        services_.setAxesEnabled(false);
+        gamepadOn_ = false;
+        gamepad_.neutral();
+    }
+}
+
+void ModuleApp::updateGamepad(core::ManualInput& manual) {
+    const bool droneShown = simRunning_ && !paused_ && coord_.freeCameraShown();
+    // The standard layout without a gamepad yet: look for one while a drone is shown (the list arrives as an event).
+    if (gamepadSticksEnabled_ && gamepad_.standard() && gamepad_.empty() && droneShown && now_ >= gamepadNextEnumerate_) {
+        gamepadNextEnumerate_ = now_ + 5;
+        services_.enumerateControllers();
+    }
+    // Only while a drone is on screen and nothing listens for inputs: elsewhere the sticks stay the simulator's.
+    const bool on = gamepadSticksEnabled_ && !gamepad_.empty() && axisCaptureDevice_ < 0 && controllerCaptureDevice_ < 0 && droneShown;
+    if (on && gamepadMapping_ != gamepadWanted_) {
+        gamepadMapping_ = gamepadWanted_;
+        gamepad_.neutral();
+        const bool mapped = services_.mapAxes(gamepad_.definitions(), gamepadBlocksAircraft_);
+        diag("gamepad axes: " + std::to_string(gamepad_.definitions().size()) + (mapped ? " mapped" : " failed") +
+             (gamepadBlocksAircraft_ ? " (masked from the aircraft while a drone is shown)" : ""));
+    }
+    if (on != gamepadOn_) {
+        gamepadOn_ = on;
+        gamepad_.neutral();  // nothing held over from before; the first new samples arrive within about 0.2 s
+        gamepadSamples_ = 0;
+        services_.setAxesEnabled(on);
+        diag(std::string("gamepad sticks ") + (on ? "on" : "off"));
+    }
+    if (on) manual = add(manual, gamepad_.input());
 }
 
 void ModuleApp::stopControllerCapture(const std::string& state) {
@@ -333,9 +475,10 @@ json ModuleApp::snapshot() const {
     const char* session = !repo_.loaded() ? "Initializing" : coord_.blockReason().find("not running") != std::string::npos ? "Discovering"
                           : !coord_.aircraft().known() ? "Discovering" : !simRunning_ ? "Suspended" : "Ready";
     json active{{"profileId", coord_.profile() ? json(coord_.profile()->profileId) : json(nullptr)},
-                {"cameraId", coord_.activeCameraId().empty() ? json(nullptr) : json(coord_.activeCameraId())},
+                {"cameraId", coord_.activeCameraId().empty() || coord_.spotOverlay() ? json(nullptr) : json(coord_.activeCameraId())},
                 {"peeking", false},
-                {"transitioning", coord_.engine().transitioning()}};
+                {"transitioning", coord_.engine().transitioning()},
+                {"glance", coord_.glanceJson()}};
     return {{"moduleBootId", bootId_},
             {"sessionEpoch", coord_.epoch()},
             {"appVersion", appVersion_},
@@ -357,6 +500,10 @@ json ModuleApp::snapshot() const {
                          {"hasCommittedVersion", hasCommitted}}},
             {"pendingCommit", pendingCommit_ ? json(pendingCommit_->requestId) : json(nullptr)},
             {"airports", airportState()},
+            {"cinematic", cinematicState()},
+            {"traffic", trafficState()},
+            {"spotting", spottingState()},
+            {"gamepad", gamepadState()},
             {"controllers", [this] {
                  json list = json::array();
                  for (const auto& [id, name] : controllers_) list.push_back({{"deviceId", id}, {"name", name}});
@@ -439,6 +586,8 @@ void ModuleApp::handle(const Command& c, double now) {
     }
 
     if(handleAirport(c,now))return;
+    if (handleCinematic(c, now)) return;
+    if (handleSpotting(c, now)) return;
 
     // Navigation and camera control -------------------------------------------------------------------------
     if (a == "SelectCamera") {
@@ -466,6 +615,10 @@ void ModuleApp::handle(const Command& c, double now) {
         a == "RecenterLook" || a == "CancelMotion" || a == "BakeTemporaryLook" || a == "EnumerateDefinitions" ||
         a == "CaptureView" || a == "SeedFromDefinition" || a == "MouseLookDelta" || a == "StartWalkaround" || a == "StopWalkaround") {
         if (a == "CaptureView" || a == "SeedFromDefinition") captureRequester_ = c.uiInstanceId;
+        send(forward(c, now));
+        return;
+    }
+    if (a == "DroneHere") {  // read-only: where a free camera dropped now would be (doc/protocol.md 5)
         send(forward(c, now));
         return;
     }
@@ -497,11 +650,12 @@ void ModuleApp::handle(const Command& c, double now) {
         auto action = profiles::parseAction(js::str(b, "action"));
         if (!action) return reply(c, AckStatus::Rejected, "Unknown action.");
         const int viewId = static_cast<int>(js::integer(b, "viewId", 0));
-        if (profiles::actionIsContinuous(*action)) {
+        if (profiles::actionIsContinuous(*action) || *action == profiles::Action::Binoculars) {
             return reply(c, AckStatus::Completed, {}, {{"dispatched", false}, {"message", "Close the editor and use the assigned input in the simulator to test this held or wheel control."}});
         }
         coord_.onAction({*action, viewId, true, 0}, now);
-        if (!profiles::actionIsContinuous(*action) && *action != profiles::Action::PeekView) coord_.onAction({*action, viewId, false, 0}, now);
+        // Peek and hold-to-glance stay on their view when tested; a release would return at once.
+        if (!profiles::actionIsContinuous(*action) && *action != profiles::Action::PeekView && *action != profiles::Action::GlanceHold) coord_.onAction({*action, viewId, false, 0}, now);
         return reply(c, AckStatus::Completed, {}, {{"dispatched", true}, {"note", "Command sent. Watch the simulator view to confirm it moved."}});
     }
     if (a == "ListControllers") {
@@ -522,6 +676,7 @@ void ModuleApp::handle(const Command& c, double now) {
         if (device < 0 || std::none_of(controllers_.begin(), controllers_.end(), [&](const auto& item) { return item.first == device; }))
             return reply(c, AckStatus::Rejected, "Select a connected controller first. Refresh the controller list if needed.");
         stopControllerCapture("stopped");
+        stopAxisCapture("stopped");
         services_.mapTestInput(""); testDefinition_.clear();
         if (!services_.captureControllerInputs(device, ++controllerCaptureGeneration_)) return reply(c, AckStatus::Rejected, "Controller listening is unavailable. Load a flight and try again.");
         for (const auto& e : router_.releaseAll()) coord_.onAction(e, now);
@@ -534,6 +689,30 @@ void ModuleApp::handle(const Command& c, double now) {
         diag("controller capture listening device=" + std::to_string(device));
         emitNow("ControllerCaptureStatus", {{"state", "listening"}, {"deviceId", device}, {"captureId", controllerCaptureId_}}, c.uiInstanceId);
         return reply(c, AckStatus::Accepted, {}, {{"seconds", 20}, {"buttonCount", 32}, {"hatCount", 1}});
+    }
+    if (a == "StartAxisCapture") {
+        const int device = static_cast<int>(js::integer(p, "deviceId", -1));
+        const std::string function = js::str(p, "function");
+        if (!profiles::parseGamepadFunction(function)) return reply(c, AckStatus::Rejected, "Choose a drone motion to assign.");
+        if (device < 0 || std::none_of(controllers_.begin(), controllers_.end(), [&](const auto& item) { return item.first == device; }))
+            return reply(c, AckStatus::Rejected, "Select a connected controller first. Refresh the controller list if needed.");
+        stopAxisCapture("stopped");
+        stopControllerCapture("stopped");
+        if (!services_.captureControllerAxes(device, ++axisCaptureGeneration_))
+            return reply(c, AckStatus::Rejected, "Controller listening is unavailable. Load a flight and try again.");
+        axisListener_.start();
+        axisCaptureDevice_ = device;
+        axisCaptureFunction_ = function;
+        axisCaptureRequester_ = c.uiInstanceId;
+        axisCaptureId_ = js::str(p, "captureId").substr(0, 120);
+        axisCaptureUntil_ = now + kAxisCaptureSeconds;
+        diag("axis capture listening device=" + std::to_string(device) + " function=" + function);
+        emitNow("AxisCaptureStatus", {{"state", "listening"}, {"deviceId", device}, {"captureId", axisCaptureId_}}, c.uiInstanceId);
+        return reply(c, AckStatus::Accepted, {}, {{"seconds", kAxisCaptureSeconds}});
+    }
+    if (a == "StopAxisCapture") {
+        if (axisCaptureRequester_.empty() || axisCaptureRequester_ == c.uiInstanceId) stopAxisCapture("stopped");
+        return reply(c, AckStatus::Completed);
     }
     if (a == "StopControllerCapture") {
         if (controllerCaptureRequester_.empty() || controllerCaptureRequester_ == c.uiInstanceId) stopControllerCapture("stopped");
@@ -580,10 +759,14 @@ void ModuleApp::handle(const Command& c, double now) {
         publishWorking(now, before != working_.bindings);
         reply(c, AckStatus::Completed, {}, {{"draftRevision", working_.draftRevision}});
         const bool pinned = js::boolean(js::object(working_.settings, "ui"), "miniPinned", false);
-        if (pinned != js::boolean(js::object(repo_.committed().settings, "ui"), "miniPinned", false)) {
+        const json& spots = js::get(js::object(working_.settings, "host"), "spottingSpots");
+        // Preferences are saved at once, with or without a camera profile, and never with the other unsaved edits.
+        if (pinned != js::boolean(js::object(repo_.committed().settings, "ui"), "miniPinned", false) ||
+            spots != js::get(js::object(repo_.committed().settings, "host"), "spottingSpots")) {
             CommitRequest pref;
             json s = repo_.committed().settings;
             s["ui"]["miniPinned"] = pinned;
+            s["host"]["spottingSpots"] = spots.is_array() ? spots : json::array();
             pref.settings = s;
             pref.navigation = navigation();
             commit(std::move(pref), {c.requestId, "preference", working_.draftRevision, nullptr, {}}, now);
@@ -619,7 +802,7 @@ void ModuleApp::handle(const Command& c, double now) {
             return reply(c, AckStatus::Rejected, "There is nothing to save.");
         CommitRequest req;
         if (aircraftDirty()) req.upsertProfiles.push_back(working_.profile);
-        for(const auto& [code,doc]:airportDrafts_)if(withoutRevision(doc)!=withoutRevision(committedProfile(js::str(doc,"profileId"))))req.upsertProfiles.push_back(doc);
+        for(const auto& [code,doc]:airportDrafts_)if(!transientAirports_.count(code)&&withoutRevision(doc)!=withoutRevision(committedProfile(js::str(doc,"profileId"))))req.upsertProfiles.push_back(doc);
         req.settings = working_.settings;
         req.bindings = working_.bindings;
         req.navigation = navigation();
@@ -812,12 +995,15 @@ void ModuleApp::importProfileCode(const protocol::Command& c, const std::string&
 // Coordinator events
 
 void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
+    if (spottingEvent(name, payload)) return;
     if (name == "SaveViewsRequested") { saveViewsRequested_=true; return; }
     if (name == "AirportAutoToggleRequested") { setAirportAuto(!airportAuto_,now_); return; }
+    if (name == "CinematicToggleRequested") { setCinematic(!cinematicOn_, now_); return; }
     if (name == "PanicReleased") {
         // A panic must not hand the camera straight back: switching off Auto switch only clears module state.
         payload["airportAutoStopped"] = airportAuto_;
         if (airportAuto_) setAirportAuto(false, now_);
+        cinematicPanic(payload, now_);
         diag("panic release: " + js::dump(payload));
     }
     if (name == "HeadTrackingToggleRequested") {
@@ -873,6 +1059,8 @@ void ModuleApp::onCoordinatorEvent(const std::string& name, json payload) {
                 }
                 updated["orientationCameraToAnchorXYZW"] = js::get(payload, "orientationCameraToAnchorXYZW");
                 updated["projection"]["value"] = js::num(payload, "fovRad", 1.0);
+                // Free cameras (drones) save a new world origin with the pose.
+                if (js::str(cam, "mode") == "free" && js::get(payload, "worldOrigin").is_object()) updated["worldOrigin"] = js::get(payload, "worldOrigin");
                 json applied;
                 std::string err;
                 if (applyOps(json::array({{{"op", "setCamera"}, {"camera", updated}}}), applied, err)) {
@@ -983,7 +1171,9 @@ void ModuleApp::publishWorking(double now, bool bindingsChanged) {
     } else {
         coord_.setProfile(std::nullopt, now);
     }
-    coord_.setSettings(profiles::parseHostSettings(working_.settings), now);
+    const auto hostSettings = profiles::parseHostSettings(working_.settings);
+    coord_.setSettings(hostSettings, now);
+    configureGamepad(hostSettings);
     if (bindingsChanged) {
         for (const auto& e : router_.releaseAll()) coord_.onAction(e, now);
         auto set = profiles::parseBindings(working_.bindings);
@@ -1128,6 +1318,7 @@ void ModuleApp::commit(CommitRequest req, PendingCommit pending, double now) {
             if(pc.kind=="save" || pc.kind=="airport")for(auto& [code,doc]:airportDrafts_){if(pc.kind=="airport"&&code!=js::str(pc.report,"icao"))continue;auto it=airportAtRequest.find(code);if(it!=airportAtRequest.end()&&withoutRevision(doc)==withoutRevision(it->second)){auto saved=committedProfile(js::str(doc,"profileId"));if(saved.is_object())doc=saved;}}
             if(pc.kind=="airport") {
                 const auto code=js::str(pc.report,"icao");
+                transientAirports_.erase(code);  // a saved temporary set becomes a normal saved set
                 // The loop above already replaces an unchanged draft with the verified
                 // saved document. Never erase edits made while this commit was pending.
                 if(!airportAtRequest.count(code))airportDrafts_.erase(code);

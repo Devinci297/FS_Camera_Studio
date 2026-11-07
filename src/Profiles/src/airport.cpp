@@ -3,9 +3,41 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <set>
 namespace fscs::profiles::airport {
-namespace { constexpr double R=6378137.0; }
+namespace { constexpr double R=6378137.0;
+// Stands with usable positions, at most `limit` (0 = all). Gates come first; the rest are chosen by
+// farthest-point sampling so a small set still covers the whole apron. Deterministic, in source order.
+std::vector<std::size_t> spreadParking(const json& parking,std::size_t limit) {
+ std::vector<std::size_t> usable,gates,chosen;
+ for(std::size_t i=0;i<parking.size();++i){
+  if(!std::isfinite(js::num(parking[i],"north",NAN))||!std::isfinite(js::num(parking[i],"east",NAN)))continue;
+  usable.push_back(i);if(js::boolean(parking[i],"gate",false))gates.push_back(i);
+ }
+ if(limit==0||usable.size()<=limit)return usable;
+ auto at=[&](std::size_t i){return core::Vec3{js::num(parking[i],"north",0),js::num(parking[i],"east",0),0};};
+ auto pick=[&](const std::vector<std::size_t>& pool){
+  core::Vec3 centroid{0,0,0};for(auto i:pool)centroid=centroid+at(i)*(1.0/pool.size());
+  while(chosen.size()<limit){
+   double best=-1;std::size_t found=parking.size();
+   for(auto i:pool){
+    if(std::find(chosen.begin(),chosen.end(),i)!=chosen.end())continue;
+    double d=std::numeric_limits<double>::infinity();
+    for(auto c:chosen)d=std::min(d,(at(i)-at(c)).length());
+    if(chosen.empty())d=(at(i)-centroid).length();
+    if(d>best){best=d;found=i;}
+   }
+   if(found==parking.size())return;
+   chosen.push_back(found);
+  }
+ };
+ if(gates.size()>=limit)pick(gates);
+ else {chosen=gates;pick(usable);}
+ std::sort(chosen.begin(),chosen.end());
+ return chosen;
+}
+}
 bool Geo::valid() const { return std::isfinite(lat)&&std::isfinite(lon)&&std::isfinite(altitude)&&std::abs(lat)<89.9&&std::abs(lon)<=180&&altitude>-1500&&altitude<30000; }
 Geo geo(const json& j) { return {js::num(j,"lat",NAN),js::num(j,"lon",NAN),js::num(j,"altitude",NAN)}; }
 json asJson(Geo p) { return {{"lat",p.lat},{"lon",p.lon},{"altitude",p.altitude}}; }
@@ -37,11 +69,11 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
  const double height=std::clamp(js::num(o,"height",3),0.0,1000.0), offset=std::clamp(js::num(o,"offset",12),3.0,150.0);
  bool towerPending=js::boolean(o,"tower",true);
  std::set<std::string> generatedIds;
- auto add=[&](std::string group,std::string key,std::string name,core::Vec3 pos,core::Vec3 target) {
+ auto add=[&](std::string group,std::string key,std::string name,core::Vec3 pos,core::Vec3 target,double minimumMeters=-1) {
    // Tower is generated last, but must survive large airports reaching the limit.
    if(doc["cameras"].size()>=kMaxCameras-(towerPending?1:0)) return;
-   const std::string heightCategory=group=="Runways"?"runways":group=="Gates"?"gates":group=="Apron"?"apron":group=="Tower"?"tower":"taxi";
-   const double minimum=key.find(":approach")!=std::string::npos?15:key.find(":overview")!=std::string::npos?25:0;
+   const std::string heightCategory=group=="Runways"||group=="Spotting"?"runways":group=="Gates"?"gates":group=="Apron"?"apron":group=="Tower"?"tower":"taxi";
+   const double minimum=minimumMeters>=0?minimumMeters:key.find(":approach")!=std::string::npos?15:key.find(":overview")!=std::string::npos?25:0;
    const double baseAltitude=group=="Tower"?origin.altitude:origin.altitude-target.z;
    const bool explicitHeight=js::get(o,"height").is_number()&&!js::boolean(o,"useGlobalHeights",false);
    const double inherited=std::clamp(js::num(js::object(o,"categoryHeights"),heightCategory.c_str(),heightCategory=="tower"?35:3),0.0,1000.0);
@@ -50,7 +82,7 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
    if(std::max({std::abs(pos.x),std::abs(pos.y),std::abs(pos.z)})>core::kMaxPositionMeters) return;
    const auto catId=stableId(code+":"+group), id=stableId(code+":"+key);
    if(!generatedIds.insert(id).second)return;
-   const char* iconName=group=="Runways"?"view-runway":group=="Gates"?"view-gate":group=="Apron"?"view-apron":group=="Tower"?"view-tower":"view-taxiway";
+   const char* iconName=group=="Runways"||group=="Spotting"?"view-runway":group=="Gates"?"view-gate":group=="Apron"?"view-apron":group=="Tower"?"view-tower":"view-taxiway";
    json* cat=nullptr;for(auto& c:doc["categories"])if(js::str(c,"id")==catId)cat=&c;
    if(!cat){doc["categories"].push_back({{"id",catId},{"name",group},{"icon",iconName},{"airportIcao",code},{"cameraIds",json::array()}});cat=&doc["categories"].back();}
    auto delta=target-pos;auto q=core::Quat::fromPbh({-std::atan2(delta.z,std::hypot(delta.x,delta.y))/core::kDegToRad,0,std::atan2(delta.y,delta.x)/core::kDegToRad});
@@ -69,11 +101,27 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
      add("Runways","runway:"+name+":approach",name+" approach",end-axis*(sign*150)+core::Vec3{0,0,-std::max(15.0,height)},end+axis*(sign*100));}
    add("Runways","runway:"+js::str(r,"primary")+":overview",js::str(r,"primary")+" runway overview",center+right*(width+offset)+core::Vec3{0,0,-std::max(25.0,height)},center);
  }
- if(js::boolean(o,"parking",true))for(const auto& p:js::array(f,"parking")) {
-   const double n=js::num(p,"north",NAN),e=js::num(p,"east",NAN);if(!std::isfinite(n)||!std::isfinite(e))continue;
+ // Spotting: defaults to the runway choice, so older callers that turned runways off get no new views.
+ if(js::boolean(o,"spotting",js::boolean(o,"runways",true)))for(const auto& r:js::array(f,"runways")) {
+   const auto g=geo(r);const double length=js::num(r,"length",0),heading=js::num(r,"heading",NAN)*core::kDegToRad;
+   if(!g.valid()||length<50||length>10000||!std::isfinite(heading))continue;
+   const auto center=local(origin,g);const core::Vec3 axis{std::cos(heading),std::sin(heading),0};
+   // A spotter's eye about 90 m below an aircraft on a 3-degree glidepath, 1 NM out.
+   const double finalHeight=std::max(0.0,kApproachDistanceMeters*std::tan(kGlidepathDeg*core::kDegToRad)-kApproachBelowGlidepathMeters);
+   for(int side=0;side<2;++side){
+     const double sign=side?-1:1;const auto landing=axis*sign,threshold=center-landing*(length/2);const core::Vec3 right{-landing.y,landing.x,0};
+     const auto name=js::str(r,side?"secondary":"primary",side?"Reciprocal":"Runway");
+     // Fence line: behind the threshold and off to the side, looking down the runway.
+     add("Spotting","spot:"+name+":fence",name+" fence line",threshold-landing*kFenceBehindMeters+right*kFenceSideMeters,center);
+     // Under the approach: on the extended centerline, looking back at the threshold.
+     add("Spotting","spot:"+name+":final",name+" approach, 1 NM",threshold-landing*kApproachDistanceMeters,threshold,finalHeight);
+   }
+ }
+ if(js::boolean(o,"parking",true)){const auto& stands=js::array(f,"parking");for(const auto index:spreadParking(stands,static_cast<std::size_t>(std::clamp<std::int64_t>(js::integer(o,"parkingLimit",0),0,static_cast<std::int64_t>(kMaxCameras))))) {
+   const auto& p=stands[index];const double n=js::num(p,"north",NAN),e=js::num(p,"east",NAN);
    const double h=js::num(p,"heading",0)*core::kDegToRad;core::Vec3 target{n,e,0};auto name=js::str(p,"name","Parking");
    add(js::boolean(p,"gate",false)?"Gates":"Apron","parking:"+js::str(p,"key",name),name,target+core::Vec3{std::cos(h)*offset,std::sin(h)*offset,-height},target);
- }
+ }}
  const auto& signs=js::array(f,"signs");
  if(js::boolean(o,"taxi",true)&&!signs.empty())for(const auto& s:signs){auto g=geo(s);if(!g.valid())continue;auto target=local(origin,g);double h=(js::num(s,"heading",0)+90)*core::kDegToRad;
    add("Taxi signs","sign:"+js::str(s,"key"),js::str(s,"label","Taxi sign"),target+core::Vec3{std::cos(h)*offset,std::sin(h)*offset,-height},target);}
@@ -95,20 +143,27 @@ json generate(const json& f,const json& o,std::vector<std::string>& notes) {
    const bool usable=t.valid()&&(t.lat!=0||t.lon!=0)&&std::max({std::abs(pos.x),std::abs(pos.y),std::abs(pos.z)})<=core::kMaxPositionMeters;
    if(usable)add("Tower","tower","Tower overview",pos,{0,0,0});
    else {
-     // Some scenery omits tower coordinates. Provide a usable, explicitly
-     // estimated overview rather than hiding the selected Tower category.
-     core::Vec3 target{0,0,0};pos={100,100,-std::max(35.0,height)};
+     // Some scenery omits tower coordinates (or reports zero). Place a clearly labelled virtual
+     // tower abeam the longest runway's midpoint, on the side with more parking (left when even
+     // or unknown). Its height is the tower category height above airport elevation.
+     core::Vec3 target{0,0,0};pos={100,100,0};
      double longest=0;
      for(const auto& r:js::array(f,"runways")){
        const auto g=geo(r);const double length=js::num(r,"length",0),heading=js::num(r,"heading",NAN)*core::kDegToRad;
        if(!g.valid()||length<50||length>10000||length<=longest||!std::isfinite(heading))continue;
-       const auto center=local(origin,g);const double clearance=std::clamp(js::num(r,"width",30),0.0,300.0)/2+std::max(80.0,offset);
-       const auto candidate=center+core::Vec3{-std::sin(heading)*clearance,std::cos(heading)*clearance,-std::max(35.0,height)};
+       const auto center=local(origin,g);const core::Vec3 right{-std::sin(heading),std::cos(heading),0};
+       int rightStands=0,leftStands=0;
+       for(const auto& p:js::array(f,"parking")){
+         const double n=js::num(p,"north",NAN),e=js::num(p,"east",NAN);if(!std::isfinite(n)||!std::isfinite(e))continue;
+         const double across=(n-center.x)*right.x+(e-center.y)*right.y;
+         if(across>0)++rightStands;else if(across<0)++leftStands;
+       }
+       const auto candidate=center+right*(rightStands>leftStands?kVirtualTowerAbeamMeters:-kVirtualTowerAbeamMeters);
        if(std::max({std::abs(candidate.x),std::abs(candidate.y),std::abs(candidate.z)})>core::kMaxPositionMeters)continue;
        longest=length;target=center;pos=candidate;
      }
-     add("Tower","tower","Tower overview (estimated)",pos,target);
-     notes.push_back("No usable tower position in scenery data; added an estimated elevated overview. Move it to the control tower if needed.");
+     add("Tower","tower","Virtual tower",pos,target);
+     notes.push_back("No tower position in scenery data; added a virtual tower beside the longest runway. It is not the real control tower.");
    }
  }
  if(doc["cameras"].empty()){notes.push_back("No usable selected scenery features.");return nullptr;}
@@ -144,4 +199,16 @@ json nearby(const std::vector<json>& profiles,Geo pos,double radius){json result
  std::sort(result.begin(),result.end(),[](const json& a,const json& b){if(a["distanceNm"]==b["distanceNm"])return a["icao"]<b["icao"];return a["distanceNm"]<b["distanceNm"];});return result;}
 std::string choose(const json& list,const std::string& current,const std::string& pin){if(list.empty())return {};for(auto& c:list)if(js::str(c,"icao")==pin)return pin;
  const auto nearest=js::str(list[0],"icao");for(auto& c:list)if(js::str(c,"icao")==current&&js::num(c,"distanceNm",0)<=js::num(list[0],"distanceNm",0)+2.0)return current;return nearest;}
+json automaticOptions(const json& categoryHeights) {
+ return {{"runways",true},{"spotting",true},{"parking",true},{"parkingLimit",kAutoParkingLimit},{"taxi",false},{"tower",true},
+         {"categoryHeights",categoryHeights.is_object()?categoryHeights:json::object()}};
+}
+json compactFacility(const json& f) {
+ json out=json::object();
+ for(const char* key:{"icao","name","lat","lon","altitude","tower","runways"})if(js::has(f,key))out[key]=f[key];
+ // Large airports list thousands of stands: keep only what generation reads.
+ out["parking"]=json::array();
+ for(const auto& p:js::array(f,"parking")){json stand=json::object();for(const char* key:{"name","key","gate","north","east","heading"})if(js::has(p,key))stand[key]=p[key];out["parking"].push_back(std::move(stand));}
+ return out;
+}
 }

@@ -9,7 +9,7 @@
 namespace fscs::host {
 using nlohmann::json;
 namespace {
-constexpr DWORD kAirportDef=70,kAirportIdentityDef=71,kNearby=80;
+constexpr DWORD kAirportDef=70,kAirportIdentityDef=71,kAirportSummaryDef=72,kNearby=80;
 #pragma pack(push,1)
 struct AirportData {double lat,lon,alt;char name[64];double towerLat,towerLon,towerAlt;};
 struct AirportIdentityData {char icao[8];double lat,lon;};
@@ -54,6 +54,22 @@ bool SimSession::requestAirport(const std::string& code,std::uint32_t id){
  }
  if(FAILED(SimConnect_RequestFacilityData(h,kAirportDef,id,code.c_str())))return false;
  airportRequests_[id]={{"icao",code},{"runways",json::array()},{"parking",json::array()},{"points",json::array()},{"paths",json::array()}};return true;
+}
+bool SimSession::requestAirportSummary(const std::string& code,std::uint32_t id){
+ // Automatic temporary airport sets never read the taxi network, so skip its (large) point and path lists.
+ // Same field order as requestAirport up to the parking stands: the replies parse identically.
+ if(!handle_||!profiles::airport::validCode(code))return false;
+ if(airportRequests_.size()>=10)airportRequests_.erase(airportRequests_.begin());
+ auto h=static_cast<HANDLE>(handle_);
+ if(!airportSummaryDefinitionReady_){
+  const char* fields[]={"OPEN AIRPORT","LATITUDE","LONGITUDE","ALTITUDE","NAME64","TOWER_LATITUDE","TOWER_LONGITUDE","TOWER_ALTITUDE",
+    "OPEN RUNWAY","LATITUDE","LONGITUDE","ALTITUDE","HEADING","LENGTH","WIDTH","PRIMARY_NUMBER","PRIMARY_DESIGNATOR","SECONDARY_NUMBER","SECONDARY_DESIGNATOR","CLOSE RUNWAY",
+    "OPEN TAXI_PARKING","TYPE","NUMBER","NAME","SUFFIX","HEADING","RADIUS","BIAS_X","BIAS_Z","CLOSE TAXI_PARKING","CLOSE AIRPORT"};
+  for(auto field:fields)if(FAILED(SimConnect_AddToFacilityDefinition(h,kAirportSummaryDef,field)))return false;
+  airportSummaryDefinitionReady_=true;
+ }
+ if(FAILED(SimConnect_RequestFacilityData(h,kAirportSummaryDef,id,code.c_str())))return false;
+ airportRequests_[id]={{"icao",code},{"runways",json::array()},{"parking",json::array()}};return true;
 }
 bool SimSession::onAirportRecv(const void* raw,unsigned long size){
  if(size<sizeof(SIMCONNECT_RECV))return false;auto base=static_cast<const SIMCONNECT_RECV*>(raw);

@@ -319,7 +319,7 @@ TEST_CASE("coordinator: view-ID bindings select through the open profile; toggle
     CHECK(r.c.ownership() == Ownership::Releasing);
 }
 
-TEST_CASE("coordinator: unsupported free mode stays visible but cannot activate") {
+TEST_CASE("coordinator: a free camera without a world position stays visible but cannot activate") {
     Rig r;
     r.profile["cameras"][1]["mode"] = "free";
     r.connect();
@@ -1408,7 +1408,7 @@ TEST_CASE("airports: global category heights preserve position offsets and allow
     camera["airportOverrides"].erase("heightMeters");r.setProfile();r.advance(.02);CHECK_NEAR(r.backend.submitted.back().z,180,1e-9);
 }
 TEST_CASE("effects: cockpit full strength, exterior and orbit reduced, world-fixed views excluded") {
-    struct Result { fscs::core::Vec3 offset, submittedMinusBase, base; std::size_t submissions = 0; };
+    struct Result { fscs::core::Vec3 offset, head, submittedMinusBase, base; double headRollDeg = 0; std::size_t submissions = 0; };
     const auto run=[](const std::string& mode, bool tracking) {
         Rig r;std::string id=r.pilot;
         if (mode=="airport") id=addAutoZoomAirport(r);
@@ -1420,10 +1420,11 @@ TEST_CASE("effects: cockpit full strength, exterior and orbit reduced, world-fix
         if (!tracking) {fscs::profiles::HostSettings settings;settings.globalAircraftTracking="off";r.c.setSettings(settings,r.t);}
         if (mode=="flyby" || mode=="airport") r.c.setAircraftPosition(40,-89.999,120,r.t,90);
         r.activate(id);r.grant();
-        fscs::core::FlightMotion motion;motion.forwardAcceleration=5;
+        fscs::core::FlightMotion motion;motion.forwardAcceleration=5;motion.lateralAcceleration=2;
         for (int i=0;i<60;++i) {r.deliver(be::MotionTelemetry{motion});r.advance(.02);}
         CHECK_EQ(r.c.activeCameraId(),id);
         Result result;result.offset=r.c.effects().offset();result.base=r.c.engine().sample().pose.positionFRD;
+        result.head=r.c.effects().head().offset;result.headRollDeg=r.c.effects().head().rollDeg;
         result.submissions=r.backend.submitted.size();
         if (!r.backend.submitted.empty() && r.backend.submitted.back().referential!=Referential::World)
             result.submittedMinusBase=fromSdk(r.backend.submitted.back(),r.qual.contract).positionFRD-result.base;
@@ -1431,19 +1432,459 @@ TEST_CASE("effects: cockpit full strength, exterior and orbit reduced, world-fix
     };
     const auto cockpit=run("aircraftCockpit",true);
     CHECK(cockpit.offset.x< -1e-3);
-    CHECK_NEAR(cockpit.submittedMinusBase.x,cockpit.offset.x,1e-6);
+    // Cockpit views add the head model (default strengths from validation) on top of the vehicle effects.
+    CHECK(cockpit.head.x< -1e-3);CHECK(cockpit.headRollDeg>.1);
+    CHECK_NEAR(cockpit.submittedMinusBase.x,cockpit.offset.x+cockpit.head.x,1e-6);
     const auto exterior=run("aircraftExterior",false);
     CHECK_NEAR(exterior.offset.x,cockpit.offset.x*fscs::core::kExteriorEffectsScale,1e-9);
     // The reduced offset reaches the submitted aircraft-relative pose; the saved base is unchanged.
     CHECK_NEAR(exterior.submittedMinusBase.x,exterior.offset.x,1e-6);CHECK_NEAR(exterior.base.x,-20,1e-9);
+    CHECK_NEAR(exterior.head.length(),0,1e-12);CHECK_NEAR(exterior.headRollDeg,0,1e-12);
     CHECK_NEAR(run("aircraftExterior",true).offset.x,exterior.offset.x,1e-9);
     // Orbit keeps animating its base; the effect is layered on top at exterior strength.
     const auto orbit=run("orbit",true);
-    CHECK_NEAR(orbit.offset.x,exterior.offset.x,1e-9);
+    CHECK_NEAR(orbit.offset.x,exterior.offset.x,1e-9);CHECK_NEAR(orbit.head.length(),0,1e-12);
     CHECK(orbit.base.length()>1);
     for (const auto* mode : {"flyby","airport"}) {
         const auto fixed=run(mode,true);
         CHECK(fixed.submissions>0);
-        CHECK_NEAR(fixed.offset.length(),0,1e-12);
+        CHECK_NEAR(fixed.offset.length(),0,1e-12);CHECK_NEAR(fixed.head.length(),0,1e-12);
     }
+}
+TEST_CASE("effects: the head model runs only on live cockpit views with fresh telemetry") {
+    Rig r;
+    for (auto& cam : r.profile["cameras"]) {cam["effects"]={{"enabled",true}};cam["transition"]["kind"]="cut";}
+    auto& exterior=r.profile["cameras"][1];
+    exterior["mode"]="aircraftExterior";exterior["positionMetersFRD"]={-20,0,-5};exterior["orientationCameraToAnchorXYZW"]={0,0,0,1};
+    r.connect();
+    fscs::core::FlightMotion motion;motion.onGround=0;motion.lateralAcceleration=3;motion.gForce=1.5;
+    const auto fly=[&](int frames){for (int i=0;i<frames;++i) {r.deliver(be::MotionTelemetry{motion});r.advance(.02);}};
+    const auto& head=r.c.effects().head();
+    r.activate(r.pilot);r.grant();fly(60);
+    CHECK(head.offset.length()>1e-3);CHECK(head.rollDeg>.1);
+    // Stale telemetry: the head returns to rest with the other effects.
+    r.advance(.02,40);CHECK_NEAR(head.offset.length(),0,1e-12);CHECK_NEAR(head.rollDeg,0,1e-12);
+    fly(60);CHECK(head.offset.length()>1e-3);
+    r.activate(r.pfd);fly(60);
+    CHECK_EQ(r.c.activeCameraId(),r.pfd);
+    CHECK(r.c.effects().offset().length()>1e-4);  // exterior keeps the vehicle effects at half strength
+    CHECK_NEAR(head.offset.length(),0,1e-12);CHECK_NEAR(head.rollDeg,0,1e-12);CHECK_NEAR(head.pitchDeg,0,1e-12);
+}
+
+namespace {
+double submittedFov(const Rig& r) { return r.backend.submitted.back().fovRad; }
+void binoculars(Rig& r, bool down, std::uint64_t hold = 7) { r.c.onAction({Action::Binoculars, 0, down, hold}, r.t); }
+bool lastBinocularsActive(const Rig& r) {
+    bool active = false;
+    for (const auto& [name, payload] : r.events) if (name == "BinocularsChanged") active = payload["active"].get<bool>();
+    return active;
+}
+constexpr double kBinocularsFov = 10 * fscs::core::kDegToRad;  // default host setting
+}  // namespace
+
+TEST_CASE("binoculars: default binding is a hold with paired edges and is suppressed while typing") {
+    auto r = routerWithDefaults();
+    const auto i = indexOf(r, "VK_LCONTROL+VK_LMENU+Z");
+    CHECK(i < r.definitions().size());
+    auto down = r.onInput(i, true, 0);
+    CHECK_EQ(down.size(), std::size_t{1});
+    CHECK(down[0].action == Action::Binoculars && down[0].pressed);
+    auto up = r.onInput(i, false, 0);
+    CHECK_EQ(up.size(), std::size_t{1});
+    CHECK(!up[0].pressed && up[0].holdId == down[0].holdId);
+    r.onInput(i, true, 0);
+    const auto released = r.setTextFocus(true);  // a text field took focus mid-hold
+    CHECK_EQ(released.size(), std::size_t{1});
+    CHECK(released[0].action == Action::Binoculars && !released[0].pressed);
+    r.onInput(i, false, 0);
+    CHECK(r.onInput(i, true, 0).empty());
+    CHECK_EQ(std::string(fscs::profiles::toString(Action::Binoculars)), std::string("binoculars"));
+    CHECK(fscs::profiles::parseAction("binoculars") == Action::Binoculars);
+}
+
+TEST_CASE("binoculars: hold eases to the zoom FOV with time-based easing and back to the saved FOV") {
+    auto run = [](double dt, int steps) {
+        Rig r; r.connect(); r.activate(r.pilot); r.grant(); r.advance(.02);
+        binoculars(r, true); r.advance(dt, steps);
+        return std::pair{submittedFov(r), r.c.engine().sample().pose.fovRad};
+    };
+    // Half-way after 0.15 s at any frame rate; smoothstep(0.5) = 0.5.
+    const auto [fast, saved] = run(.01, 15);
+    const auto [slow, saved2] = run(.05, 3);
+    CHECK_NEAR(fast, saved + (kBinocularsFov - saved) * .5, 1e-9);
+    CHECK_NEAR(slow, fast, 1e-9);
+    CHECK_NEAR(saved, saved2, 1e-12);
+    CHECK(saved > 30 * fscs::core::kDegToRad);
+
+    Rig r; r.connect(); r.activate(r.pilot); r.grant(); r.advance(.02);
+    const double cameraFov = r.c.engine().sample().pose.fovRad;
+    r.events.clear();
+    binoculars(r, true);
+    CHECK(r.c.binocularsHeld());
+    CHECK(lastBinocularsActive(r));
+    for (const auto& [name, payload] : r.events) if (name == "BindingTriggered") CHECK(payload["result"].is_null());
+    r.advance(.02);
+    CHECK(submittedFov(r) < cameraFov);
+    CHECK(submittedFov(r) > kBinocularsFov);
+    r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);  // below the editor's 30-degree floor
+    // Presentation only: the engine, the saved camera and a capture keep the camera's FOV.
+    CHECK_NEAR(r.c.engine().sample().pose.fovRad, cameraFov, 1e-12);
+    CHECK_NEAR(r.c.profile()->camera(r.pilot)->pose.fovRad, cameraFov, 1e-12);
+    r.events.clear(); r.send("CaptureView");
+    CHECK(r.emitted("ViewCaptured"));
+    for (const auto& [name, payload] : r.events) if (name == "ViewCaptured") CHECK_NEAR(payload["fovRad"].get<double>(), cameraFov, 1e-12);
+    // Releasing mid-way reverses from the current zoom without a jump.
+    r.events.clear();
+    binoculars(r, false);
+    CHECK(!lastBinocularsActive(r));
+    CHECK(!r.emitted("BindingTriggered"));
+    r.advance(.03);
+    const double partway = submittedFov(r);
+    CHECK(partway > kBinocularsFov);
+    CHECK(partway < cameraFov);
+    binoculars(r, true, 8); r.advance(.01);
+    CHECK(submittedFov(r) < partway);
+    CHECK(submittedFov(r) > kBinocularsFov);
+    binoculars(r, false, 8); r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), cameraFov, 1e-12);
+    CHECK_NEAR(r.c.binocularsProgress(), 0, 1e-12);
+}
+
+TEST_CASE("binoculars: alternate inputs share one hold and the zoom never widens a narrower view") {
+    Rig r; r.connect(); r.activate(r.pilot); r.grant(); r.advance(.02);
+    binoculars(r, true, 1); binoculars(r, true, 2); r.advance(.02, 20);
+    binoculars(r, false, 1); r.advance(.02, 20);
+    CHECK(r.c.binocularsHeld());
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);
+    binoculars(r, false, 2); r.advance(.02, 20);
+    CHECK(!r.c.binocularsHeld());
+    auto settings = fscs::profiles::parseHostSettings(fscs::profiles::defaultSettingsDocument());
+    settings.binocularsFovDeg = 60; r.c.setSettings(settings, r.t);
+    for (int i = 0; i < 20; ++i) r.c.onAction({Action::ZoomIn, 0, true, 0, true}, r.t);  // 40 degrees narrower
+    r.advance(.02);
+    const double narrow = r.c.engine().sample().pose.fovRad;
+    CHECK(narrow < 60 * fscs::core::kDegToRad);
+    binoculars(r, true); r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), narrow, 1e-12);
+    CHECK_NEAR(r.c.binocularsLookScale(), 1, 1e-12);
+}
+
+TEST_CASE("binoculars: release, panic and loss of control cancel immediately; no zoom without a camera") {
+    Rig r; r.connect(); r.advance(.02);
+    r.events.clear();
+    binoculars(r, true);  // Observing: nothing to zoom
+    CHECK(!r.c.binocularsHeld());
+    CHECK(r.emitted("BindingTriggered"));
+    for (const auto& [name, payload] : r.events) if (name == "BindingTriggered") CHECK(payload["result"].is_string());
+    binoculars(r, false);
+    r.activate(r.pilot); r.grant(); r.advance(.02);
+    const double cameraFov = r.c.engine().sample().pose.fovRad;
+    binoculars(r, true); r.advance(.02, 20);
+    r.events.clear();
+    r.send("ReleaseCamera");
+    CHECK(!r.c.binocularsHeld());
+    CHECK_NEAR(r.c.binocularsProgress(), 0, 1e-12);
+    CHECK(r.emitted("BinocularsChanged"));
+    CHECK(!lastBinocularsActive(r));
+    r.deliver(be::CameraStatus{SdkAvailability::NotAcquired, false}); r.advance(.02);
+    binoculars(r, false);  // the physical release arriving later changes nothing
+    r.activate(r.pilot); r.grant(); r.advance(.02);
+    CHECK_NEAR(submittedFov(r), cameraFov, 1e-12);  // no ease-out from a cancelled zoom
+
+    binoculars(r, true); r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);
+    r.events.clear();
+    r.c.onAction({Action::PanicRelease, 0, true, 9}, r.t);
+    CHECK(!r.c.binocularsHeld());
+    CHECK_NEAR(r.c.binocularsProgress(), 0, 1e-12);
+    CHECK(!lastBinocularsActive(r));
+    CHECK(r.emitted("PanicReleased"));
+    r.deliver(be::CameraStatus{SdkAvailability::NotAcquired, false}); r.advance(.02);
+
+    r.activate(r.pilot); r.grant(); r.advance(.02);
+    binoculars(r, true, 10); r.advance(.02, 20);
+    r.deliver(be::CameraStatus{SdkAvailability::Acquired, true});  // the simulator takes over the view
+    CHECK(r.c.ownership() == Ownership::SimulatorSuspended);
+    CHECK(!r.c.binocularsHeld());
+    CHECK_NEAR(r.c.binocularsProgress(), 0, 1e-12);
+}
+
+TEST_CASE("binoculars: mouse and keyboard look scale by zoomed FOV over camera FOV") {
+    struct Result { double mouse, panel, keys, keysAfter, cameraFov; };
+    auto keys = [](Rig& r) {
+        const double before = r.c.engine().look().pitchDeg;
+        fscs::core::ManualInput in; in.lookUp = 1; r.c.setManualInput(in); r.advance(1.0 / 60, 30);
+        r.c.setManualInput({}); r.advance(1.0 / 60, 60);
+        return r.c.engine().look().pitchDeg - before;
+    };
+    auto run = [&](bool zoomed) {
+        Rig r; r.connect(); r.activate(r.pilot); r.grant(); r.advance(.02);
+        Result out{};
+        out.cameraFov = r.c.engine().sample().pose.fovRad;
+        if (zoomed) { binoculars(r, true); r.advance(.02, 20); CHECK_NEAR(r.c.binocularsLookScale(), kBinocularsFov / out.cameraFov, 1e-12); }
+        r.deliver(be::NativeMouseMapping{true}); r.deliver(be::NativeMouseButton{true});
+        r.deliver(be::NativeMouseAxis{true, 8192}); r.advance(.01, 150);
+        r.deliver(be::NativeMouseButton{false}); r.advance(.01);
+        out.mouse = r.c.engine().look().headingDeg;
+        const double heading = out.mouse;
+        CHECK_EQ(r.send("MouseLookDelta", {{"headingDeg", 2.0}, {"pitchDeg", 0.0}})["status"].get<std::string>(), std::string("Completed"));
+        out.panel = r.c.engine().look().headingDeg - heading;
+        out.keys = keys(r);
+        binoculars(r, false); r.advance(.02, 20);
+        CHECK_NEAR(r.c.binocularsLookScale(), 1, 1e-12);
+        out.keysAfter = keys(r);
+        return out;
+    };
+    const auto normal = run(false), zoomed = run(true);
+    const double scale = kBinocularsFov / normal.cameraFov;
+    CHECK_NEAR(normal.mouse, 1.5, 1e-6);
+    CHECK_NEAR(zoomed.mouse, 1.5 * scale, 1e-6);
+    CHECK_NEAR(normal.panel, 2.0, 1e-9);
+    CHECK_NEAR(zoomed.panel, 2.0 * scale, 1e-9);
+    CHECK(normal.keys > 5);
+    CHECK_NEAR(zoomed.keys, normal.keys * scale, 1e-9);
+    CHECK_NEAR(zoomed.keysAfter, normal.keysAfter, 1e-9);  // full speed again once the zoom has eased out
+}
+
+TEST_CASE("binoculars: override airport auto zoom while held and hand back to it on release") {
+    Rig r; const auto id = addAutoZoomAirport(r); r.connect();
+    fscs::profiles::HostSettings settings; settings.airportAutoZoomEnabled = true; settings.airportAutoZoomResponseSeconds = .1;
+    r.c.setSettings(settings, r.t); autoZoomTarget(r, 100); r.activate(id); r.grant(); r.advance(.02, 100);
+    const double framed = 2 * std::atan2(40., 200.);
+    CHECK_NEAR(submittedFov(r), framed, 1e-5);
+    CHECK(framed > kBinocularsFov);
+    binoculars(r, true); r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);
+    autoZoomTarget(r, 1); r.advance(.02, 100);  // auto zoom keeps following underneath
+    CHECK_NEAR(submittedFov(r), kBinocularsFov, 1e-12);
+    binoculars(r, false); r.advance(.02);
+    CHECK(submittedFov(r) > kBinocularsFov);
+    r.advance(.02, 20);
+    CHECK_NEAR(submittedFov(r), 90 * fscs::core::kDegToRad, 1e-6);  // the current auto-zoom value, not the old one
+    CHECK_NEAR(r.c.engine().sample().pose.fovRad, r.c.profile()->camera(id)->pose.fovRad, 1e-12);
+}
+
+namespace {
+// A profile whose first camera is mounted on the left wing tip, looking along `look` (PBH degrees).
+Rig& mountRig(Rig& r, const std::string& gimbal, double vibration, fscs::core::Pbh look = {}) {
+    auto& cam = r.profile["cameras"][0];
+    const auto q = fscs::core::Quat::fromPbh(look);
+    cam["mode"] = "mounted";
+    cam["gimbal"] = gimbal;
+    cam["mountVibration"] = vibration;
+    cam["interaction"] = false;
+    cam["positionMetersFRD"] = {0.4, -5.4, 0.3};
+    cam["orientationCameraToAnchorXYZW"] = {q.x, q.y, q.z, q.w};
+    cam["transition"]["kind"] = "cut";
+    return r;
+}
+// Steady flight attitude for the gimbal: FRD pitch (nose up > 0) and bank (right wing down > 0).
+void flyAttitude(Rig& r, double pitch, double bank, int frames, fscs::core::FlightMotion motion = {}) {
+    for (int i = 0; i < frames; ++i) { r.deliver(be::MotionTelemetry{motion, bank, pitch}); r.advance(1.0 / 60); }
+}
+fscs::core::CameraPose shownPose(Rig& r) { return fromSdk(r.backend.submitted.back(), r.qual.contract); }
+}  // namespace
+
+TEST_CASE("mounted: rigid on the SimObject anchor; locked follows the aircraft and ignores aircraft tracking") {
+    Rig r;
+    mountRig(r, "locked", 0, {-5, 0, 30});
+    r.connect();
+    fscs::profiles::HostSettings settings;
+    settings.globalAircraftTracking = "both";  // would aim an exterior view at the aircraft
+    r.c.setSettings(settings, r.t);
+    r.activate(r.pilot);
+    r.grant();
+    flyAttitude(r, 10, 30, 60);
+    const auto& sdk = r.backend.submitted.back();
+    CHECK(sdk.referential == Referential::SimObject);
+    CHECK(!sdk.trackUserAircraft);
+    const auto shown = shownPose(r);
+    CHECK_NEAR(shown.positionFRD.x, 0.4, 1e-9);
+    CHECK_NEAR(shown.positionFRD.y, -5.4, 1e-9);
+    CHECK_NEAR(shown.positionFRD.z, 0.3, 1e-9);
+    // Locked: exactly the saved orientation relative to the airframe, so it banks and pitches with the aircraft.
+    CHECK_NEAR(fscs::core::angleBetween(shown.orientation, fscs::core::Quat::fromPbh({-5, 0, 30})), 0, 1e-7);
+    // Keyboard movement uses the camera's own frame, never a tracked basis.
+    fscs::core::ManualInput in;
+    in.moveRight = 1;
+    r.c.setManualInput(in);
+    flyAttitude(r, 10, 30, 30);
+    const auto moved = r.c.engine().sample().pose.positionFRD;
+    CHECK(std::abs(moved.y + 5.4) > .01);
+    // The capability list offers the mode.
+    const auto caps = r.c.capabilitiesJson();
+    CHECK_EQ(caps["modes"]["mounted"]["available"], json(true));
+}
+
+TEST_CASE("mounted: horizon gimbal levels the bank for any lens direction, keeps the mount's pitch and eases in") {
+    using fscs::core::Quat;
+    for (const double lensHeading : {0.0, 90.0, -135.0}) {
+        Rig r;
+        mountRig(r, "horizon", 0, {-4, 0, lensHeading});
+        r.connect();
+        r.activate(r.pilot);
+        r.grant();
+        flyAttitude(r, 10, 30, 1);
+        const Quat aircraft = Quat::fromPbh({10, 30, 0});
+        const Quat saved = Quat::fromPbh({-4, 0, lensHeading});
+        CHECK(std::abs((aircraft * shownPose(r).orientation).toPbh().bankDeg) > 1);  // eased, not snapped
+        flyAttitude(r, 10, 30, 120);
+        const auto shown = shownPose(r);
+        const auto world = (aircraft * shown.orientation).toPbh();
+        CHECK_NEAR(world.bankDeg, 0, 1e-3);
+        // The lens still points where the airframe points it.
+        const auto look = (aircraft * shown.orientation).rotate({1, 0, 0});
+        const auto mountLook = (aircraft * saved).rotate({1, 0, 0});
+        CHECK_NEAR(fscs::core::dot(look, mountLook), 1, 1e-6);
+        CHECK_NEAR(shown.positionFRD.y, -5.4, 1e-9);  // only the lens turns: the mount stays on the wing
+    }
+    // Forward lens, wings-level pitch: the same as the follow-horizon counter-roll at followHorizon 0.
+    Rig r;
+    mountRig(r, "horizon", 0);
+    r.connect();
+    r.activate(r.pilot);
+    r.grant();
+    flyAttitude(r, 0, 25, 120);
+    const auto phase1 = fscs::core::counterRoll(r.c.engine().sample().pose, fscs::core::horizonCounterRollDeg(25, 0), false);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, phase1.orientation), 0, 1e-5);
+    // With pitch: the world pitch is the aircraft's, the roll is gone.
+    flyAttitude(r, 12, 25, 120);
+    const auto world = (Quat::fromPbh({12, 25, 0}) * shownPose(r).orientation).toPbh();
+    CHECK_NEAR(world.pitchDeg, 12, 1e-3);
+    CHECK_NEAR(world.bankDeg, 0, 1e-3);
+    CHECK_NEAR(world.headingDeg, 0, 1e-3);
+}
+
+TEST_CASE("mounted: yaw gimbal cancels pitch and bank, holds through a pause and relaxes when telemetry is stale") {
+    using fscs::core::Quat;
+    Rig r;
+    mountRig(r, "yaw", 0, {-6, 0, 20});
+    r.connect();
+    r.activate(r.pilot);
+    r.grant();
+    const Quat saved = Quat::fromPbh({-6, 0, 20});
+    flyAttitude(r, 10, 30, 120);
+    CHECK_NEAR(fscs::core::angleBetween(Quat::fromPbh({10, 30, 0}) * shownPose(r).orientation, saved), 0, 1e-5);
+    flyAttitude(r, -8, -45, 120);
+    CHECK_NEAR(fscs::core::angleBetween(Quat::fromPbh({-8, -45, 0}) * shownPose(r).orientation, saved), 0, 1e-5);
+    // The engine pose never contains the gimbal.
+    CHECK_NEAR(fscs::core::angleBetween(r.c.engine().sample().pose.orientation, saved), 0, 1e-9);
+    // No samples for 0.5 s: eases back to the airframe (locked) instead of holding an old correction.
+    r.advance(1.0 / 60, 30);
+    CHECK(fscs::core::angleBetween(shownPose(r).orientation, saved) > .05);
+    r.advance(1.0 / 60, 150);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, saved), 0, 1e-4);
+    // Switching the gimbal to locked eases out as well.
+    flyAttitude(r, 10, 30, 120);
+    r.profile["cameras"][0]["gimbal"] = "locked";
+    r.setProfile();
+    flyAttitude(r, 10, 30, 1);
+    CHECK(fscs::core::angleBetween(shownPose(r).orientation, saved) > .1);
+    flyAttitude(r, 10, 30, 120);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, saved), 0, 1e-4);
+}
+
+TEST_CASE("mounted: gimbals apply to mounted cameras only; follow horizon and flight effects do not") {
+    using fscs::core::Quat;
+    Rig r;
+    mountRig(r, "locked", 0);
+    auto& cam = r.profile["cameras"][0];
+    cam["followHorizon"] = 0.0;  // ignored: the gimbal decides
+    cam["effects"] = {{"enabled", true}, {"intensity", 1}, {"acceleration", 1}};
+    auto& exterior = r.profile["cameras"][1];
+    exterior["mode"] = "aircraftExterior";
+    exterior["gimbal"] = "yaw";  // left over from a mode change: ignored
+    exterior["mountVibration"] = 1.0;
+    exterior["followHorizon"] = 1.0;
+    exterior["transition"]["kind"] = "cut";
+    exterior["positionMetersFRD"] = {-10, 0, -2};
+    r.connect();
+    fscs::profiles::HostSettings settings;
+    settings.globalAircraftTracking = "off";
+    r.c.setSettings(settings, r.t);
+    r.activate(r.pilot);
+    r.grant();
+    fscs::core::FlightMotion motion;
+    motion.forwardAcceleration = 5;
+    motion.engineRpm = 2400;
+    flyAttitude(r, 10, 30, 60, motion);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, Quat::identity()), 0, 1e-9);
+    CHECK_NEAR(r.c.effects().offset().length(), 0, 1e-12);
+    r.activate(r.pfd);
+    flyAttitude(r, 10, 30, 60, motion);
+    CHECK_NEAR(fscs::core::angleBetween(shownPose(r).orientation, Quat::fromPbh({0, 0, 0})), 0, 1e-9);
+    CHECK_NEAR(r.c.mountVibration().offset().length(), 0, 1e-12);
+    CHECK_NEAR(shownPose(r).positionFRD.x, -10, 1e-9);
+}
+
+TEST_CASE("mounted: airframe vibration is small, bounded, follows engine and ground roll, and is mounted only") {
+    struct Run { double maxAxis = 0, maxAngleDeg = 0; int zeroCrossings = 0; };
+    const auto run = [](const std::string& mode, double amount, fscs::core::FlightMotion motion) {
+        Rig r;
+        mountRig(r, "locked", amount);
+        r.profile["cameras"][0]["mode"] = mode;
+        r.connect();
+        r.activate(r.pilot);
+        r.grant();
+        flyAttitude(r, 0, 0, 60, motion);  // amplitudes settle
+        Run out;
+        double previous = 0;
+        const fscs::core::Vec3 saved{0.4, -5.4, 0.3};
+        for (int i = 0; i < 120; ++i) {
+            flyAttitude(r, 0, 0, 1, motion);
+            const auto shown = shownPose(r);
+            const auto d = shown.positionFRD - saved;
+            out.maxAxis = std::max({out.maxAxis, std::abs(d.x), std::abs(d.y), std::abs(d.z)});
+            out.maxAngleDeg = std::max(out.maxAngleDeg, fscs::core::angleBetween(shown.orientation, fscs::core::Quat::identity()) * fscs::core::kRadToDeg);
+            const double z = r.c.mountVibration().offset().z;
+            if (i > 0 && (z > 0) != (previous > 0)) ++out.zeroCrossings;
+            previous = z;
+        }
+        return out;
+    };
+    fscs::core::FlightMotion rolling;
+    rolling.onGround = 1; rolling.groundSpeed = 30; rolling.engineRpm = 2500;
+    fscs::core::FlightMotion cruise;
+    cruise.onGround = 0; cruise.groundSpeed = 55; cruise.engineRpm = 2400;
+    fscs::core::FlightMotion parked;  // engine off, standing still
+
+    const auto full = run("mounted", 1, rolling);
+    CHECK(full.maxAxis > .1 * fscs::core::kMountVibrationMaxMeters);
+    CHECK(full.maxAxis <= fscs::core::kMountVibrationMaxMeters + 1e-12);
+    CHECK(full.maxAngleDeg > .05);
+    CHECK(full.maxAngleDeg <= 2.5 * fscs::core::kMountVibrationMaxDeg);
+    CHECK(full.zeroCrossings > 20);  // fast: more than 10 Hz over two seconds
+    const auto light = run("mounted", .3, rolling);
+    CHECK(light.maxAxis <= .3 * fscs::core::kMountVibrationMaxMeters + 1e-12);
+    CHECK(light.maxAxis < full.maxAxis);
+    const auto air = run("mounted", 1, cruise);
+    CHECK(air.maxAxis > 0);
+    CHECK(air.maxAxis < full.maxAxis);  // engine only: no ground roll
+    CHECK_NEAR(run("mounted", 1, parked).maxAxis, 0, 1e-12);
+    CHECK_NEAR(run("mounted", 0, rolling).maxAxis, 0, 1e-12);
+    // Other modes never vibrate, whatever their stored mountVibration says.
+    for (const auto* mode : {"aircraftExterior", "aircraftCockpit", "orbit"}) {
+        Rig r;
+        mountRig(r, "locked", 1);
+        r.profile["cameras"][0]["mode"] = mode;
+        r.connect();
+        r.activate(r.pilot);
+        r.grant();
+        flyAttitude(r, 0, 0, 60, rolling);
+        CHECK_NEAR(r.c.mountVibration().offset().length(), 0, 1e-12);
+    }
+    // Direct class checks: non-finite input, oversize steps and ineligibility reset to zero.
+    fscs::core::MountVibration v;
+    for (int i = 0; i < 60; ++i) v.tick(1.0 / 60, rolling, 1, true);
+    CHECK(v.offset().length() > 0);
+    v.tick(.5, rolling, 1, true);
+    CHECK_NEAR(v.offset().length(), 0, 1e-12);
+    for (int i = 0; i < 60; ++i) v.tick(1.0 / 60, rolling, 5, true);  // amount clamps to 1
+    CHECK(std::abs(v.offset().z) <= fscs::core::kMountVibrationMaxMeters + 1e-12);
+    v.tick(1.0 / 60, rolling, NAN, true);
+    CHECK_NEAR(v.offset().length(), 0, 1e-12);
+    for (int i = 0; i < 60; ++i) v.tick(1.0 / 60, rolling, 1, true);
+    v.tick(1.0 / 60, rolling, 1, false);
+    CHECK_NEAR(v.offset().length(), 0, 1e-12);
 }

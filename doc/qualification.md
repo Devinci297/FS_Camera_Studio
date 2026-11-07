@@ -1,14 +1,14 @@
-# In-simulator qualification — 0.3.0
+# In-simulator qualification — 0.4.0
 
 Automated native and browser tests do not prove live simulator behavior. Record pass/fail, steps, MSFS build,
-aircraft, controller, scenery, package version and screenshots in `doc/test-evidence/`. The latest T.16000M
-hat-release fix has automated coverage and still needs physical-controller confirmation.
+aircraft, controller, scenery, package version and screenshots in `doc/test-evidence/`. The 0.3.0 T.16000M
+hat-release fix and most 0.4.0 features have automated coverage and still need live confirmation.
 
 ## Setup
 
 Install the release setup with MSFS closed, start a parked Free Flight, and open both toolbar panels. Confirm
-**0.3.0** in the app bar. Developer reproduction and package receipts are described in the
-[README](../README.md) and [release evidence](test-evidence/2026-10-11-v0.3.0.md).
+**0.4.0** in the app bar. Developer reproduction and package receipts are described in the
+[README](../README.md) and [release evidence](test-evidence/2026-11-07-v0.4.0.md).
 Camera directions are configured automatically; there is no user axis-calibration step.
 
 ## Hosting and navigation
@@ -22,6 +22,7 @@ Camera directions are configured automatically; there is no user axis-calibratio
 | Open assignment, tracking, walkaround and confirmation dialogs | Content scrolls above visible action buttons; no unwanted full-screen opaque panel |
 | Test opacity, reopen and resize | Main and mini alpha settings are independent; scene is visible without native blur |
 | Click cockpit controls around visible and hidden panels | No invisible hit regions block simulator controls |
+| **Pop out** the editor, drag it to a second monitor, edit and save a camera, then **Dock** it; repeat with Right Alt + click | Editor opens in its own opaque desktop window and stays fully usable; Dock returns it to the sim window; no CoherentUIGT crash; mini panel unaffected |
 
 ## Input and camera behavior
 
@@ -39,6 +40,26 @@ Camera directions are configured automatically; there is no user axis-calibratio
 | Wheel zoom, pause, active pause, menus and Release camera | No latched translation or zoom; simulator can recover camera control |
 | Capture current view, review, save and recall | Reviewed pose matches the scene and remains after restart |
 | Orbit and animated fly-by while parked; timed walkaround | Correct mode controls, animation, pause/stop and sequence looping |
+| Settings > Gamepad: Listen for each drone motion on a gamepad, then show a drone and use the sticks and triggers | Left stick moves, right stick turns, triggers climb and descend; releasing stops the drone; the aircraft does not respond to the assigned sticks while the drone is shown and does again on other views |
+
+## Camera feel, cinematics and spotting (0.4.0)
+
+| Check | Expected result |
+| --- | --- |
+| Follow horizon at 0, 0.5 and 1 in a banked turn | 0 rolls with the aircraft, 1 stays level, 0.5 is between |
+| Flight effects presets on cockpit, exterior and orbit views | Exterior and orbit move at about half the cockpit strength; a changed slider shows Custom |
+| Head movement during taxi, turns and acceleration | Lag, turn lean and taxi bob are noticeable but not nauseating; idle sway only when enabled |
+| Mounted cam with each gimbal; vibration on and off | Locked follows the airframe; horizon stays level; yaw follows heading only; pitch direction is correct |
+| Hold Ctrl+Alt+Z, release; repeat on a view below 30 degrees FOV | Zooms in while held and returns to the previous FOV on release |
+| Hold Ctrl+Alt+G, step with Ctrl+Alt+I, return with Ctrl+Alt+U | Glances at an instrument view and snaps back to the exact view and look |
+| Ctrl+Alt+K through taxi, takeoff, climb, cruise and approach | Views change with the flight phase; holds stay within the configured range; manual movement pauses it |
+| Load at an airport without saved cameras | Temporary tower, runway, stand and spotting views appear; Save keeps them; nothing is stored otherwise |
+| Drop drone here; fly it with keys and a gamepad; enable Follow aircraft | Drone moves where it looks and never goes below the terrain; the aircraft ignores the sticks only while the drone is shown |
+| Traffic tab with FSLTL or online traffic; chase, fly-by, tower and runway views | Speed is not 0 kt for moving traffic; chase and fly-by are smooth; parked targets give a still camera |
+| Spot an arrival and a departure from the runway view | Arrivals use the landing end, departures the far end |
+| Create and edit a spot; Save current view as a spot | Behind, side and height update live; the spot survives a restart without a profile |
+| Auto-spot (Ctrl+Alt+J), Ctrl+Alt+T / Y / O | Follows landings and departures; next / previous / return work; Ctrl+Alt+X releases at once |
+| Mini Traffic tab filters and search; click the category divider | Counts match the list; search filters by callsign and type; categories collapse to icons and back |
 
 ## Airport cameras
 

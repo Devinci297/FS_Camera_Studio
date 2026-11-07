@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <initializer_list>
 #include <map>
 #include <set>
 #include <sstream>
@@ -115,6 +116,11 @@ void migrateFrom2(json& doc) {
     }
 }
 
+// Schema 3 -> 4: no field changes. Version 4 adds the "mounted" camera mode (with optional gimbal and
+// mountVibration), which a schema 3 reader rejects as an unknown mode; the bump makes older builds refuse the
+// whole document by version instead.
+void migrateFrom3(json& doc) { doc["schemaVersion"] = 4; }
+
 }  // namespace
 
 const char* toString(CameraMode m) {
@@ -125,6 +131,7 @@ const char* toString(CameraMode m) {
         case CameraMode::Flyby: return "flyby";
         case CameraMode::Airport: return "airport";
         case CameraMode::Free: return "free";
+        case CameraMode::Mounted: return "mounted";
     }
     return "aircraftCockpit";
 }
@@ -133,13 +140,14 @@ std::optional<CameraMode> parseMode(const std::string& s) {
     static const std::map<std::string, CameraMode> m = {
         {"aircraftCockpit", CameraMode::AircraftCockpit}, {"aircraftExterior", CameraMode::AircraftExterior},
         {"orbit", CameraMode::Orbit},                     {"flyby", CameraMode::Flyby},
-        {"airport", CameraMode::Airport},                 {"free", CameraMode::Free}};
+        {"airport", CameraMode::Airport},                 {"free", CameraMode::Free},
+        {"mounted", CameraMode::Mounted}};
     auto it = m.find(s);
     if (it == m.end()) return std::nullopt;
     return it->second;
 }
 
-bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior || m == CameraMode::Airport || m == CameraMode::Orbit || m == CameraMode::Flyby; }
+bool modeActivatable(CameraMode m) { return m == CameraMode::AircraftCockpit || m == CameraMode::AircraftExterior || m == CameraMode::Airport || m == CameraMode::Orbit || m == CameraMode::Flyby || m == CameraMode::Mounted || m == CameraMode::Free; }
 
 std::string ValidationResult::summary() const {
     if (errors.empty()) return "valid";
@@ -159,11 +167,12 @@ ValidationResult validateProfile(json& doc) {
     }
     const auto version = js::integer(doc, "schemaVersion", -1);
     if (version == 1) migrateFrom1(doc);
-    if (version == 1 || version == 2) {
-        migrateFrom2(doc);
+    if (version == 1 || version == 2) migrateFrom2(doc);
+    if (version >= 1 && version <= 3) {
+        migrateFrom3(doc);
         r.migrated = true;
     } else if (version != kSchemaVersion) {
-        c.error("$.schemaVersion", "unsupported schema version (this build reads versions 1 to 3)");
+        c.error("$.schemaVersion", "unsupported schema version (this build reads versions 1 to 4)");
         return r;
     }
     if (c.text(doc, "profileId", "$", 36, 36) && !isUuid(doc["profileId"].get<std::string>())) c.error("$.profileId", "must be a UUID");
@@ -251,6 +260,18 @@ ValidationResult validateProfile(json& doc) {
                 if(!std::isfinite(lat)||std::abs(lat)>=89.9||!std::isfinite(lon)||std::abs(lon)>180||!std::isfinite(alt)||alt< -1500||alt>30000)
                     c.error(p+".worldOrigin", "Airport camera needs a valid world origin in degrees/meters.");
             }
+            // Free cameras (drones) reuse the airport world fields: worldOrigin plus a local NED pose about it. A free
+            // camera without one (made before free cameras could activate) stays valid but cannot activate until
+            // it is placed with Drop drone here.
+            if (js::str(cam, "mode") == "free") {
+                if (cam.contains("worldOrigin") && !airport::geo(js::get(cam, "worldOrigin")).valid())
+                    c.error(p + ".worldOrigin", "Free camera needs a valid world origin in degrees/meters.");
+                else if (!cam.contains("worldOrigin"))
+                    c.warn(p + ".worldOrigin", "This free camera has no world position yet. Use Drop drone here to place it.");
+                if (!cam.contains("followAircraft")) cam["followAircraft"] = false;
+            }
+            if (cam.contains("followAircraft") && !cam["followAircraft"].is_boolean())
+                c.error(p + ".followAircraft", "must be true or false");
             if (c.numbers(cam, "positionMetersFRD", 3, p))
                 for (const auto& v : cam["positionMetersFRD"])
                     if (std::abs(v.get<double>()) > core::kMaxPositionMeters) c.error(p + ".positionMetersFRD", "is more than 10 km from the anchor");
@@ -350,7 +371,10 @@ ValidationResult validateProfile(json& doc) {
             else {
                 if (!fx.contains("enabled")) fx["enabled"] = false;
                 if (!fx["enabled"].is_boolean()) c.error(p + ".effects.enabled", "must be true or false");
-                const std::pair<const char*, double> amounts[] = {{"intensity", .35}, {"turbulence", .5}, {"groundRoll", .35}, {"touchdown", .5}, {"acceleration", .35}, {"engine", .2}};
+                // Fallbacks match core::EffectsSettings and ui/app.js EFFECT_DEFAULTS. The head-model strengths
+                // are optional (added without a schema bump): older profiles get the defaults here.
+                const std::pair<const char*, double> amounts[] = {{"intensity", .35}, {"turbulence", .5}, {"groundRoll", .35}, {"touchdown", .5}, {"acceleration", .35}, {"engine", .2},
+                                                                  {"headLag", .5}, {"turnLean", .5}, {"taxiBob", .5}, {"idleSway", 0.}};
                 for (const auto& [key, fallback] : amounts) {
                     if (!fx.contains(key)) fx[key] = fallback;
                     const double value = js::num(fx, key, -1.);
@@ -370,6 +394,24 @@ ValidationResult validateProfile(json& doc) {
                     c.error(p + ".followHorizon", "must be a number between 0 and 1");
             }
             if (!(cam["seedDefinitionName"].is_null() || cam["seedDefinitionName"].is_string())) cam["seedDefinitionName"] = nullptr;
+            // Mounted cameras get their defaults; other modes keep (and ignore) values left by a mode change.
+            if (js::str(cam, "mode") == "mounted") {
+                if (!cam.contains("gimbal")) cam["gimbal"] = "locked";
+                if (!cam.contains("mountVibration")) cam["mountVibration"] = core::kDefaultMountVibration;
+            }
+            if (cam.contains("gimbal") && (!cam["gimbal"].is_string() || !core::parseGimbal(cam["gimbal"].get<std::string>())))
+                c.error(p + ".gimbal", "must be locked, horizon or yaw");
+            if (cam.contains("mountVibration")) {
+                const double vibration = js::num(cam, "mountVibration", NAN);
+                if (!cam["mountVibration"].is_number() || !std::isfinite(vibration) || vibration < 0 || vibration > 1)
+                    c.error(p + ".mountVibration", "must be a number between 0 and 1");
+            }
+            // Optional, no schema bump: older profiles derive it from the icon or name.
+            if (!cam.contains("glance")) cam["glance"] = defaultGlance(cam);
+            else if (!cam["glance"].is_boolean()) c.error(p + ".glance", "must be true or false");
+            // Optional, no schema bump: Cinematic mode includes outside views and the default pilot view.
+            if (!cam.contains("cinematic")) cam["cinematic"] = defaultCinematic(cam, js::str(doc, "defaultCameraId"));
+            else if (!cam["cinematic"].is_boolean()) c.error(p + ".cinematic", "must be true or false");
         }
     }
 
@@ -512,9 +554,16 @@ ProfileSnapshot toSnapshot(const json& doc) {
         e.resetMouseLookOnRelease = js::str(cam, "mouseLookOnRelease", "retain") == "reset";
         const auto& fx = js::object(cam, "effects");
         e.effects = {js::boolean(fx, "enabled", false), js::num(fx, "intensity", .35), js::num(fx, "turbulence", .5),
-                     js::num(fx, "groundRoll", .35), js::num(fx, "touchdown", .5), js::num(fx, "acceleration", .35), js::num(fx, "engine", .2)};
+                     js::num(fx, "groundRoll", .35), js::num(fx, "touchdown", .5), js::num(fx, "acceleration", .35), js::num(fx, "engine", .2),
+                     js::num(fx, "headLag", .5), js::num(fx, "turnLean", .5), js::num(fx, "taxiBob", .5), js::num(fx, "idleSway", 0.)};
         e.followHorizon = core::clamp(js::num(cam, "followHorizon", 1.0), 0., 1.);
+        e.gimbal = core::parseGimbal(js::str(cam, "gimbal", "locked")).value_or(core::Gimbal::Locked);
+        e.mountVibration = core::clamp(js::num(cam, "mountVibration", core::kDefaultMountVibration), 0., 1.);
         e.seedDefinitionName = js::str(cam, "seedDefinitionName");
+        e.glance = e.mode == CameraMode::AircraftCockpit && js::boolean(cam, "glance", defaultGlance(cam));
+        e.cinematic = e.mode != CameraMode::Free && js::boolean(cam, "cinematic", defaultCinematic(cam, s.defaultCameraId));
+        e.followAircraft = e.mode == CameraMode::Free && js::boolean(cam, "followAircraft", false);
+        e.worldOriginValid = cam.contains("worldOrigin") && airport::geo(js::get(cam, "worldOrigin")).valid();
         s.cameras.push_back(std::move(e));
     }
     return s;
@@ -558,6 +607,28 @@ std::string newUuid() {
         s.push_back(hex[b[i] & 15]);
     }
     return s;
+}
+
+bool defaultCinematic(const json& cam, const std::string& defaultCameraId) {
+    if (!cam.is_object()) return false;
+    const auto mode = js::str(cam, "mode", "aircraftCockpit");
+    if (mode == "free") return false;
+    if (mode != "aircraftCockpit") return true;
+    return !defaultCameraId.empty() && js::str(cam, "id") == defaultCameraId;
+}
+
+bool defaultGlance(const json& cam) {
+    if (!cam.is_object() || js::str(cam, "mode", "aircraftCockpit") != "aircraftCockpit") return false;
+    // A chosen icon decides; without one the editor picks the icon from the name (viewIcon() in ui/app.js).
+    if (const auto icon = js::str(cam, "icon"); !icon.empty()) return icon == "view-instrument";
+    std::string name = js::str(cam, "name");
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const auto has = [&](std::initializer_list<const char*> words) {
+        return std::any_of(words.begin(), words.end(), [&](const char* w) { return name.find(w) != std::string::npos; });
+    };
+    // Airport words take precedence in the editor's icon choice.
+    if (has({"runway", "threshold", "approach", "gate", "jetway", "apron", "parking", "ramp", "taxi", "tower", "airport"})) return false;
+    return has({"pfd", "mfd", "instrument", "g1000", "radio", "avionics", "autopilot"});
 }
 
 bool isUuid(const std::string& s) {
