@@ -94,6 +94,7 @@ private:
     void onPanelText(const std::string& text, double now);
     void handle(const protocol::Command& c, double now);
     void importProfileCode(const protocol::Command& c, const std::string& code, double now);
+    void commitImport(const protocol::Command& c, profiles::ImportReport report, const char* source, double now);
     void reply(const protocol::Command& c, protocol::AckStatus s, const std::string& reason = {}, json result = nullptr);
     void send(const json& message);
     void emitState(const std::string& name, json payload);  // coalesced latest-state event

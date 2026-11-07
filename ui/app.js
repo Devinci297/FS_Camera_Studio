@@ -4770,7 +4770,7 @@
     let fileCode = '', reading = false, importing = false, readSequence = 0;
     const native = bridge.mode !== 'demo';
     const available = !native && typeof window.FileReader === 'function' && file.type === 'file';
-    let selectedFilename = '', refreshing = false;
+    let selectedFilename = '', selectedXCamera = null, refreshing = false;
     let refreshButton = null;
     const currentDialog = () => document.documentElement.contains(file);
     if (native) {
@@ -4789,9 +4789,20 @@
       const list = make('div', undefined, 'mc-profile-list');
       list.setAttribute('aria-label', 'Profile files'); list.setAttribute('role', 'group');
       list.style.maxHeight = '220px'; list.style.overflowY = 'auto';
+      // X-Camera (X-Plane): each aircraft's own camera file, community sets for the loaded aircraft and .csv files
+      // in the imports folder, converted into a new profile.
+      const xcam = make('div'); xcam.hidden = true;
+      const xcamList = make('div', undefined, 'mc-profile-list');
+      xcamList.setAttribute('aria-label', 'X-Camera files'); xcamList.setAttribute('role', 'group');
+      xcamList.style.maxHeight = '220px'; xcamList.style.overflowY = 'auto';
+      add(xcam, make('h3', 'X-Camera views'),
+        make('p', 'Convert X-Camera\'s cameras into a new profile. Listed: every aircraft\'s own X-Camera file, community sets for the loaded aircraft and .csv files in the folder above. X-Camera\'s files are not changed.', 'mc-note'),
+        xcamList);
+      const pickButtons = () => Array.prototype.slice.call(list.querySelectorAll('button')).concat(Array.prototype.slice.call(xcamList.querySelectorAll('button')));
+      const markPicked = pick => pickButtons().forEach(b => { b.setAttribute('aria-pressed', b === pick ? 'true' : 'false'); b.className = b === pick ? 'mc-primary' : 'mc-secondary'; });
       const refresh = async () => {
         if (refreshing || importing) return;
-        refreshing = true; refreshButton.disabled = true; selectedFilename = ''; empty(list);
+        refreshing = true; refreshButton.disabled = true; selectedFilename = ''; selectedXCamera = null; empty(list); empty(xcamList); xcam.hidden = true;
         status.textContent = 'Reading the imports folder...'; dialogError('');
         try {
           const ack = await bridge.request('ListImportFiles', {});
@@ -4803,14 +4814,28 @@
           names.forEach(name => {
             const pick = button(name, () => {
               if (importing) return;
-              selectedFilename = name; input.value = ''; fileCode = '';
-              Array.prototype.forEach.call(list.querySelectorAll('button'), b => { b.setAttribute('aria-pressed', b === pick ? 'true' : 'false'); b.className = b === pick ? 'mc-primary' : 'mc-secondary'; });
+              selectedFilename = name; selectedXCamera = null; input.value = ''; fileCode = '';
+              markPicked(pick);
               status.textContent = 'Ready to import ' + name; dialogError('');
             }, 'mc-secondary');
             pick.setAttribute('aria-pressed', 'false'); pick.style.display = 'block'; pick.style.width = '100%';
             list.appendChild(pick);
           });
-          status.textContent = names.length ? 'Select a profile file, then Import.' : 'No JSON files found. Add profiles to this folder, then Refresh.';
+          const xfiles = Array.isArray(result.xcamera) ? result.xcamera.filter(f => f && typeof f.id === 'string') : [];
+          xfiles.forEach(f => {
+            const where = f.source === 'community' ? 'community set' : f.source === 'imports' ? 'imports folder' : '';
+            const label = (f.aircraft || 'Aircraft') + ' - ' + (f.label || 'X-Camera file') + (where ? ' (' + where + ')' : '') + (f.loadedAircraft ? ', loaded aircraft' : '');
+            const pick = button(label, () => {
+              if (importing) return;
+              selectedXCamera = f; selectedFilename = ''; input.value = ''; fileCode = '';
+              markPicked(pick);
+              status.textContent = 'Ready to convert ' + (f.label || 'the X-Camera file') + ' for ' + (f.aircraft || 'its aircraft'); dialogError('');
+            }, 'mc-secondary');
+            pick.setAttribute('aria-pressed', 'false'); pick.style.display = 'block'; pick.style.width = '100%'; pick.style.textAlign = 'left';
+            xcamList.appendChild(pick);
+          });
+          xcam.hidden = !xfiles.length;
+          status.textContent = names.length || xfiles.length ? 'Select a file, then Import.' : 'No JSON files found. Add profiles to this folder, then Refresh.';
           if (result.error) dialogError(result.error);
         } catch (_) { if (currentDialog()) { status.textContent = 'Could not list profile files.'; dialogError('Refresh to try again.'); } }
         finally { refreshing = false; refreshButton.disabled = false; }
@@ -4818,7 +4843,7 @@
       refreshButton = button('Refresh', refresh, 'mc-secondary');
       body.insertBefore(folderLabel, status);
       body.insertBefore(make('p', 'Open this location in File Explorer, copy your profile JSON files into it, then Refresh. The simulator does not provide a Windows file picker or Open folder action.', 'mc-note'), status);
-      body.insertBefore(copy, status); body.insertBefore(refreshButton, status); body.insertBefore(list, status);
+      body.insertBefore(copy, status); body.insertBefore(refreshButton, status); body.insertBefore(list, status); body.insertBefore(xcam, status);
       nextFrame(refresh);
     } else if (!available) {
       choose.disabled = true;
@@ -4828,7 +4853,7 @@
       body.appendChild(make('p', 'If the simulator does not open a file picker, use Paste profile code instead.', 'mc-note'));
     }
     input.addEventListener('input', () => {
-      ++readSequence; fileCode = ''; reading = false; file.value = ''; selectedFilename = '';
+      ++readSequence; fileCode = ''; reading = false; file.value = ''; selectedFilename = ''; selectedXCamera = null;
       status.textContent = 'Using pasted profile code.';
       dialogError('');
     });
@@ -4871,11 +4896,12 @@
       if (importing) return;
       if (reading) { dialogError('Wait for the profile file to finish loading.'); return; }
       const code = fileCode || input.value.trim();
-      if (!code && !selectedFilename) { dialogError('Choose a profile file or paste its code first.'); return; }
+      if (!code && !selectedFilename && !selectedXCamera) { dialogError('Choose a profile file or paste its code first.'); return; }
       importing = true; choose.disabled = true; input.disabled = true; if (refreshButton) refreshButton.disabled = true;
       dialogError('');
       try {
-        const ack = selectedFilename ? await bridge.request('ImportProfileFile', { filename: selectedFilename }) : await bridge.request('ImportProfile', { code });
+        const ack = selectedXCamera ? await bridge.request('ImportXCameraFile', { id: selectedXCamera.id })
+          : selectedFilename ? await bridge.request('ImportProfileFile', { filename: selectedFilename }) : await bridge.request('ImportProfile', { code });
         if (ack.status === 'Pending') {
           const done = await waitForCommit(ack.requestId);
           if (!document.documentElement.contains(file)) return;
@@ -4892,15 +4918,23 @@
   }
   function showImportReport(result) {
     const report = result.report || {};
-    const body = openDialog('Profile imported');
-    body.appendChild(make('p', '"' + (report.name || 'The profile') + '" was added as a copy with new camera IDs.'));
+    const xcamera = report.source === 'xcamera';
+    const body = openDialog(xcamera ? 'X-Camera views imported' : 'Profile imported');
+    body.appendChild(make('p', xcamera ? '"' + (report.name || 'The profile') + '" was made from X-Camera\'s cameras. Check each view before relying on it.'
+      : '"' + (report.name || 'The profile') + '" was added as a copy with new camera IDs.'));
     const kv = make('dl', undefined, 'mc-kv');
     const am = report.aircraftMatch || { matches: report.matchesLoadedAircraft, displayName: report.aircraft };
     add(kv, make('dt', 'Aircraft'), make('dd', (am.matches ? 'Matches the loaded aircraft' : 'Not the loaded aircraft') + (am.displayName ? ' - ' + am.displayName : '')));
     add(kv, make('dt', 'Cameras'), make('dd', String(report.cameraCount || 0)));
     body.appendChild(kv);
     const unsupported = report.unsupported || report.notes || [];
-    if (unsupported.length) {
+    if (unsupported.length && xcamera) {
+      body.appendChild(make('p', 'How X-Camera\'s cameras were converted:', 'mc-note'));
+      const ul = make('ul', undefined, 'mc-report-list');
+      unsupported.forEach(item => ul.appendChild(make('li', typeof item === 'string' ? item : (item.message || item.name || ''))));
+      body.appendChild(ul);
+    } else if (xcamera) body.appendChild(make('p', 'Every camera was converted as it was.'));
+    else if (unsupported.length) {
       body.appendChild(make('p', 'Kept, but not available in this version:', 'mc-warn'));
       const ul = make('ul', undefined, 'mc-report-list');
       unsupported.forEach(item => ul.appendChild(make('li', typeof item === 'string' ? item : (item.message || item.name || ''))));

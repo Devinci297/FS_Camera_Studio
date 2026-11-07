@@ -67,3 +67,8 @@ if(UNIX AND NOT APPLE)
     add_test(NAME xpcs_fake_xplane
         COMMAND xpcs_fake_xplane "$<TARGET_FILE:xpcs_plugin>" "${CMAKE_CURRENT_BINARY_DIR}/fake-xplane")
 endif()
+
+# Converts every X-Camera file the plugin would list into profile files (no X-Plane needed).
+add_executable(xpcs_xcamera_convert ../../tools/xcamera_convert.cpp xp_storage.cpp)
+target_link_libraries(xpcs_xcamera_convert PRIVATE fscs_profiles fscs_json)
+target_include_directories(xpcs_xcamera_convert PRIVATE .)
