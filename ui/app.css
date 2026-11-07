@@ -1254,16 +1254,44 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim[data-surface="mini"] .mc-dock-body>.mc-spotting-status{font-size:10px;line-height:12px}
 /* Mid-width mini docks keep one toolbar row: the spotting buttons show icons only (their names stay in aria-label). */
 @media(max-width:1500px){#mc-sim[data-surface="mini"] .mc-dock-tools .mc-spot-toggle>span,#mc-sim[data-surface="mini"] .mc-dock-tools .mc-spot-next>span{display:none}}
-/* Mini Traffic tab: view choice on top, nearby aircraft below; the pane scrolls inside the dock's fixed height. */
-#mc-sim[data-surface="mini"] .mc-dock-categories .mc-dock-traffic-count{margin-left:auto;font-size:10px;min-width:14px;height:15px;padding:0 3px}
-#mc-sim[data-surface="mini"] .mc-dock-favorites>.mc-dock-traffic{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0}
-#mc-sim[data-surface="mini"] .mc-dock-traffic-views,#mc-sim[data-surface="mini"] .mc-dock-traffic-list{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
-#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-dock-traffic-views button{min-width:0;min-height:22px;padding:2px 7px;font-size:10px;gap:4px;background:transparent}
-#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-dock-traffic-views button[aria-pressed="true"]{outline:0;box-shadow:none;color:var(--mc-accent);background:var(--mc-active);border-color:var(--mc-accent)}
-#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-dock-traffic-views .mc-dock-traffic-stop{margin-left:auto}
-#mc-sim[data-surface="mini"] .mc-dock-favorites .mc-dock-traffic-aircraft{min-width:0;max-width:220px;gap:5px;white-space:nowrap}
-#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft strong{font-weight:600;overflow:hidden;text-overflow:ellipsis}
-#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft small{color:var(--mc-muted);font-size:10px;font-variant-numeric:tabular-nums}
-#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[aria-pressed="true"] small{color:inherit}
-#mc-sim[data-surface="mini"] .mc-dock-traffic>.mc-note{font-size:10px;line-height:13px}
+/* Mini Traffic tab: a fixed bar (views, status filters, search, Stop) above the aircraft list, which scrolls on its own.
+   Spacing uses margins, not flex gap: Coherent ignores gap, which ran callsign, distance and status together in the sim. */
+#mc-sim[data-surface="mini"] .mc-dock-categories .mc-dock-traffic-count{margin-left:auto;font-size:11px;min-width:16px;height:16px;padding:0 4px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:0;min-width:0;padding:0 10px 0 0;margin:0}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-views,#mc-sim[data-surface="mini"] .mc-dock-traffic-filters{display:flex;flex:none;flex-wrap:nowrap;align-items:center;gap:0;margin:0 8px 2px 0}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-filters{border-left:1px solid var(--mc-line);padding-left:8px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar button{min-width:0;height:24px;min-height:24px;padding:2px 8px;margin:0 3px 0 0;font-size:11px;line-height:14px;gap:0;background:transparent;border:1px solid var(--mc-line);border-radius:6px;white-space:nowrap}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar button>svg{width:14px;height:14px;margin-right:4px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar button[aria-pressed="true"]{color:var(--mc-accent);background:var(--mc-active);border-color:var(--mc-accent)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-filter-count{display:inline-block;margin-left:5px;min-width:12px;font-size:10px;font-weight:600;color:var(--mc-muted);text-align:center;font-variant-numeric:tabular-nums}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-filter[aria-pressed="true"] .mc-dock-traffic-filter-count{color:inherit}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-search{display:flex;flex:0 1 170px;align-items:center;min-width:110px;height:24px;margin:0 8px 2px 0;padding:0 7px;border:1px solid var(--mc-line);border-radius:6px;background:var(--mc-input);cursor:text}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-search>svg{width:13px;height:13px;margin-right:5px;color:var(--mc-muted)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-search input[type="search"]{flex:1 1 auto;width:100%;min-width:0;height:22px;min-height:0;padding:0;border:0;border-radius:0;background:transparent;font-size:12px;line-height:22px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-search input::placeholder{color:var(--mc-muted)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar .mc-dock-traffic-stop{margin:0 0 2px auto}
+#mc-sim[data-surface="mini"] .mc-dock-favorites>.mc-dock-traffic{display:block;width:100%;min-width:0}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-list{display:flex;flex-wrap:wrap;gap:0;min-width:0}
+#mc-sim[data-surface="mini"][data-name-display] .mc-dock-favorites .mc-dock-traffic-aircraft{min-width:0;max-width:300px;height:30px;min-height:30px;margin:0 4px 4px 0;padding:3px 9px 3px 7px;gap:0;white-space:nowrap;font-size:13px;line-height:18px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft>svg{width:15px;height:15px;margin-right:6px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft strong{font-weight:600;letter-spacing:.01em;overflow:hidden;text-overflow:ellipsis}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft small{margin-left:9px;color:var(--mc-text);opacity:.82;font-size:12px;font-variant-numeric:tabular-nums}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-status{margin-left:7px;padding:0 6px;border:1px solid var(--mc-line);border-radius:9px;font-size:11px;line-height:16px;color:var(--mc-muted)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="arriving"] .mc-dock-traffic-status,#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="landing"] .mc-dock-traffic-status{color:var(--mc-accent);border-color:var(--mc-accent)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="departing"] .mc-dock-traffic-status,#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="takeoff"] .mc-dock-traffic-status{color:var(--mc-amber);border-color:var(--mc-amber)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="cruise"] .mc-dock-traffic-status{color:var(--mc-text)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[aria-pressed="true"] small{color:inherit;opacity:1}
+#mc-sim[data-surface="mini"] .mc-dock-traffic>.mc-note{display:block;font-size:11px;line-height:14px;padding:2px 0}
 #mc-sim[data-surface="mini"][data-name-display="icons"] .mc-dock-traffic-views button>span{display:none}
+#mc-sim[data-surface="mini"][data-name-display="icons"] .mc-dock-traffic-views button>svg{margin-right:0}
+/* Narrower mini docks: the view buttons show icons only so the bar stays on one row (names stay in the tooltips). */
+@media(max-width:1800px){#mc-sim[data-surface="mini"] .mc-dock-traffic-views button>span{display:none}#mc-sim[data-surface="mini"] .mc-dock-traffic-views button>svg{margin-right:0}#mc-sim[data-surface="mini"] .mc-dock-traffic-views button{padding:2px 6px}}
+/* Mini readability: larger category names and labels, and margins between icons and text that also hold in Coherent. */
+#mc-sim[data-surface="mini"] .mc-category-grid button{font-size:11px;line-height:12px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-label{line-height:12px;max-height:24px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name{gap:0}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name>svg.mc-icon{margin-right:4px}
+#mc-sim[data-surface="mini"] .mc-dock-category-legend{font-size:10px;letter-spacing:.06em}
+#mc-sim[data-surface="mini"] .mc-tool-group-label{font-size:10px}
+#mc-sim[data-surface="mini"] .mc-dock-body>.mc-effective-tracking,#mc-sim[data-surface="mini"] .mc-dock-body>.mc-spotting-status{font-size:11px;line-height:14px}
+#mc-sim[data-surface="mini"] .mc-dock-tools button>svg+span{margin-left:3px}
