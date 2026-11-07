@@ -1,6 +1,8 @@
 """Build a shareable, offline Windows setup from an explicitly verified package.
 
-No SDK compile or simulator writes occur. Inno Setup 6.7.3 is a build-only tool.
+One setup for both simulators: the verified MSFS 2024 package and the X-Plane 12 plugin folder built by CMake
+(XP Camera Studio, -DFSCS_BUILD_XPLANE=ON). The user picks MSFS, X-Plane or both. No SDK compile or simulator
+writes occur. Inno Setup 6.7.3 is a build-only tool.
 """
 import argparse
 import hashlib
@@ -10,7 +12,7 @@ import shutil
 import subprocess
 import zipfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,6 +20,22 @@ ROOT = Path(__file__).resolve().parents[1]
 def inventory(folder):
     return {p.relative_to(folder).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in sorted(folder.rglob('*')) if p.is_file()}
+
+
+def xplane_plugin(args):
+    """The X-Plane plugin folder: win_x64/XPCameraStudio.xpl and the shared ui/, at the release version."""
+    plugin = (ROOT / args.xplane).resolve()
+    files = inventory(plugin) if plugin.is_dir() else {}
+    if 'win_x64/XPCameraStudio.xpl' not in files:
+        raise ValueError('X-Plane plugin not found at ' + str(plugin) + '. Build xpcs_plugin (Release) first, or pass --xplane.')
+    for name in files:
+        if '..' in Path(name).parts or any(c in name for c in '"\r\n;\''):
+            raise ValueError('Unsafe plugin filename: ' + name)
+        if not name.startswith(('win_x64/', 'ui/')) or name.startswith('ui/tests/'):
+            raise ValueError('Unexpected X-Plane plugin file: ' + name)
+    if f"'{args.version}'" not in (plugin / 'ui/version.js').read_text(encoding='utf-8-sig'):
+        raise ValueError('X-Plane plugin and installer versions must match (rebuild the plugin after updating ui/version.js).')
+    return plugin, files
 
 
 def build(args):
@@ -41,6 +59,7 @@ def build(args):
             raise ValueError('Unsafe package filename: ' + name)
         if name not in {'layout.json', 'manifest.json'} and not name.startswith(('html_ui/', 'InGamePanels/', 'modules/')):
             raise ValueError('Unexpected distributable file: ' + name)
+    plugin, plugin_files = xplane_plugin(args)
     manifest = json.loads((package / 'manifest.json').read_text(encoding='utf-8-sig'))
     if manifest['package_version'] != args.version.split('-')[0]:
         raise ValueError('Installer and package versions must match.')
@@ -56,11 +75,18 @@ def build(args):
         raise ValueError('Unexpected stale payload files. Use a new build ID.')
     shutil.copytree(package, payload, dirs_exist_ok=True)
     assert inventory(payload) == actual
+    xpayload = stage / 'xplane'
+    if xpayload.exists():
+        shutil.rmtree(xpayload)
+    shutil.copytree(plugin, xpayload)
+    assert inventory(xpayload) == plugin_files
     shutil.copy2(ROOT / 'installer/CameraStudio.iss', stage / 'CameraStudio.iss')
     shutil.copy2(ROOT / 'installer/TESTER-GUIDE.txt', stage / 'TESTER-GUIDE.txt')
     shutil.copy2(ROOT / 'output/pdf/FS-Camera-Studio-Manual.pdf', stage / 'FS-Camera-Studio-Manual.pdf')
     (stage / 'AFTER-INSTALL.txt').write_text(
-        'Installation complete.\n\nStart MSFS 2024 and open Camera Studio from the toolbar.\n'
+        'Installation complete.\n\nMSFS 2024: open Camera Studio from the toolbar.\n'
+        'X-Plane 12: Plugins > XP Camera Studio > Editor. Assign keys to the xpcs/ commands\n'
+        'in X-Plane\'s Keyboard settings (the Bindings tab lists them).\n'
         'Airport creation: Camera library + > Create airport cameras.\n'
         'WASD follows your view; Q/E changes height; Shift boosts movement.\n'
         'Ctrl+S saves. Bindings are customizable.\n\n'
@@ -70,12 +96,16 @@ def build(args):
     notices = 'FS Camera Studio - third-party notices\n\n'
     notices += 'This package includes nlohmann/json:\n\n'
     notices += (ROOT / 'third_party/nlohmann/LICENSE.MIT').read_text(encoding='utf-8')
+    notices += '\n\nThe X-Plane 12 plugin is built with the X-Plane SDK:\n\n'
+    notices += (ROOT / 'third_party/XPSDK/license.txt').read_text(encoding='utf-8', errors='replace')
     (stage / 'THIRD-PARTY-NOTICES.txt').write_text(notices, encoding='utf-8')
     info = dict(product='FS Camera Studio', buildId=args.version, channel='tester' if '-test.' in args.version else 'release',
                 packageVersion=manifest['package_version'], minimumSimulatorVersion=manifest['minimum_game_version'],
                 builtUtc=datetime.now(timezone.utc).isoformat(),
                 sourceReceipt=Path(args.receipt).name, sourceTrial=Path(args.receipt).parent.name,
                 packageFiles=actual, packageFileCount=len(actual),
+                simulators=['MSFS 2024', 'X-Plane 12'], xplanePluginFiles=plugin_files,
+                xplanePluginFileCount=len(plugin_files),
                 liveSimulatorVerified=bool(receipt.get('liveVerified', False)),
                 installerSigned=False, testHarness=args.test_harness)
     (stage / 'BUILD-INFO.json').write_text(json.dumps(info, indent=2)+'\n', encoding='utf-8')
@@ -83,16 +113,25 @@ def build(args):
     (stage / 'release.iss').write_text(
         f'#define ReleaseVersion "{args.version}"\n#define NumericVersion "{numeric}"\n'
         f'#define ReleaseOutput "{output}"\n#define StageRoot "{stage}"\n' +
-        ('#define SimulatorProcessName "FSCS-Installer-Test-Sim.exe"\n' if args.test_harness else ''), encoding='utf-8-sig')
-    entries, verifies = [], []
+        ('#define SimulatorProcessName "FSCS-Installer-Test-Sim.exe"\n#define XPlaneProcessName "FSCS-Installer-Test-XPlane.exe"\n'
+         if args.test_harness else ''), encoding='utf-8-sig')
+    entries, verifies, xverifies = [], [], []
     for name, sha in actual.items():
         relative = name.replace('/', '\\')
-        directory = str(Path(relative).parent)
+        directory = str(PurePosixPath(name).parent).replace('/', '\\')
         dest = '{app}' if directory == '.' else '{app}\\' + directory
-        entries.append(f'Source: "{{#StageRoot}}\\payload\\{relative}"; DestDir: "{dest}"; Flags: ignoreversion')
-        verifies.append(f"  if GetSHA256OfFile(ExpandConstant('{{app}}\\{relative}')) <> '{sha}' then RaiseException('Installed file verification failed: {relative}');")
+        entries.append(f'Source: "{{#StageRoot}}\\payload\\{relative}"; DestDir: "{dest}"; Components: msfs; Flags: ignoreversion')
+        verifies.append(f"    if GetSHA256OfFile(ExpandConstant('{{app}}\\{relative}')) <> '{sha}' then RaiseException('Installed file verification failed: {relative}');")
+    for name, sha in plugin_files.items():
+        relative = name.replace('/', '\\')
+        directory = str(PurePosixPath(name).parent).replace('/', '\\')
+        dest = '{code:XPlaneDir}' if directory == '.' else '{code:XPlaneDir}\\' + directory
+        entries.append(f'Source: "{{#StageRoot}}\\xplane\\{relative}"; DestDir: "{dest}"; Components: xplane; Flags: ignoreversion')
+        xverifies.append(f"    if GetSHA256OfFile(XPlaneDir('')+'\\{relative}') <> '{sha}' then RaiseException('Installed plugin verification failed: {relative}');")
     (stage / 'payload.iss').write_text('\n'.join(entries)+'\n', encoding='utf-8-sig')
-    (stage / 'verify.iss').write_text('procedure VerifyPayload;\nbegin\n'+'\n'.join(verifies)+'\nend;\n', encoding='utf-8-sig')
+    (stage / 'verify.iss').write_text(
+        'procedure VerifyPayload;\nbegin\n  if MsfsSelected then begin\n' + '\n'.join(verifies) +
+        '\n  end;\n  if XPlaneSelected then begin\n' + '\n'.join(xverifies) + '\n  end;\nend;\n', encoding='utf-8-sig')
     compiler = (ROOT / args.compiler).resolve()
     if not compiler.is_file():
         raise ValueError('Inno Setup compiler not found. Run tools/get-installer-compiler.ps1 or pass --compiler.')
@@ -111,7 +150,8 @@ def build(args):
     with zipfile.ZipFile(archive) as bundle:
         assert bundle.testzip() is None
     (output / (archive.name + '.sha256')).write_text(hashlib.sha256(archive.read_bytes()).hexdigest()+'  '+archive.name+'\n', encoding='ascii')
-    print(f'Built {exe}\nShare {archive}\nPackage: {len(actual)} files, byte-identical to the verified receipt.')
+    print(f'Built {exe}\nShare {archive}\nPackage: {len(actual)} files, byte-identical to the verified receipt.\n'
+          f'X-Plane plugin: {len(plugin_files)} files from {plugin}.')
 
 
 if __name__ == '__main__':
@@ -119,6 +159,7 @@ if __name__ == '__main__':
     parser.add_argument('--version', default='0.4.0')
     parser.add_argument('--package', default='build/release/0.4.0/fs-camera-studio')
     parser.add_argument('--receipt', default='build/release/0.4.0/staged.json')
+    parser.add_argument('--xplane', default='build-xp/XPCameraStudio', help='The built X-Plane plugin folder (win_x64 and ui).')
     parser.add_argument('--compiler', default='build/installer-tools/inno/ISCC.exe')
     parser.add_argument('--test-harness', action='store_true', help='Internal lifecycle test build, always under build/, never dist/. Uses a named test process guard.')
     build(parser.parse_args())

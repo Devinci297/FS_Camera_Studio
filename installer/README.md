@@ -1,5 +1,10 @@
 # Tester installer
 
+One setup for both simulators. The components page offers **Microsoft Flight Simulator 2024** and **X-Plane 12**
+(XP Camera Studio); the user picks one or both, and each choice gets its own folder page. Both share one version and
+one update check. On a first install the simulators found on the PC are preselected; an upgrade keeps the earlier
+choice.
+
 The Windows installer deploys the **verified packaged build**, not a fresh compile of the working tree.
 This preserves the reviewed simulator host and its native pointer routing.
 The package files remain byte-identical to the selected release receipt. No user profiles or development
@@ -18,6 +23,18 @@ node tools/capture-manual.cjs
 python tools/build-manual.py
 python tools/build-installer.py --version 0.4.0 --package build/release/0.4.0/fs-camera-studio --receipt build/release/0.4.0/staged.json
 ```
+
+From the release after 0.4.0 the setup also carries the X-Plane plugin. Build it first, at the same version
+(the plugin takes its version from `ui/version.js`, and the build refuses a mismatch):
+
+```powershell
+cmake -S . -B build-xp -G "Visual Studio 17 2022" -A x64 -DFSCS_BUILD_XPLANE=ON
+cmake --build build-xp --config Release --target xpcs_plugin
+python tools/build-installer.py --version <ID> --package ... --receipt ... --xplane build-xp/XPCameraStudio
+```
+
+`--xplane` defaults to `build-xp/XPCameraStudio`. It must hold `win_x64/XPCameraStudio.xpl` and `ui/` only;
+`BUILD-INFO.json` records every plugin file hash next to the package hashes, and setup verifies both after install.
 
 The build dependency is Inno Setup 6.7.3, downloaded from its official GitHub release and checked for a valid
 Pyrsys B.V. Authenticode signature before execution. An existing compiler can be supplied with `--compiler`.
@@ -44,7 +61,20 @@ Outputs are under `dist/<release ID>/`:
   MSFS `\work` camera profiles, airport data, settings, bindings, package backups and unrelated files are preserved.
 - Uses the current user's permissions. Protected Community folders need an appropriate writable package location.
 
+X-Plane 12:
+
+- Finds X-Plane 12 from `%LOCALAPPDATA%\x-plane_install_12.txt` (written by X-Plane), the default Steam library or
+  one listed in Steam's `libraryfolders.vdf`; the user confirms or browses to the folder with `X-Plane.exe`.
+- Installs to `Resources\plugins\XPCameraStudio` (`win_x64\XPCameraStudio.xpl` and `ui\`). An existing plugin folder
+  is backed up and hash-verified under `%LOCALAPPDATA%\FS Camera Studio\Backups\<time>\XPCameraStudio`, then replaced
+  by a clean copy, so no stale files remain. A folder of that name without the plugin is refused, as are links.
+- Requires X-Plane stopped (`X-Plane.exe`). Profiles in `Output\preferences\XPCameraStudio` are never touched;
+  uninstall removes only the plugin folder and leaves other plugins alone.
+- With X-Plane only, nothing is written to a Community folder.
+
 Silent deployment: `Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /COMMUNITY="D:\MSFS\Community" /LOG="setup.log"`.
+For X-Plane add `/COMPONENTS=msfs,xplane /XPLANE="D:\X-Plane 12"` (or `/COMPONENTS=xplane` for X-Plane only). A
+silent setup never selects X-Plane on its own.
 No install target is accepted without validation. This release is unsigned; signing needs a publisher certificate.
 Sign the EXE before regenerating distribution checksums/ZIP for any future signed release.
 
@@ -53,7 +83,10 @@ Sign the EXE before regenerating distribution checksums/ZIP for any future signe
 `python tools/test-installer.py` tests the shipping EXE in an isolated Community fixture when MSFS is closed and
 no installer-managed FS Camera Studio support directory exists. It never writes the real Community package.
 It verifies fresh install, repair/backup, uninstall/unknown-file preservation, wrong/unrecognized targets,
-autodetection's refusal to follow the developer junction, duplicates, and a named sleeper process guard.
+autodetection's refusal to follow the developer junction, duplicates, and a named sleeper process guard. For X-Plane
+it uses a fake X-Plane folder (an empty `X-Plane.exe` and `Resources\plugins` with another plugin): X-Plane-only
+install, clean upgrade with backup, uninstall, wrong and unrecognized folders, both simulators in one run, and the
+running-X-Plane guard. It never writes the real X-Plane folder.
 
 For lifecycle testing while MSFS is running:
 
@@ -62,7 +95,7 @@ python tools/build-installer.py --test-harness
 python tools/test-installer.py --test-harness
 ```
 
-The harness changes only the compiled process name checked by the guard to a test sleeper name. It is emitted
+The harness changes only the compiled process names checked by the guards to test sleeper names. It is emitted
 under **build/**, never dist/, and its BUILD-INFO has `testHarness: true`. Do not distribute that harness.
 Use the shipping EXE separately to verify the real running-simulator refusal. Both tests preserve evidence
 under `build/installer-tests/`. A failed test intentionally leaves evidence for inspection; inspect the exact

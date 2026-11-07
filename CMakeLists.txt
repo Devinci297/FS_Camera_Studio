@@ -16,6 +16,13 @@ endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+# XP Camera Studio (X-Plane 12 plugin), off by default; see src/XPlanePlugin/CMakeLists.txt.
+option(FSCS_BUILD_XPLANE "Build the X-Plane 12 plugin" OFF)
+# The plugin links the C++ runtime statically, so it loads in any X-Plane without a separate redistributable.
+if(FSCS_BUILD_XPLANE AND MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 add_library(fscs_json INTERFACE)
 target_include_directories(fscs_json SYSTEM INTERFACE "${PROJECT_SOURCE_DIR}/third_party")
 
@@ -27,8 +34,6 @@ add_subdirectory(src/WasmModule)
 enable_testing()
 add_subdirectory(tests)
 
-# XP Camera Studio (X-Plane 12 plugin), off by default; see src/XPlanePlugin/CMakeLists.txt.
-option(FSCS_BUILD_XPLANE "Build the X-Plane 12 plugin" OFF)
 if(FSCS_BUILD_XPLANE)
     add_subdirectory(src/XPlanePlugin)
 endif()

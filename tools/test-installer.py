@@ -1,7 +1,7 @@
-"""Exercise the shipping setup EXE in an isolated fake Community folder.
+"""Exercise the shipping setup EXE in an isolated fake Community folder and a fake X-Plane 12 folder.
 
-Requires Windows, MSFS closed, and no existing installer-managed FS Camera Studio.
-Never changes the real Community package or MSFS profile storage.
+Requires Windows, MSFS and X-Plane closed, and no existing installer-managed FS Camera Studio.
+Never changes the real Community package, the real X-Plane folder or MSFS profile storage.
 """
 import argparse
 import hashlib
@@ -48,11 +48,13 @@ profile.write_text('{"testProfile":"keep"}')
 results = []
 
 
-def run(label, executable=SETUP, location=community, success=True):
+def run(label, executable=SETUP, location=community, success=True, extra=()):
     args = [str(executable), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-',
             '/NOICONS', '/LOG=' + str(test / (label + '.log'))]
     if executable == SETUP and location is not None:
         args += ['/COMMUNITY=' + str(location)]
+    if executable == SETUP:
+        args += list(extra)
     proc = subprocess.run(args, timeout=90)
     assert (proc.returncode == 0) == success, (label, proc.returncode, test / (label+'.log'))
     results.append({'test': label, 'exitCode': proc.returncode, 'passed': True})
@@ -108,6 +110,70 @@ try:
     run('reject-duplicate-copy', success=False)
     (duplicate / 'keep.txt').unlink()
     duplicate.rmdir()
+    # X-Plane 12, in a fake X-Plane folder (X-Plane.exe and Resources\plugins), never the real one.
+    xplane = test / 'X-Plane 12'
+    plugins = xplane / 'Resources/plugins'
+    (plugins / 'OtherPlugin').mkdir(parents=True)
+    (plugins / 'OtherPlugin/keep.txt').write_text('untouched')
+    (xplane / 'X-Plane.exe').write_bytes(b'')
+    xtarget = plugins / 'XPCameraStudio'
+
+    def xrun(label, components='xplane', root=xplane, success=True, community_location=None):
+        run(label, location=community_location, success=success,
+            extra=['/COMPONENTS=' + components, '/XPLANE=' + str(root)])
+
+    def uninstall(label):
+        run(label, executable=uninstaller)
+        for attempt in range(50):
+            if not uninstaller.exists(): break
+            time.sleep(.1)
+        assert not uninstaller.exists()
+
+    xrun('xplane-only-install')
+    assert inventory(xtarget) == INFO['xplanePluginFiles']
+    assert not target.exists(), 'X-Plane only: nothing goes to the Community folder'
+    assert (plugins / 'OtherPlugin/keep.txt').read_text() == 'untouched'
+    # An upgrade backs the plugin up, then installs it into a clean folder (no stale files).
+    (xtarget / 'stale.txt').write_text('from an older build')
+    (xtarget / 'ui/app.js').write_text('// older test build')
+    previous_plugin = inventory(xtarget)
+    xrun('xplane-upgrade-clean')
+    assert inventory(xtarget) == INFO['xplanePluginFiles']
+    xbackups = list((CONTROL / 'Backups').glob('*/XPCameraStudio'))
+    assert len(xbackups) == 1 and inventory(xbackups[0]) == previous_plugin
+    uninstall('xplane-uninstall')
+    assert not xtarget.exists()
+    assert (plugins / 'OtherPlugin/keep.txt').read_text() == 'untouched'
+    run('reject-wrong-xplane-folder', location=None, success=False,
+        extra=['/COMPONENTS=xplane', '/XPLANE=' + str(test)])
+    xtarget.mkdir()
+    (xtarget / 'keep.txt').write_text('someone else')
+    xrun('reject-unrecognized-plugin-folder', success=False)
+    assert (xtarget / 'keep.txt').read_text() == 'someone else'
+    (xtarget / 'keep.txt').unlink()
+    xtarget.rmdir()
+    # Both simulators in one run, then one uninstall removes both.
+    xrun('both-simulators-install', components='msfs,xplane', community_location=community)
+    assert inventory(target) == INFO['packageFiles']
+    assert inventory(xtarget) == INFO['xplanePluginFiles']
+    uninstall('both-simulators-uninstall')
+    assert not xtarget.exists() and not (target.exists() and inventory(target))
+    if target.exists(): target.rmdir()
+    assert (community / 'unrelated-addon/keep.txt').read_text() == 'untouched'
+    # A running X-Plane blocks setup (a named sleeper, never X-Plane itself).
+    xp_source = test / 'FakeXPlane.cs'
+    xp_source.write_text('class Program { static void Main() { System.Threading.Thread.Sleep(60000); } }')
+    xp_exe = test / ('FSCS-Installer-Test-XPlane.exe' if HARNESS else 'X-Plane.exe')
+    subprocess.run([r'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe', '/nologo', '/target:winexe',
+                    '/out:' + str(xp_exe), str(xp_source)], check=True)
+    fake_xp = subprocess.Popen([str(xp_exe)], creationflags=subprocess.CREATE_NO_WINDOW)
+    try:
+        time.sleep(.5)
+        xrun('reject-running-xplane', success=False)
+        assert not xtarget.exists()
+    finally:
+        fake_xp.terminate()
+        fake_xp.wait(timeout=10)
     # Named sleeper exercises the process guard, without ever starting MSFS.
     fake_source = test / 'FakeSim.cs'
     fake_source.write_text('class Program { static void Main() { System.Threading.Thread.Sleep(60000); } }')
