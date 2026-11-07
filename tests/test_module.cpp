@@ -578,7 +578,7 @@ TEST_CASE("module: airport preview saves separate files, loads one nearby tree a
     CHECK(aFile);CHECK(bFile);
     m.panel("RequestSnapshot");auto snap=m.lastEvent("Snapshot")["payload"];
     CHECK_EQ(snap["airports"]["loaded"],json("KAAA"));CHECK_EQ(snap["airports"]["nearby"].size(),std::size_t{2});
-    CHECK_EQ(snap["working"]["profile"]["cameras"].size(),aircraft["cameras"].size()+8);
+    CHECK_EQ(snap["working"]["profile"]["cameras"].size(),aircraft["cameras"].size()+12);
     auto cam=snap["working"]["profile"]["cameras"].back();CHECK(snap["working"]["hasCommittedVersion"][js::str(cam,"id")].get<bool>());
     cam["name"]="My tower";
     auto edit=m.panel("UpdateDraft",{{"ops",{{{"op","setCamera"},{"camera",cam}}}}},"main-1",m.app.draftRevision());
@@ -1249,4 +1249,34 @@ TEST_CASE("module: capture mapping failures surface errors and ignore stale atte
     m.app.onEvent(be::ControllerButton{2,0,true,retryGeneration},m.t);
     m.app.onEvent(be::ControllerButton{2,0,false,retryGeneration},m.t);
     CHECK(!m.lastEvent("ControllerInputCaptured").is_null());
+}
+
+TEST_CASE("module: binoculars binding with panels closed zooms to the working setting and reports its state") {
+    ModuleRig m; m.flight(); m.panel("Hello", {{"surface", "mini"}}, "mini-1");
+    m.panel("CreateProfile", {{"name", "Binoculars"}, {"forAircraft", true}}, "mini-1");
+    m.panel("QualificationStart", json::object(), "mini-1");
+    m.panel("ActivateCamera", {{"cameraId", js::str(m.app.workingProfile(), "defaultCameraId")}}, "mini-1");
+    m.app.onEvent(be::CameraStatus{SdkAvailability::Acquired, false}, m.t); m.frame();
+    const double cameraFov = m.camera.submitted.back().fovRad;
+    auto settings = fscs::profiles::defaultSettingsDocument(); settings["host"]["binocularsFovDeg"] = 20;
+    m.panel("UpdateDraft", {{"ops", {{{"op", "setSettings"}, {"settings", settings}}}}}, "mini-1", m.app.draftRevision());
+    m.drain();
+    const auto zoom = static_cast<std::size_t>(std::find(m.services.mapped.begin(), m.services.mapped.end(), "VK_LCONTROL+VK_LMENU+Z") - m.services.mapped.begin());
+    CHECK(zoom < m.services.mapped.size());
+    m.app.onEvent(be::InputEvent{zoom, true}, m.t);
+    auto event = m.lastEvent("BinocularsChanged");
+    CHECK(event["payload"]["active"].get<bool>());
+    CHECK_NEAR(event["payload"]["fovDeg"].get<double>(), 20, 1e-12);
+    m.frame(30);
+    CHECK_NEAR(m.camera.submitted.back().fovRad, 20 * fscs::core::kDegToRad, 1e-9);
+    // The Bindings page cannot demonstrate a hold: it explains instead of pressing and releasing at once.
+    const auto test = m.ackFor(m.panel("TestBinding", {{"binding", {{"action", "binoculars"}, {"viewId", 0}}}}, "mini-1"));
+    CHECK(!test["result"]["dispatched"].get<bool>());
+    m.app.onEvent(be::InputEvent{zoom, false}, m.t);
+    event = m.lastEvent("BinocularsChanged");
+    CHECK(!event["payload"]["active"].get<bool>());
+    m.frame(30);
+    CHECK_NEAR(m.camera.submitted.back().fovRad, cameraFov, 1e-12);
+    // Nothing about the zoom reaches the working profile.
+    CHECK_EQ(m.app.workingProfile().dump().find("binoculars"), std::string::npos);
 }

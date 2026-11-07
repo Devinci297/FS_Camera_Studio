@@ -60,7 +60,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
    const code=(await FSCApp.bridge.request('ExportProfile',{profileId:list[list.length-1].profileId,working:false})).result.code;
    const p=JSON.parse(code);return {schemaVersion:p.schemaVersion,values:p.cameras.map(c=>c.followHorizon),legacy:p.cameras.some(c=>'levelHorizon' in c)};
   });
-  assert.ok(migrated,'the imported profile is listed');assert.equal(migrated.schemaVersion,3);assert.deepEqual(migrated.values,[0,1,1]);assert.equal(migrated.legacy,false);
+  assert.ok(migrated,'the imported profile is listed');assert.equal(migrated.schemaVersion,4);assert.deepEqual(migrated.values,[0,1,1]);assert.equal(migrated.legacy,false);
   assert.deepEqual(errors,[]);console.log('Follow horizon slider, tooltip, persistence, world-view gating and schema 2 migration passed.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

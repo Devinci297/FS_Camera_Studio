@@ -43,7 +43,7 @@ await page.screenshot({path:'build/review/editor-directional.png'});
 await page.goto('file:///'+path.resolve(process.argv[2]?process.argv[2].replace(/main\.html$/,'mini.html'):'ui/index.html').replaceAll('\\','/')+'?surface=mini');await page.waitForFunction(()=>window.FSCApp.state.snapshot);
 await page.mouse.move(5,995);await page.waitForTimeout(400);
 const box=await page.locator('#mc-mini-panel').boundingBox(); assert.ok(box);assert.ok(Math.abs(box.x+box.width/2-550)<2);
-assert.equal(await page.locator('#mc-dock-categories button').count(),await page.evaluate(()=>window.FSCApp.state.working.profile.categories.length));
+assert.equal(await page.locator('#mc-dock-categories button:not(#mc-dock-traffic-tab)').count(),await page.evaluate(()=>window.FSCApp.state.working.profile.categories.length));
 assert.ok(box.height < 155, 'compact mini panel');
 await page.screenshot({path:'build/review/mini-categories.png'});
 if(await page.locator('#mc-dock-release').isVisible())await page.locator('#mc-dock-release').click();else{await page.locator('#mc-mouse-look-more').click();await page.getByRole('button',{name:'Enable',exact:true}).click();} await page.waitForFunction(()=>window.FSCApp.state.ownership.state==='Active');

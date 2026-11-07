@@ -15,4 +15,17 @@ json generate(const json& facility, const json& options, std::vector<std::string
 json merge(const json& saved, const json& generated, bool replaceGenerated);
 json nearby(const std::vector<json>& profiles, Geo position, double radiusNm);
 std::string choose(const json& candidates, const std::string& current, const std::string& pinned);
+// Generated spotting views and the virtual tower fallback, in meters.
+constexpr double kFenceBehindMeters = 150;          // behind the threshold, on the extended centerline side
+constexpr double kFenceSideMeters = 80;             // to the right of the landing direction
+constexpr double kApproachDistanceMeters = 1852;    // 1 NM out on the extended centerline
+constexpr double kGlidepathDeg = 3;
+constexpr double kApproachBelowGlidepathMeters = 90;
+constexpr double kVirtualTowerAbeamMeters = 300;    // beside the longest runway's midpoint
+constexpr std::int64_t kAutoParkingLimit = 4;       // gates/stands in an automatic set, chosen by spread
+// Generation options for automatic (temporary) airport sets: tower, every runway end with spotting views
+// and a few spread-out stands. No taxi intersections, so it stays cheap enough to run unprompted.
+json automaticOptions(const json& categoryHeights);
+// The facility fields automatic generation reads, for a per-session cache (drops taxi points and paths).
+json compactFacility(const json& facility);
 }

@@ -117,6 +117,8 @@ public:
     void animateBase(const CameraPose& pose) { if (pose.withinLimits() && !transition_) base_ = pose; }
     void freeze();  // simulator suspension: stop time and held motion
     void recenterLook() { look_ = {}; mover_.neutralize(); }
+    // Restores a temporary look exactly (glance return); the saved base pose is untouched.
+    void setLook(const TemporaryLook& look) { look_ = look; }
     void setSpeeds(const ManualSpeeds& s) { mover_.setSpeeds(s); }
 
     EngineSample sample() const;

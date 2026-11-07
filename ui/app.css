@@ -259,6 +259,8 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 @media(prefers-reduced-motion:reduce){#mc-sim .mc-switch:before{transition:none}}
 #mc-sim .mc-stage,#mc-sim[data-mode="fly"] .mc-stage{padding-bottom:var(--mc-mini-clearance,144px)}
 #mc-sim .mc-mini-region{position:absolute;z-index:12;left:0;right:0;bottom:0;height:36px}
+#mc-sim .mc-binoculars-badge{position:absolute;z-index:2;left:24px;bottom:7px;display:inline-flex;align-items:center;padding:2px 10px;border:1px solid var(--mc-accent);border-radius:999px;background:var(--mc-raised);color:var(--mc-text);font-size:11px;font-weight:600;line-height:18px;pointer-events:none}
+#mc-sim .mc-binoculars-badge[hidden]{display:none}
 #mc-sim .mc-mini-region .mc-dock{display:flex;position:absolute;left:24px;right:24px;bottom:36px;margin:0 auto;max-width:960px;opacity:0;transform:translateY(12px);visibility:hidden;pointer-events:none;transition:opacity .18s ease,transform .18s ease,visibility 0s linear .18s}
 #mc-sim[data-mini-open="true"] .mc-mini-region .mc-dock{opacity:1;transform:translateY(0);visibility:visible;pointer-events:auto;transition:opacity .18s ease,transform .18s ease,visibility 0s}
 #mc-sim .mc-mini-trigger{position:absolute;left:0;right:0;bottom:0;width:100%;height:36px;min-height:36px;padding:4px 12px 7px;border-radius:0;background:transparent;color:#d0e5ec;justify-content:center}
@@ -566,6 +568,7 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim input.mc-camera-name-input{display:block;font-size:20px;font-weight:600;background:var(--mc-input);border:1px solid var(--mc-line);border-radius:6px;padding:4px 9px;min-height:34px;width:100%;max-width:none;color:var(--mc-text);cursor:text}#mc-sim input.mc-camera-name-input:hover{border-color:var(--mc-muted)}#mc-sim input.mc-camera-name-input:focus{border-color:var(--mc-accent);background:var(--mc-input);outline:none}
 #mc-sim .mc-name-row{display:flex;align-items:center;gap:7px;min-width:0}#mc-sim .mc-name-row #mc-camera-icon{flex:none;width:30px;height:30px;padding:5px;min-height:30px;color:var(--mc-accent)}#mc-sim .mc-name-row input.mc-camera-name-input{min-width:0;margin:0}
 #mc-sim .mc-effect-row{display:flex;align-items:center;padding:13px 0;border-bottom:1px solid var(--mc-line)}#mc-sim .mc-effect-row>span{flex:1;margin-right:16px}#mc-sim .mc-effect-row strong,#mc-sim .mc-effect-row small{display:block}#mc-sim .mc-effect-row small{color:var(--mc-muted);font-size:11px;margin-top:3px}#mc-sim .mc-effect-row input{width:32%;margin:0 10px}#mc-sim .mc-effect-row output{width:40px;text-align:right;font-variant-numeric:tabular-nums;color:var(--mc-accent)}
+#mc-sim .mc-effects-head{margin-top:20px}#mc-sim .mc-effects-head[hidden]{display:none}
 @media(min-width:621px){#mc-sim .mc-inspector{position:relative}#mc-sim .mc-camera-binding{position:absolute;top:51px;right:18px;margin:0}#mc-sim .mc-camera-heading{min-height:54px;padding-right:0;margin-bottom:4px}#mc-sim .mc-camera-heading>div:first-child{flex:1;min-width:0;margin-right:24px}#mc-sim .mc-name-row{max-width:500px}#mc-sim .mc-precision-bar{padding:3px 8px}#mc-sim .mc-precision-bar .mc-precision{padding:1px}#mc-sim .mc-pose-section h4{margin:0 10px 0 0}#mc-sim .mc-pose-section{margin:7px 0 5px}#mc-sim .mc-axis-description{display:none}#mc-sim .mc-axis-illustration{height:100px}#mc-sim .mc-axis .mc-pose-slider{min-height:12px;margin:7px 0 4px}#mc-sim .mc-lens-controls{display:flex;align-items:center;flex-wrap:wrap}#mc-sim .mc-lens-controls .mc-lens-top{width:180px;margin:0 12px 0 0}#mc-sim .mc-lens-controls .mc-lens-top h4{max-width:100px;font-size:11px}#mc-sim .mc-lens-controls #mc-fov-range{flex:1;min-width:90px;min-height:12px;width:auto;margin:0 12px 0 0}#mc-sim .mc-lens-controls .mc-range-labels{display:none}#mc-sim .mc-lens-controls .mc-lens-presets{margin:0;gap:2px}#mc-sim .mc-lens-presets button{padding:3px 6px}#mc-sim .mc-camera-tools{position:static}}
 @media(min-width:621px) and (max-height:950px){#mc-sim .mc-axis-illustration{height:78px}#mc-sim .mc-axis-grid>.mc-axis{padding:7px}#mc-sim .mc-precision-bar{margin-bottom:4px}}
 /* Directional movement and direct angle arcs replace the six straight sliders. */
@@ -746,6 +749,10 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim .mc-global-nav { padding:6px 18px; gap:0; }
 #mc-sim .mc-global-nav > button { margin-right:5px; gap:0; }
 #mc-sim .mc-global-nav > button svg,#mc-sim .mc-compact-button svg { margin-right:6px; }
+/* Pop out / Dock: one header button; msfs-panel.js sets #mc-sim[data-pop-out] from the simulator's extern state. */
+#mc-sim .mc-pop-out svg[data-icon="pop-in"],
+#mc-sim[data-pop-out="true"] .mc-pop-out svg[data-icon="pop-out"] { display:none; }
+#mc-sim[data-pop-out="true"] .mc-pop-out svg[data-icon="pop-in"] { display:inline-block; }
 @media(max-width:880px) {
  #mc-sim .mc-panel-head { padding:10px 12px; }
  #mc-sim .mc-panel-head .mc-brand { flex-basis:190px; }
@@ -951,7 +958,7 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim .mc-context-appearance { margin:5px 0; border-top:1px solid var(--mc-line); }
 #mc-sim .mc-context-appearance summary { display:flex; align-items:center; gap:8px; padding:9px 7px; cursor:pointer; font-size:12px; }
 #mc-sim .mc-context-appearance summary:after { content:'+'; margin-left:auto; }
-#mc-sim .mc-context-appearance[open] summary:after { content:'−'; }
+#mc-sim .mc-context-appearance[open] summary:after { content:'-'; }
 #mc-sim .mc-context-appearance summary svg { width:15px; height:15px; }
 #mc-sim .mc-context-appearance summary:focus-visible { outline:2px solid var(--mc-accent); outline-offset:-2px; border-radius:4px; }
 #mc-sim .mc-context-appearance-body { padding:0 3px 5px; }
@@ -1116,6 +1123,12 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 #mc-sim .mc-airport-tree { margin-top:7px; padding-top:5px; border-top:1px solid var(--mc-line); }
 #mc-sim .mc-airport-tree>.mc-tree-scope-toggle { height:28px; min-height:28px; padding:4px 4px 4px 17px; font-size:11px; color:var(--mc-muted); }
 #mc-sim .mc-airport-tree>.mc-tree-scope-toggle>svg { top:7px; left:2px; }
+#mc-sim .mc-airport-temporary { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:4px 8px; margin:2px 0 6px 12px; padding:5px 6px 5px 8px; border:1px dashed var(--mc-amber); border-radius:6px; font-size:11px; }
+#mc-sim .mc-airport-temporary-copy { flex:1 1 90px; min-width:0; line-height:1.3; }
+#mc-sim .mc-airport-temporary-text { color:var(--mc-amber); font-weight:500; }
+#mc-sim .mc-airport-temporary-save { flex:none; min-height:24px; height:24px; padding:0 8px; font-size:11px; }
+#mc-airports-summary .mc-airport-temporary { margin-left:0; }
+#mc-sim[data-surface="mini"] .mc-dock-airport[data-temporary="true"] { outline:1px dashed var(--mc-amber); outline-offset:-1px; border-radius:6px; }
 #mc-sim .mc-category { margin:0 0 3px; }
 #mc-sim .mc-category-line { display:block; height:32px; padding:0 22px 0 13px; }
 #mc-sim .mc-category-line>.mc-reorder-grip { top:0; left:0; width:13px; min-width:13px; height:32px; min-height:32px; padding:0; opacity:.55; }
@@ -1155,3 +1168,139 @@ html.surface-mini, body.surface-mini { height: 100%; background: transparent; ov
 
 /* Keep enough room for a labeled camera alongside a full keyboard shortcut. */
 @media (min-width:621px) { #mc-sim .mc-camera-layout>.mc-browser { min-width:220px; } }
+
+/* Spotting: Traffic page rows and the dock's one-line spotting status. */
+#mc-sim .mc-spot-state{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 12px;margin-bottom:14px;border:1px solid var(--mc-line);border-radius:8px;background:var(--mc-raised);font-size:12px}
+#mc-sim .mc-spot-state>svg{width:16px;height:16px;flex:none;color:var(--mc-muted)}
+#mc-sim .mc-spot-state[data-state="tracking"]>svg{color:var(--mc-accent)}
+#mc-sim .mc-spot-state[data-state="lost"]>svg{color:var(--mc-amber)}
+#mc-sim .mc-spot-state>#mc-spot-state-text{flex:1;min-width:180px}
+#mc-sim .mc-spot-state button{min-height:30px;font-size:12px;padding:5px 10px}
+#mc-sim .mc-traffic-filters{margin-bottom:10px}
+#mc-sim .mc-traffic-filters .mc-setting-choices button{min-width:0}
+#mc-sim .mc-traffic-list{display:flex;flex-direction:column}
+/* Rows: aircraft | status | distance, altitude, speed | views, in aligned columns; narrower panels move the views,
+   then the figures, to their own line instead of wrapping. */
+#mc-sim .mc-traffic-row{display:grid;grid-template-columns:minmax(150px,1fr) 86px 226px auto;align-items:center;gap:6px 14px;padding:7px 8px;border-bottom:1px solid var(--mc-line)}
+#mc-sim .mc-traffic-row[data-tracking="true"]{background:var(--mc-active);box-shadow:inset 3px 0 0 var(--mc-accent)}
+#mc-sim .mc-traffic-row[data-selected="true"]:not([data-tracking="true"]){box-shadow:inset 3px 0 0 var(--mc-line)}
+#mc-sim .mc-traffic-head{padding:0 8px 5px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--mc-muted)}
+#mc-sim .mc-traffic-head .mc-traffic-figures{font-size:10px;color:var(--mc-muted)}
+#mc-sim .mc-traffic-head .mc-traffic-views{justify-content:flex-start}
+#mc-sim .mc-traffic-name{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;min-width:0;min-height:0;margin:-3px -5px;padding:3px 5px;border-radius:6px;text-align:left}
+#mc-sim .mc-traffic-name strong{max-width:100%;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mc-sim .mc-traffic-name small{max-width:100%;font-size:11px;color:var(--mc-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mc-sim .mc-traffic-row[data-selected="true"] .mc-traffic-name strong{color:var(--mc-accent)}
+#mc-sim .mc-traffic-status{justify-self:start;min-width:78px;justify-content:center}
+#mc-sim .mc-traffic-status[data-status="parked"],#mc-sim .mc-traffic-status[data-status="cruise"]{border-color:var(--mc-line);color:var(--mc-muted)}
+#mc-sim .mc-traffic-status[data-status="arriving"],#mc-sim .mc-traffic-status[data-status="landing"]{border-color:var(--mc-accent);color:var(--mc-accent)}
+#mc-sim .mc-traffic-figures{display:grid;grid-template-columns:58px 80px 56px;gap:14px;font-size:12px;color:var(--mc-text);font-variant-numeric:tabular-nums;white-space:nowrap}
+#mc-sim .mc-traffic-figures>span{text-align:right}
+#mc-sim .mc-traffic-views{display:flex;flex-wrap:nowrap;gap:4px;justify-content:flex-end;min-width:0}
+#mc-sim .mc-traffic-views button{min-height:28px;font-size:11px;padding:4px 8px}
+#mc-sim .mc-traffic-views button svg{width:14px;height:14px}
+#mc-sim .mc-traffic-views button[aria-pressed="true"]{color:var(--mc-accent);background:var(--mc-active);border-color:var(--mc-accent)}
+#mc-sim .mc-traffic-reasons{margin:0 0 8px;padding:6px 10px;border:1px dashed var(--mc-line);border-radius:7px;font-size:11px;line-height:1.5;color:var(--mc-muted)}
+#mc-sim .mc-traffic-reason strong{color:var(--mc-text);font-weight:600}
+@media(max-width:1180px){#mc-sim .mc-traffic-row{grid-template-columns:minmax(0,1fr) 86px 226px}#mc-sim .mc-traffic-views{grid-column:1/-1;justify-content:flex-start;flex-wrap:wrap}#mc-sim .mc-traffic-head .mc-traffic-views{display:none}}
+@media(max-width:700px){#mc-sim .mc-traffic-row{grid-template-columns:minmax(0,1fr) auto}#mc-sim .mc-traffic-figures{grid-column:1/-1;justify-content:start;grid-template-columns:auto auto auto}#mc-sim .mc-traffic-figures>span{text-align:left}#mc-sim .mc-traffic-head{display:none}}
+/* Spots: picker, offsets, actions and the saved spots list. */
+#mc-sim .mc-spots{margin:0 0 14px;border:1px solid var(--mc-line);border-radius:8px;background:var(--mc-raised)}
+#mc-sim .mc-spots>summary{display:flex;align-items:center;gap:8px;margin:0;padding:9px 12px;font-size:12px;color:var(--mc-text)}
+#mc-sim .mc-spots>summary>svg{width:16px;height:16px;flex:none;color:var(--mc-muted)}
+#mc-sim .mc-spots[data-live="true"]>summary>svg{color:var(--mc-accent)}
+#mc-sim .mc-spots-summary{font-size:11px;font-weight:400;color:var(--mc-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mc-sim .mc-spots-body{display:flex;flex-direction:column;gap:10px;padding:10px 12px 12px;border-top:1px solid var(--mc-line)}
+#mc-sim .mc-spots-body .mc-note{margin:0}
+#mc-sim .mc-spot-picker{display:grid;grid-template-columns:minmax(110px,150px) minmax(110px,150px) minmax(0,1fr);gap:10px;align-items:end}
+#mc-sim .mc-spot-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:11px;color:var(--mc-muted)}
+#mc-sim .mc-spot-field select{width:100%;min-height:32px;padding-top:6px;padding-bottom:6px}
+#mc-sim .mc-spot-kinds{flex-wrap:wrap;align-self:flex-start}
+#mc-sim .mc-spot-kinds button{min-width:0;min-height:28px;padding:4px 9px;font-size:11px}
+#mc-sim .mc-spot-place{display:flex;align-items:center;flex-wrap:wrap;gap:10px;font-size:12px}
+#mc-sim .mc-spot-place-text{flex:1;min-width:180px}
+#mc-sim .mc-spot-place button{min-height:30px;font-size:11px;padding:4px 9px}
+#mc-sim .mc-spot-offsets{display:grid;grid-template-columns:repeat(3,minmax(0,190px));gap:10px}
+#mc-sim .mc-spot-step{display:flex;align-items:center;gap:4px;color:var(--mc-muted)}
+#mc-sim .mc-spot-step input{flex:1;width:0;min-height:32px;padding:5px 8px;text-align:right}
+#mc-sim .mc-spot-step button{flex:none;width:30px;min-height:32px;padding:0}
+#mc-sim .mc-spot-step button svg{width:13px;height:13px}
+#mc-sim .mc-spot-actions{display:flex;flex-wrap:wrap;gap:6px}
+#mc-sim .mc-spot-actions button{min-height:32px;padding:6px 11px;font-size:12px}
+#mc-sim .mc-spot-actions button svg{width:14px;height:14px}
+#mc-sim .mc-spot-note[data-tone="warn"]{color:var(--mc-amber)}
+#mc-sim .mc-spot-note[data-tone="live"]{color:var(--mc-accent)}
+#mc-sim .mc-spot-saved-head{margin:2px 0 0;font-size:12px;font-weight:600}
+#mc-sim .mc-spot-saved{display:flex;flex-direction:column}
+#mc-sim .mc-spot-saved>.mc-empty{padding:8px 0;text-align:left}
+#mc-sim .mc-spot-saved-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 10px;padding:6px 8px;border-top:1px solid var(--mc-line)}
+#mc-sim .mc-spot-saved-row[data-editing="true"]{box-shadow:inset 3px 0 0 var(--mc-line)}
+#mc-sim .mc-spot-saved-row[data-active="true"]{background:var(--mc-active);box-shadow:inset 3px 0 0 var(--mc-accent)}
+#mc-sim .mc-spot-saved-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+#mc-sim .mc-spot-saved-text strong{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mc-sim .mc-spot-saved-detail{font-size:11px;color:var(--mc-muted);overflow:hidden;text-overflow:ellipsis}
+#mc-sim .mc-spot-saved-tools{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px}
+#mc-sim .mc-spot-saved-tools button{min-height:28px;padding:4px 8px;font-size:11px}
+#mc-sim .mc-spot-saved-tools button svg{width:13px;height:13px}
+#mc-sim .mc-spot-saved-reason{grid-column:1/-1;font-size:11px;color:var(--mc-amber)}
+#mc-sim .mc-spot-rename{width:100%;min-height:30px;padding:4px 8px}
+@media(max-width:900px){#mc-sim .mc-spot-picker{grid-template-columns:1fr 1fr}#mc-sim .mc-spot-kind-field{grid-column:1/-1}}
+@media(max-width:700px){#mc-sim .mc-spot-offsets{grid-template-columns:repeat(3,minmax(0,1fr))}#mc-sim .mc-spot-saved-row{grid-template-columns:minmax(0,1fr)}#mc-sim .mc-spot-saved-tools{justify-content:flex-start}}
+@media(max-width:480px){#mc-sim .mc-spot-offsets{grid-template-columns:1fr}}
+#mc-sim .mc-traffic-empty{padding:28px 12px;text-align:center;color:var(--mc-muted);font-size:12px;line-height:1.6}
+#mc-sim .mc-traffic-empty h4{font-size:16px;font-weight:500;color:var(--mc-text);margin-bottom:6px}
+#mc-sim .mc-traffic-empty p{max-width:520px;margin:0 auto}
+#mc-sim .mc-dock-body>.mc-spotting-status{flex:none;color:var(--mc-accent);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#mc-sim[data-surface="mini"] .mc-dock-body>.mc-spotting-status{font-size:10px;line-height:12px}
+/* Mid-width mini docks keep one toolbar row: the spotting buttons show icons only (their names stay in aria-label). */
+@media(max-width:1500px){#mc-sim[data-surface="mini"] .mc-dock-tools .mc-spot-toggle>span,#mc-sim[data-surface="mini"] .mc-dock-tools .mc-spot-next>span{display:none}}
+/* Mini Traffic tab: a fixed bar (views, status filters, search, Stop) above the aircraft list, which scrolls on its own.
+   Spacing uses margins, not flex gap: Coherent ignores gap, which ran callsign, distance and status together in the sim. */
+#mc-sim[data-surface="mini"] .mc-dock-categories .mc-dock-traffic-count{margin-left:auto;font-size:11px;min-width:16px;height:16px;padding:0 4px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:0;min-width:0;padding:0 10px 0 0;margin:0}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-views,#mc-sim[data-surface="mini"] .mc-dock-traffic-filters{display:flex;flex:none;flex-wrap:nowrap;align-items:center;gap:0;margin:0 8px 2px 0}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-filters{border-left:1px solid var(--mc-line);padding-left:8px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar button{min-width:0;height:24px;min-height:24px;padding:2px 8px;margin:0 3px 0 0;font-size:11px;line-height:14px;gap:0;background:transparent;border:1px solid var(--mc-line);border-radius:6px;white-space:nowrap}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar button>svg{width:14px;height:14px;margin-right:4px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar button[aria-pressed="true"]{color:var(--mc-accent);background:var(--mc-active);border-color:var(--mc-accent)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-filter-count{display:inline-block;margin-left:5px;min-width:12px;font-size:10px;font-weight:600;color:var(--mc-muted);text-align:center;font-variant-numeric:tabular-nums}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-filter[aria-pressed="true"] .mc-dock-traffic-filter-count{color:inherit}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-search{display:flex;flex:0 1 170px;align-items:center;min-width:110px;height:24px;margin:0 8px 2px 0;padding:0 7px;border:1px solid var(--mc-line);border-radius:6px;background:var(--mc-input);cursor:text}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-search>svg{width:13px;height:13px;margin-right:5px;color:var(--mc-muted)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-search input[type="search"]{flex:1 1 auto;width:100%;min-width:0;height:22px;min-height:0;padding:0;border:0;border-radius:0;background:transparent;font-size:12px;line-height:22px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-search input::placeholder{color:var(--mc-muted)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-bar .mc-dock-traffic-stop{margin:0 0 2px auto}
+#mc-sim[data-surface="mini"] .mc-dock-favorites>.mc-dock-traffic{display:block;width:100%;min-width:0}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-list{display:flex;flex-wrap:wrap;gap:0;min-width:0}
+#mc-sim[data-surface="mini"][data-name-display] .mc-dock-favorites .mc-dock-traffic-aircraft{min-width:0;max-width:300px;height:30px;min-height:30px;margin:0 4px 4px 0;padding:3px 9px 3px 7px;gap:0;white-space:nowrap;font-size:13px;line-height:18px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft>svg{width:15px;height:15px;margin-right:6px}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft strong{font-weight:600;letter-spacing:.01em;overflow:hidden;text-overflow:ellipsis}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft small{margin-left:9px;color:var(--mc-text);opacity:.82;font-size:12px;font-variant-numeric:tabular-nums}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-status{margin-left:7px;padding:0 6px;border:1px solid var(--mc-line);border-radius:9px;font-size:11px;line-height:16px;color:var(--mc-muted)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="arriving"] .mc-dock-traffic-status,#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="landing"] .mc-dock-traffic-status{color:var(--mc-accent);border-color:var(--mc-accent)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="departing"] .mc-dock-traffic-status,#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="takeoff"] .mc-dock-traffic-status{color:var(--mc-amber);border-color:var(--mc-amber)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[data-status="cruise"] .mc-dock-traffic-status{color:var(--mc-text)}
+#mc-sim[data-surface="mini"] .mc-dock-traffic-aircraft[aria-pressed="true"] small{color:inherit;opacity:1}
+#mc-sim[data-surface="mini"] .mc-dock-traffic>.mc-note{display:block;font-size:11px;line-height:14px;padding:2px 0}
+#mc-sim[data-surface="mini"][data-name-display="icons"] .mc-dock-traffic-views button>span{display:none}
+#mc-sim[data-surface="mini"][data-name-display="icons"] .mc-dock-traffic-views button>svg{margin-right:0}
+/* Narrower mini docks: the view buttons show icons only so the bar stays on one row (names stay in the tooltips). */
+@media(max-width:1800px){#mc-sim[data-surface="mini"] .mc-dock-traffic-views button>span{display:none}#mc-sim[data-surface="mini"] .mc-dock-traffic-views button>svg{margin-right:0}#mc-sim[data-surface="mini"] .mc-dock-traffic-views button{padding:2px 6px}}
+/* Mini readability: larger category names and labels, and margins between icons and text that also hold in Coherent. */
+#mc-sim[data-surface="mini"] .mc-category-grid button{font-size:11px;line-height:12px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-label{line-height:12px;max-height:24px}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name{gap:0}
+#mc-sim[data-surface="mini"] .mc-category-grid .mc-entity-name>svg.mc-icon{margin-right:4px}
+#mc-sim[data-surface="mini"] .mc-dock-category-legend{font-size:10px;letter-spacing:.06em}
+#mc-sim[data-surface="mini"] .mc-tool-group-label{font-size:10px}
+#mc-sim[data-surface="mini"] .mc-dock-body>.mc-effective-tracking,#mc-sim[data-surface="mini"] .mc-dock-body>.mc-spotting-status{font-size:11px;line-height:14px}
+#mc-sim[data-surface="mini"] .mc-dock-tools button>svg+span{margin-left:3px}
+/* Mini category divider: clicking the line between categories and cameras shows the categories as icons only. */
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-divider{position:absolute;z-index:3;width:12px;min-width:12px;min-height:0;padding:0;margin:0;border:0;border-radius:4px;background:transparent;color:var(--mc-muted);display:flex;align-items:center;justify-content:center;cursor:pointer}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-divider>svg{width:12px;height:12px;opacity:.5}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-divider:hover{background:var(--mc-hover);color:var(--mc-accent)}
+#mc-sim[data-surface="mini"] .mc-dock>.mc-dock-divider:hover>svg{opacity:1}
+#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-entity-label,#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-dock-traffic-count{display:none}
+#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-category-grid button{justify-content:center;padding:2px}
+#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-entity-name{justify-content:center}
+#mc-sim[data-surface="mini"] .mc-dock[data-categories-collapsed="true"] .mc-dock-categories .mc-entity-name>svg.mc-icon{margin-right:0}
